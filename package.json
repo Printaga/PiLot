@@ -1,0 +1,640 @@
+{
+  "name": "pilots-studio",
+  "displayName": "PiLot Studio",
+  "description": "Integrate the PI AI coding agent into VS Code with a user-friendly GUI",
+  "version": "1.0.0",
+  "publisher": "PrintagaPublishingLLC",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1a1b26",
+    "theme": "dark"
+  },
+  "packageManager": "pnpm@11.5.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "pi",
+    "pi dev",
+    "pi agent",
+    "pi coder",
+    "pi harness",
+    "pi developer",
+    "pi ai",
+    "coding-agent",
+    "copilot",
+    "pi-agent",
+    "coding harness",
+    "ai",
+    "chat",
+    "assistant",
+    "agent",
+    "developer-tools"
+  ],
+  "activationEvents": [
+    "onCommand:pi-agent.openPanel",
+    "onView:piAgentChat",
+    "onCommand:pi-agent.newSession",
+    "onCommand:pi-agent.switchModel",
+    "onCommand:pi-agent.cycleModel",
+    "onCommand:pi-agent.cycleThinkingLevel",
+    "onCommand:pi-agent.focusInput",
+    "onCommand:pi-agent.editLastMessage",
+    "onCommand:pi-agent.openSettings",
+    "onCommand:pi-agent.openCurrentSessionInEditor",
+    "onCommand:pi-agent.newChatInEditor",
+    "onCommand:pi-agent.toggleVoiceCapture",
+    "onCommand:pi-agent.addFileToChat",
+    "onCommand:pi-agent.listResources",
+    "onCommand:pi-agent.installResource",
+    "onCommand:pi-agent.removeResource",
+    "onCommand:pi-agent.updateResources",
+    "onCommand:pi-agent.manageResources",
+    "onCommand:pi-agent.showDiagnosticsLog",
+    "onCommand:pi-agent.exportDiagnosticsLog"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pi-agent/PiLot-Studio"
+  },
+  "homepage": "https://github.com/pi-agent/PiLot-Studio",
+  "bugs": {
+    "url": "https://github.com/pi-agent/PiLot-Studio/issues"
+  },
+  "main": "./dist/extension.js",
+  "type": "module",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pi-agent.openPanel",
+        "title": "Open PiLot Studio",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "pi-agent.newSession",
+        "title": "New PiLot Session",
+        "icon": "$(add)"
+      },
+      {
+        "command": "pi-agent.explainCode",
+        "title": "Explain Code with PI",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "pi-agent.refactorCode",
+        "title": "Refactor Code with PI",
+        "icon": "$(refactor)"
+      },
+      {
+        "command": "pi-agent.analyzeProject",
+        "title": "Analyze Project with PI",
+        "icon": "$(search)"
+      },
+      {
+        "command": "pi-agent.cycleModel",
+        "title": "Cycle Model"
+      },
+      {
+        "command": "pi-agent.cycleThinkingLevel",
+        "title": "Cycle Thinking Level"
+      },
+      {
+        "command": "pi-agent.focusInput",
+        "title": "Focus Chat Input"
+      },
+      {
+        "command": "pi-agent.editLastMessage",
+        "title": "Edit Last Message"
+      },
+      {
+        "command": "pi-agent.openSettings",
+        "title": "Open Settings"
+      },
+      {
+        "command": "pi-agent.openCurrentSessionInEditor",
+        "title": "Open Current Session in Editor"
+      },
+      {
+        "command": "pi-agent.newChatInEditor",
+        "title": "New Chat in Editor"
+      },
+      {
+        "command": "pi-agent.toggleVoiceCapture",
+        "title": "Toggle Dictation"
+      },
+      {
+        "command": "pi-agent.addFileToChat",
+        "title": "Add File to Chat"
+      },
+      {
+        "command": "pi-agent.listResources",
+        "title": "List Resources (Open Document)"
+      },
+      {
+        "command": "pi-agent.installResource",
+        "title": "Install Resource (Open Terminal)..."
+      },
+      {
+        "command": "pi-agent.removeResource",
+        "title": "Remove Resource (Open Terminal)..."
+      },
+      {
+        "command": "pi-agent.updateResources",
+        "title": "Update Resources (Open Terminal)"
+      },
+      {
+        "command": "pi-agent.manageResources",
+        "title": "Manage Resources"
+      },
+      {
+        "command": "pi-agent.showDiagnosticsLog",
+        "title": "Show Diagnostics Log"
+      },
+      {
+        "command": "pi-agent.exportDiagnosticsLog",
+        "title": "Export Diagnostics Log..."
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi-agent",
+          "title": "PiLot Studio",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "pi-agent": [
+        {
+          "id": "piAgentChat",
+          "name": "Agent",
+          "icon": "media/icon.png",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "pi-agent.explainCode",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        },
+        {
+          "command": "pi-agent.refactorCode",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        },
+        {
+          "command": "pi-agent.addFileToChat",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "pi-agent.analyzeProject",
+          "when": "explorerResourceIsFolder"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "pi-agent.openPanel",
+          "when": "!pi-agent.panelVisible"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pi-agent.openPanel",
+        "key": "ctrl+shift+alt+p",
+        "mac": "cmd+shift+alt+p"
+      },
+      {
+        "command": "pi-agent.focusInput",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i"
+      },
+      {
+        "command": "pi-agent.newSession",
+        "key": "ctrl+shift+alt+n",
+        "mac": "cmd+shift+alt+n",
+        "when": "sideBarFocus && activeViewlet == pi-agent"
+      },
+      {
+        "command": "pi-agent.toggleVoiceCapture",
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;"
+      },
+      {
+        "command": "pi-agent.addFileToChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "sideBarFocus && activeViewlet == pi-agent"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Runtime",
+        "properties": {
+          "pi-agent.binaryPath": {
+            "type": "string",
+            "default": "pi",
+            "order": 1,
+            "markdownDescription": "Command name or absolute path for the `pi` executable. Leave this as `pi` to use the copy found on your PATH."
+          },
+          "pi-agent.agentDir": {
+            "type": "string",
+            "default": "",
+            "order": 2,
+            "markdownDescription": "Directory where pi stores its auth, models, sessions, and other agent files. Leave empty to use `~/.pi/agent`."
+          },
+          "pi-agent.offline": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "Start `pi` with `--offline`, which disables startup network operations. This matches `PI_OFFLINE=1`."
+          },
+          "pi-agent.autoUpdate": {
+            "type": "boolean",
+            "default": false,
+            "order": 4,
+            "markdownDescription": "Automatically open a visible terminal running `pi update` when the extension detects a newer pi package version."
+          }
+        }
+      },
+      {
+        "title": "Sessions",
+        "properties": {
+          "pi-agent.thinkingLevel": {
+            "type": "string",
+            "enum": [
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "default": "medium",
+            "order": 1,
+            "markdownDescription": "Default thinking/reasoning level for model responses."
+          },
+          "pi-agent.autoCompact": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "Enable automatic context compaction when the conversation grows large."
+          },
+          "pi-agent.autoRetry": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Enable automatic retry for transient provider errors (rate limits, timeouts)."
+          },
+          "pi-agent.restoreLastSession": {
+            "type": "boolean",
+            "default": true,
+            "order": 4,
+            "markdownDescription": "Reopen your last chat session automatically."
+          },
+          "pi-agent.messageHistory.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "markdownDescription": "Enable per-session prompt history recall from the chat input button and Up/Down keys."
+          }
+        }
+      },
+      {
+        "title": "Tools",
+        "properties": {
+          "pi-agent.toolPreset": {
+            "type": "string",
+            "enum": [
+              "default",
+              "review",
+              "none",
+              "custom"
+            ],
+            "default": "default",
+            "order": 1,
+            "markdownDescription": "Tool access mode to apply when the pi runtime starts. `default` keeps pi's normal behavior, `review` allows only read-only tools, `none` disables all tools, and `custom` uses `pi-agent.customTools`."
+          },
+          "pi-agent.customTools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "bash",
+                "edit",
+                "write",
+                "grep",
+                "find",
+                "ls"
+              ]
+            },
+            "default": [],
+            "order": 2,
+            "markdownDescription": "Tools to allow when `pi-agent.toolPreset` is set to `custom`. Leave the list empty to start pi with no tools."
+          },
+          "pi-agent.autoExpandSmallEdits": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Automatically expand edit tool blocks when the edit changes no more than `pi-agent.autoExpandEditLineThreshold` lines."
+          },
+          "pi-agent.autoExpandEditLineThreshold": {
+            "type": "number",
+            "default": 15,
+            "minimum": 0,
+            "order": 4,
+            "markdownDescription": "Maximum changed lines for automatically expanding edit tool blocks when `pi-agent.autoExpandSmallEdits` is enabled."
+          }
+        }
+      },
+      {
+        "title": "Prompts",
+        "properties": {
+          "pi-agent.disableContextFiles": {
+            "type": "boolean",
+            "default": false,
+            "order": 1,
+            "markdownDescription": "Start `pi` with `--no-context-files`, which disables `AGENTS.md` and `CLAUDE.md` discovery and loading."
+          },
+          "pi-agent.systemPrompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "order": 2,
+            "editPresentation": "multilineText",
+            "markdownDescription": "Replace pi's default coding-assistant system prompt for new runs. Leave empty to keep pi's built-in prompt."
+          },
+          "pi-agent.appendSystemPrompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 3,
+            "markdownDescription": "Append extra text to pi's active system prompt in order. Multiline values are supported and each item is passed as its own append prompt source."
+          }
+        }
+      },
+      {
+        "title": "Resources",
+        "properties": {
+          "pi-agent.extraExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "default": [],
+            "order": 1,
+            "markdownDescription": "Additional extension paths to pass to pi on startup. Each item is sent as its own `--extension` value and can point to a local file or directory."
+          },
+          "pi-agent.extraSkills": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "default": [],
+            "order": 2,
+            "markdownDescription": "Additional skill paths to pass to pi on startup. Each item is sent as its own `--skill` value and can point to a local file or directory."
+          },
+          "pi-agent.extraPromptTemplates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "default": [],
+            "order": 3,
+            "markdownDescription": "Additional prompt template paths to pass to pi on startup. Each item is sent as its own `--prompt-template` value and can point to a local file or directory."
+          }
+        }
+      },
+      {
+        "title": "Discovery",
+        "properties": {
+          "pi-agent.disableExtensionDiscovery": {
+            "type": "boolean",
+            "default": false,
+            "order": 1,
+            "markdownDescription": "Start `pi` with `--no-extensions`. Explicit extension paths still load."
+          },
+          "pi-agent.disableSkillDiscovery": {
+            "type": "boolean",
+            "default": false,
+            "order": 2,
+            "markdownDescription": "Start `pi` with `--no-skills`, which disables skill discovery and loading."
+          },
+          "pi-agent.disablePromptTemplateDiscovery": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "Start `pi` with `--no-prompt-templates`, which disables prompt template discovery and loading."
+          }
+        }
+      },
+      {
+        "title": "Context",
+        "properties": {
+          "pi-agent.context.autoAttach": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "markdownDescription": "Automatically append editor context (active file, selection, diagnostics) to every prompt."
+          },
+          "pi-agent.context.includeEditor": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "Include active editor metadata (file, cursor, visible range, open tabs) in auto-attached context."
+          },
+          "pi-agent.context.includeSelection": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Include selected text in auto-attached context."
+          },
+          "pi-agent.context.includeDiagnostics": {
+            "type": "boolean",
+            "default": true,
+            "order": 4,
+            "markdownDescription": "Include diagnostics (errors/warnings) in auto-attached context."
+          },
+          "pi-agent.context.includeGit": {
+            "type": "boolean",
+            "default": false,
+            "order": 5,
+            "markdownDescription": "Include git branch and change status in auto-attached context."
+          }
+        }
+      },
+      {
+        "title": "Dictation",
+        "properties": {
+          "pi-agent.voice.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "markdownDescription": "Show the microphone dictation button in the pi sidebar and enable local on-device speech-to-text on macOS, Windows x64/arm64, and Linux x64/arm64."
+          },
+          "pi-agent.voice.model": {
+            "type": "string",
+            "default": "tiny-q5_1",
+            "order": 2,
+            "enum": [
+              "tiny-q5_1",
+              "tiny",
+              "base-q5_1",
+              "base",
+              "tiny.en-q5_1",
+              "tiny.en",
+              "base.en-q5_1",
+              "base.en"
+            ],
+            "enumDescriptions": [
+              "Fast multilingual default with smaller download size.",
+              "Multilingual tiny model with the highest tiny-model accuracy.",
+              "A larger multilingual model with a moderate speed tradeoff.",
+              "The highest-accuracy multilingual option in the built-in fast set.",
+              "Fast English-only advanced option with a smaller download size.",
+              "English-only advanced option with the highest tiny-model accuracy.",
+              "A larger English-only advanced option with a moderate speed tradeoff.",
+              "The highest-accuracy English-only option in the built-in fast set."
+            ],
+            "markdownDescription": "Choose which local dictation model to use for the built-in dictation path. `tiny-q5_1` is the default fast multilingual option, while the `*.en*` models are English-only advanced options."
+          }
+        }
+      },
+      {
+        "title": "Diagnostics",
+        "properties": {
+          "pi-agent.diagnostics.enabled": {
+            "type": "boolean",
+            "default": false,
+            "order": 1,
+            "markdownDescription": "Write high-signal diagnostic progress and error logs to the **PiLot Studio Diagnostics** output channel. Enable this temporarily when troubleshooting or preparing logs for a support report."
+          }
+        }
+      },
+      {
+        "title": "Style",
+        "properties": {
+          "pi-agent.fontSize": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "default": null,
+            "minimum": 8,
+            "maximum": 300,
+            "order": 1,
+            "markdownDescription": "Font size (px) used in the PiLot Studio sidebar panel. When unset, uses the VS Code default."
+          },
+          "pi-agent.fontFamily": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "order": 2,
+            "markdownDescription": "Font family used in the PiLot Studio sidebar panel. When unset, uses the VS Code default."
+          },
+          "pi-agent.fontWeight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "enum": [
+              null,
+              "normal",
+              "bold",
+              "bolder",
+              "lighter",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900"
+            ],
+            "order": 3,
+            "markdownDescription": "Font weight used in the PiLot Studio sidebar panel. When unset, uses the VS Code default."
+          },
+          "pi-agent.fontStyle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "enum": [
+              null,
+              "normal",
+              "italic"
+            ],
+            "order": 4,
+            "markdownDescription": "Font style used in the PiLot Studio sidebar panel. When unset, uses the VS Code default."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run webview:build && pnpm run bundle",
+    "compile": "tsc -p ./tsconfig.json",
+    "bundle": "node esbuild.config.mjs",
+    "bundle:watch": "node esbuild.config.mjs --watch",
+    "watch": "tsc -p ./tsconfig.json --watch",
+    "webview:dev": "vite build --config vite.webview.config.mts --watch",
+    "webview:serve": "vite --config vite.webview.config.mts",
+    "webview:build": "vite build --config vite.webview.config.mts",
+    "build": "pnpm run webview:build && pnpm run bundle",
+    "test": "pnpm run compile && node ./dist-tsc/test/runTest.js",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@tsconfig/svelte": "^5.0.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.9.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.9.1",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.4.1",
+    "glob": "^13.0.0",
+    "globals": "^17.6.0",
+    "mermaid": "^11.6.0",
+    "mocha": "^11.7.6",
+    "svelte": "^5.56.0",
+    "svelte-check": "^4.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.60.1",
+    "vite": "^8.0.15",
+    "eslint-plugin-svelte": "^3.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0"
+  }
+}

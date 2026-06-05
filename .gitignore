@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-tsc/
+out/
+
+# VS Code
+.vscode/
+.vscode-test/
+
+# VS Code extension package
+*.vsix
+
+# Reference extension folder and everything in it
+reference/
+
+# PI agent runtime state (generated)
+.pi/
+
+# PI Lens cache/index (generated)
+.pi-lens/
+
+# Graphify output (generated)
+graphify-out
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# macOS
+.DS_Store
