@@ -62,11 +62,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/pi-agent/PiLot-Studio"
+    "url": "https://github.com/Printaga/PiLot"
   },
-  "homepage": "https://github.com/pi-agent/PiLot-Studio",
+  "homepage": "https://github.com/Printaga/PiLot",
   "bugs": {
-    "url": "https://github.com/pi-agent/PiLot-Studio/issues"
+    "url": "https://github.com/Printaga/PiLot/issues"
   },
   "main": "./dist/extension.js",
   "type": "module",

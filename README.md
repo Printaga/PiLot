@@ -6,7 +6,7 @@
 
 Integrate the powerful PI coding agent directly into VS Code with a beautiful Svelte-based GUI.
 
-[![Release](https://badgen.net/github/release/pi-agent/PiLot-Studio?label=Release&icon=github)](https://github.com/pi-agent/PiLot-Studio/releases/latest) [![GitHub Repo stars](https://img.shields.io/github/stars/pi-agent/PiLot-Studio)](https://github.com/pi-agent/PiLot-Studio)
+[![Release](https://badgen.net/github/release/Printaga/PiLot?label=Release&icon=github)](https://github.com/Printaga/PiLot/releases/latest) [![GitHub Repo stars](https://img.shields.io/github/stars/Printaga/PiLot)](https://github.com/Printaga/PiLot)
 
 **Working on macOS, Linux, and Windows.**
 
@@ -292,8 +292,8 @@ pnpm run build    # Builds webview + compiles TS in one step
 
 Contributions are welcome! Please feel free to:
 
-- [Open an issue](https://github.com/pi-agent/PiLot-Studio/issues) for bug reports or feature requests
-- [Submit a pull request](https://github.com/pi-agent/PiLot-Studio/pulls) with improvements
+- [Open an issue](https://github.com/Printaga/PiLot/issues) for bug reports or feature requests
+- [Submit a pull request](https://github.com/Printaga/PiLot/pulls) with improvements
 
 ## License
 
