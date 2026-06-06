@@ -1,6 +1,10 @@
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import Mocha from 'mocha';
 import { glob } from 'glob';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export async function run(): Promise<void> {
 	const mocha = new Mocha({

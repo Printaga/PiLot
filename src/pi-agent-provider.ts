@@ -557,17 +557,17 @@ export class PiAgentProvider
 			const models = await this.getMergedModels();
 			this.availableModels = this.buildModelList(models);
 
-			// Restore persisted state — sync with TUI settings.json
 			const settingsModels = this.settingsManager?.getEnabledModels() || [];
+			// Filter against available models (handles PI version mismatches)
+			const validSettingsModels = settingsModels.filter(pattern =>
+				this.availableModels.some(m => m.id === pattern)
+			);
 			this.favoriteModels =
-				settingsModels.length > 0
-					? settingsModels
+				validSettingsModels.length > 0
+					? validSettingsModels
 					: this.context.globalState.get<string[]>("favoriteModels", []);
-			// Write to settings.json so TUI picks it up
-			if (this.favoriteModels.length > 0 && this.settingsManager) {
-				this.settingsManager.setEnabledModels(this.favoriteModels);
-				await this.settingsManager.flush();
-			}
+			// Write valid favorites to settings.json so TUI picks them up
+			await this.syncFavoritesToSettings();
 
 			// Restore persisted model — settings.json first, then globalState
 			const settingsDefaultModel = this.settingsManager?.getDefaultModel();
@@ -1742,11 +1742,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.favoriteModels;
 	}
 
+	/**
+	 * Sync favorite models to PI's settings.json.
+	 * Filters against available models so that only model IDs
+	 * recognized by the current registry are persisted.
+	 * Prevents warnings from PI CLI when the user has a different
+	 * version of the model registry than the extension.
+	 */
+	private async syncFavoritesToSettings(): Promise<void> {
+		if (!this.settingsManager) return;
+		const validPatterns = this.favoriteModels.filter(pattern =>
+			this.availableModels.some(m => m.id === pattern)
+		);
+		this.settingsManager.setEnabledModels(validPatterns);
+		await this.settingsManager.flush();
+	}
+
 	async toggleFavorite(
 		modelId: string,
 		isFavorite: boolean,
 	): Promise<string[]> {
 		if (isFavorite && !this.favoriteModels.includes(modelId)) {
+			// Guard: only add models that exist in the current registry
+			if (!this.availableModels.some(m => m.id === modelId)) {
+				return this.favoriteModels;
+			}
 			this.favoriteModels = [...this.favoriteModels, modelId];
 		} else if (!isFavorite) {
 			this.favoriteModels = this.favoriteModels.filter((m) => m !== modelId);
@@ -1756,11 +1776,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.favoriteModels,
 		);
 
-		// Sync with TUI settings.json enabledModels (same as Ctrl+P scoped models)
-		if (this.settingsManager) {
-			this.settingsManager.setEnabledModels(this.favoriteModels);
-			await this.settingsManager.flush();
-		}
+		// Sync valid favorites with TUI settings.json (handles PI version mismatches)
+		await this.syncFavoritesToSettings();
 
 		return this.favoriteModels;
 	}
