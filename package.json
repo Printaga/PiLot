@@ -173,7 +173,7 @@
         {
           "id": "pi-agent",
           "title": "PiLot Studio",
-          "icon": "media/icon.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -182,7 +182,7 @@
         {
           "id": "piAgentChat",
           "name": "Agent",
-          "icon": "media/icon.png",
+          "icon": "media/icon.svg",
           "type": "webview"
         }
       ]

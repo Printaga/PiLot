@@ -11,6 +11,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Fixed
 
 - Fixed mismatch between PI CLI scoped models and the extension favorite models causing warnings
+- Fixed icon display issues
 
 ## [1.0.1] - 2026-06-05
 
