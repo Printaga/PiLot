@@ -488,6 +488,8 @@ export class PiAgentProvider
 		name: string;
 	}> = [];
 	private favoriteModels: string[] = [];
+	private cliModelIdsCache: Set<string> | null = null;
+	private cliModelIdsPromise: Promise<Set<string>> | null = null;
 	private currentModelId: string | null = null;
 	private sessionList: SessionItem[] = [];
 	private _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -557,17 +559,13 @@ export class PiAgentProvider
 			const models = await this.getMergedModels();
 			this.availableModels = this.buildModelList(models);
 
-			const settingsModels = this.settingsManager?.getEnabledModels() || [];
-			// Filter against available models (handles PI version mismatches)
-			const validSettingsModels = settingsModels.filter(pattern =>
+			const savedFavorites = this.context.globalState.get<string[]>("favoriteModels", []);
+			this.favoriteModels = savedFavorites.filter(pattern =>
 				this.availableModels.some(m => m.id === pattern)
 			);
-			this.favoriteModels =
-				validSettingsModels.length > 0
-					? validSettingsModels
-					: this.context.globalState.get<string[]>("favoriteModels", []);
-			// Write valid favorites to settings.json so TUI picks them up
-			await this.syncFavoritesToSettings();
+
+			// Merge with PI CLI scoped models (bidirectional sync)
+			this.syncFromCliModels().catch(() => {});
 
 			// Restore persisted model — settings.json first, then globalState
 			const settingsDefaultModel = this.settingsManager?.getDefaultModel();
@@ -1743,19 +1741,96 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	/**
-	 * Sync favorite models to PI's settings.json.
-	 * Filters against available models so that only model IDs
-	 * recognized by the current registry are persisted.
-	 * Prevents warnings from PI CLI when the user has a different
-	 * version of the model registry than the extension.
+	 * Get the set of model IDs known to the user's PI CLI.
+	 * Runs `pi --list-models` and parses the output.
+	 * Cached for the session lifetime; invalidated on auth changes.
+	 */
+	private async getCliModelIds(): Promise<Set<string>> {
+		if (this.cliModelIdsCache) return this.cliModelIdsCache;
+		if (!this.cliModelIdsPromise) {
+			this.cliModelIdsPromise = this._resolveCliModelIds()
+				.then(ids => {
+					this.cliModelIdsCache = ids;
+					return ids;
+				})
+				.catch(() => {
+					this.cliModelIdsCache = new Set();
+					return this.cliModelIdsCache;
+				});
+		}
+		return this.cliModelIdsPromise;
+	}
+
+	private _resolveCliModelIds(): Promise<Set<string>> {
+		return new Promise<Set<string>>((resolve) => {
+			execFile('pi', ['--list-models'], {
+				timeout: 60000,
+				maxBuffer: 10 * 1024 * 1024,
+			}, (_error, stdout, stderr) => {
+				const output = (stderr || '') + '\n' + (stdout || '');
+				const models = new Set<string>();
+
+				for (const line of output.split('\n')) {
+					// Match: "provider  modelId  context  max-out  thinking  images"
+					const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
+					if (match && match[1] !== 'provider' && !match[0].startsWith('Warning')) {
+						models.add(`${match[1]}/${match[2]}`);
+					}
+				}
+
+				resolve(models);
+			});
+		});
+	}
+
+	/**
+	 * Sync favorites to PI CLI's settings.json (enabledModels).
+	 * Only writes patterns that the PI CLI actually knows about,
+	 * preventing warnings from version mismatches.
 	 */
 	private async syncFavoritesToSettings(): Promise<void> {
 		if (!this.settingsManager) return;
+
+		const cliModels = await this.getCliModelIds();
+
+		// If CLI not available or not yet resolved, skip sync
+		if (cliModels.size === 0) return;
+
+		// Only write patterns that the CLI actually knows about
 		const validPatterns = this.favoriteModels.filter(pattern =>
-			this.availableModels.some(m => m.id === pattern)
+			cliModels.has(pattern)
 		);
+
 		this.settingsManager.setEnabledModels(validPatterns);
 		await this.settingsManager.flush();
+	}
+
+	/**
+	 * Merge PI CLI's scoped models into extension favorites.
+	 * Picks up models set outside the extension (e.g., via Ctrl+P in PI CLI).
+	 */
+	private async syncFromCliModels(): Promise<void> {
+		const cliModels = await this.getCliModelIds();
+		if (cliModels.size === 0) return;
+
+		const settingsModels = this.settingsManager?.getEnabledModels() || [];
+		if (settingsModels.length === 0) return;
+
+		// Add CLI models that the extension also knows about
+		const newModels = settingsModels.filter(pattern =>
+			cliModels.has(pattern) &&
+			this.availableModels.some(m => m.id === pattern) &&
+			!this.favoriteModels.includes(pattern)
+		);
+
+		if (newModels.length > 0) {
+			this.favoriteModels = [...this.favoriteModels, ...newModels];
+			await this.context.globalState.update("favoriteModels", this.favoriteModels);
+			this.notifyWebview({
+				type: "favorites-updated",
+				data: { favorites: this.favoriteModels },
+			});
+		}
 	}
 
 	async toggleFavorite(
@@ -1776,7 +1851,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.favoriteModels,
 		);
 
-		// Sync valid favorites with TUI settings.json (handles PI version mismatches)
+		// Sync to PI CLI settings.json (validates against CLI model list)
 		await this.syncFavoritesToSettings();
 
 		return this.favoriteModels;
@@ -1849,6 +1924,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		this.authStorage.remove(provider);
 		await this.refreshAvailableModels();
+		this.cliModelIdsCache = null;
+		this.cliModelIdsPromise = null;
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
