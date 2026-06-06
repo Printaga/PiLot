@@ -69,6 +69,11 @@
 	let isListening = $state(false);
 	let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(new Map());
 
+	// Update notification state
+	let hasUpdates = $state(false);
+	let piUpdateAvailable = $state<string | null>(null);
+	let packageUpdateCount = $state(0);
+
 	// Poll context usage and token stats every 5s once initialized
 	$effect(() => {
 		if (!isInitialized) return;
@@ -194,6 +199,18 @@
 						timestamp: data.timestamp || Date.now()
 					}
 				];
+				break;
+
+			case 'updates-available':
+				hasUpdates = true;
+				piUpdateAvailable = data?.piVersion ?? null;
+				packageUpdateCount = data?.packageCount ?? 0;
+				break;
+
+			case 'updates-cleared':
+				hasUpdates = false;
+				piUpdateAvailable = null;
+				packageUpdateCount = 0;
 				break;
 
 			case 'system-message':
@@ -643,6 +660,10 @@
 		autoCompaction={autoCompaction}
 		onRenameSession={handleRenameSession}
 		onSwitchToModels={() => activeTab = 'models'}
+		onRunUpdate={() => sendMessage({ type: 'checkForUpdates' })}
+		{hasUpdates}
+		{piUpdateAvailable}
+		{packageUpdateCount}
 	/>
 
 	<div class="main">

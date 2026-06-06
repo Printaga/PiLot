@@ -336,6 +336,11 @@ export class MessageHandler {
 					}
 					break;
 
+				case "checkForUpdates":
+					await vscode.commands.executeCommand("pi-agent.checkForUpdates");
+					result = { success: true };
+					break;
+
 				case "updateResources":
 					try {
 						await this.provider.updatePackages();

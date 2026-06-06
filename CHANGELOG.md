@@ -2,6 +2,14 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [1.1.0] - 2026-06-05
+
+### Features
+
+- Added version check for PI and PI packages in the GUI showing available updates
+
+### Fixed
+
 ## [1.0.1] - 2026-06-05
 
 ### Fixed

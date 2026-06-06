@@ -473,6 +473,8 @@ export class PiAgentProvider
 	private _webview?: vscode.Webview;
 	private view?: vscode.WebviewView;
 	private session?: AgentSession;
+	// Cached update info for re-sending to webview on visibility change
+	private lastUpdateInfo: { piVersion: string | null; packageCount: number } = { piVersion: null, packageCount: 0 };
 	private config: PiAgentConfig;
 	private messageHandler: MessageHandler;
 	private isInitialized = false;
@@ -685,6 +687,13 @@ export class PiAgentProvider
 				this.notifyWebview({ type: "thinking-level-changed", data: { level } });
 				// Refresh installed packages when panel becomes visible
 				this.refreshInstalledPackagesInWebview();
+			}
+			// Re-send cached update info whenever panel becomes visible
+			if (view.visible) {
+				this.sendUpdatesToWebview(
+					this.lastUpdateInfo.piVersion,
+					this.lastUpdateInfo.packageCount,
+				);
 			}
 		});
 	}
@@ -1689,6 +1698,32 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.initialize();
 		}
 		return this.availableModels;
+	}
+
+	/** @internal Exposed for the update checker and other extension internals. */
+	getSettingsManager(): SettingsManager | undefined {
+		return this.settingsManager;
+	}
+
+	/**
+	 * Send update availability info (or clear signal) to the webview.
+	 * Called by the update checker when new updates are discovered or cleared.
+	 */
+	sendUpdatesToWebview(
+		piVersion: string | null,
+		packageCount: number,
+	): void {
+		// Cache so we can re-send when the panel becomes visible
+		this.lastUpdateInfo = { piVersion, packageCount };
+
+		if (piVersion || packageCount > 0) {
+			this.notifyWebview({
+				type: "updates-available",
+				data: { piVersion, packageCount },
+			});
+		} else {
+			this.notifyWebview({ type: "updates-cleared" });
+		}
 	}
 
 	getCurrentModelId(): string | null {

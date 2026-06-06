@@ -25,6 +25,10 @@
 		onCompact?: () => void;
 		onRenameSession?: () => void;
 		onSwitchToModels?: () => void;
+		onRunUpdate?: () => void;
+		hasUpdates?: boolean;
+		piUpdateAvailable?: string | null;
+		packageUpdateCount?: number;
 	}
 
 	let {
@@ -44,7 +48,11 @@
 		autoCompaction = true,
 		onCompact = () => {},
 		onRenameSession = () => {},
-		onSwitchToModels = () => {}
+		onSwitchToModels = () => {},
+		onRunUpdate = () => {},
+		hasUpdates = false,
+		piUpdateAvailable = null,
+		packageUpdateCount = 0
 	}: Props = $props();
 
 	let showFavDropdown = $state(false);
@@ -96,6 +104,16 @@
 	const favModelDetails = $derived(
 		favoriteModels.map(id => models.find(m => m.id === id)).filter(Boolean) as Model[]
 	);
+
+	function getUpdateTitle(piVersion: string | null | undefined, pkgCount: number): string {
+		if (!piVersion && pkgCount === 0) {
+			return "Check for updates";
+		}
+		const parts: string[] = [];
+		if (piVersion) parts.push(`PI CLI v${piVersion} available`);
+		if (pkgCount > 0) parts.push(`${pkgCount} package update(s)`);
+		return `Updates Available\n${parts.join("\n")}\n\nClick to run pi update`;
+	}
 
 	let mediaIcon = $state(
 		typeof window !== 'undefined' ? ((window as any).__MEDIA_ICON__ as string | undefined) ?? '' : ''
@@ -181,6 +199,20 @@
 				<path d="M18.5 8.5a2.121 2.121 0 0 1 3 3L12 20l-4 1 1-4h5.5z" />
 			</svg>
 		</button>
+		<button
+			class="update-btn"
+			class:has-updates={hasUpdates}
+			onclick={onRunUpdate}
+			title={getUpdateTitle(piUpdateAvailable, packageUpdateCount)}
+		>
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+			</svg>
+			{#if hasUpdates && packageUpdateCount > 0}
+				<span class="update-badge">{packageUpdateCount}</span>
+			{/if}
+		</button>
+
 		<ContextIndicator
 			percent={contextPercent}
 			{contextTokens}
@@ -472,6 +504,62 @@
 		border-color: var(--color-primary);
 		background: var(--surface-tint);
 		color: var(--color-primary);
+	}
+
+	.update-btn {
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-surface-2);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		color: var(--color-text-muted);
+		position: relative;
+		transition: all var(--transition-interactive);
+	}
+
+	.update-btn:hover {
+		border-color: var(--color-primary);
+		background: var(--surface-tint);
+		color: var(--color-primary);
+		transform: scale(1.05);
+	}
+
+	.update-btn.has-updates {
+		background: oklch(from var(--color-warning, #eab308) l c h / 0.15);
+		border-color: oklch(from var(--color-warning, #eab308) l c h / 0.3);
+		color: var(--color-warning, #eab308);
+		animation: pulse-update 2s ease-in-out infinite;
+	}
+
+	.update-btn.has-updates:hover {
+		background: oklch(from var(--color-warning, #eab308) l c h / 0.25);
+		border-color: var(--color-warning, #eab308);
+		transform: scale(1.1);
+	}
+
+	.update-badge {
+		position: absolute;
+		top: -4px;
+		right: -4px;
+		min-width: 14px;
+		height: 14px;
+		padding: 0 3px;
+		font-size: 9px;
+		font-weight: 800;
+		line-height: 14px;
+		text-align: center;
+		background: var(--color-error, #ef4444);
+		color: white;
+		border-radius: var(--radius-full);
+		box-shadow: 0 1px 4px oklch(0% 0 0 / 0.3);
+	}
+
+	@keyframes pulse-update {
+		0%, 100% { box-shadow: 0 0 0 0 oklch(from var(--color-warning, #eab308) l c h / 0.3); }
+		50% { box-shadow: 0 0 0 6px oklch(from var(--color-warning, #eab308) l c h / 0); }
 	}
 
 

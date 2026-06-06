@@ -2,7 +2,7 @@
   "name": "pilots-studio",
   "displayName": "PiLot Studio",
   "description": "Integrate the PI AI coding agent into VS Code with a user-friendly GUI",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "publisher": "PrintagaPublishingLLC",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -58,6 +58,7 @@
     "onCommand:pi-agent.updateResources",
     "onCommand:pi-agent.manageResources",
     "onCommand:pi-agent.showDiagnosticsLog",
+    "onCommand:pi-agent.checkForUpdates",
     "onCommand:pi-agent.exportDiagnosticsLog"
   ],
   "repository": {
@@ -156,6 +157,11 @@
       {
         "command": "pi-agent.showDiagnosticsLog",
         "title": "Show Diagnostics Log"
+      },
+      {
+        "command": "pi-agent.checkForUpdates",
+        "title": "Check for Updates",
+        "icon": "$(package)"
       },
       {
         "command": "pi-agent.exportDiagnosticsLog",

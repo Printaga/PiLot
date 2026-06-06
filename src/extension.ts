@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { PiAgentProvider, validateThinkingLevel } from './pi-agent-provider.js';
 import { registerCommands } from './commands/index.js';
+import { startUpdateChecker } from './update-checker.js';
 
 export async function activate(context: vscode.ExtensionContext) {
 	const config = vscode.workspace.getConfiguration('pi-agent');
@@ -24,6 +25,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 
 	registerCommands(context, provider);
+
+	// Start the update checker (periodically checks for pi CLI and package updates)
+	context.subscriptions.push(startUpdateChecker(context, provider));
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('pi-agent.openPanel', async (sessionId?: string) => {

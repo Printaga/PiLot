@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import { PiAgentProvider } from "../pi-agent-provider.js";
+import { runUpdateCheck } from "../update-checker.js";
 
 // ── Diagnostics output channel and log buffer ──────────────────────────────
 
@@ -254,6 +255,18 @@ export function registerCommands(
 		vscode.commands.registerCommand("pi-agent.manageResources", async () => {
 			await focusSidebar();
 			provider.notifyWebviewFromCommand("manage-resources", {});
+		}),
+	);
+
+	// Check for Updates command
+	context.subscriptions.push(
+		vscode.commands.registerCommand("pi-agent.checkForUpdates", async () => {
+			try {
+				await runUpdateCheck(provider);
+			} catch (err) {
+				logDiagnostics(`[Update Checker] Manual update check failed: ${err}`);
+				vscode.window.showErrorMessage("Failed to check for updates.");
+			}
 		}),
 	);
 
