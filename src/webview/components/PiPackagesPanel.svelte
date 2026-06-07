@@ -18,13 +18,13 @@
   }
 
   // State
-  let activeTab = $state<"installed" | "official">("installed");
+  let activeTab = $state<"installed" | "available">("installed");
   let installedPackages = $state<InstalledPackage[]>([]);
   let marketplacePackages = $state<MarketplacePackage[]>([]);
   let marketplaceLoading = $state(false);
   let marketplaceError = $state<string | null>(null);
   let installedQuery = $state("");
-  let officialQuery = $state("");
+  let availableQuery = $state("");
   let typeFilter = $state<"all" | "extensions" | "skills" | "prompts" | "themes">("all");
   let sortOption = $state<"downloads" | "newest" | "name">("downloads");
   let showLoadingOverlay = $state(false);
@@ -34,7 +34,7 @@
   let filteredPackages = $derived(
     marketplacePackages
       .filter((pkg) => {
-        const q = officialQuery.toLowerCase();
+        const q = availableQuery.toLowerCase();
         const matchesSearch =
           !q ||
           pkg.name.toLowerCase().includes(q) ||
@@ -217,10 +217,10 @@ async function fetchMarketplacePackages() {
     </button>
     <button
       class="tab-btn"
-      class:active={activeTab === "official"}
-      onclick={() => (activeTab = "official")}
+      class:active={activeTab === "available"}
+      onclick={() => (activeTab = "available")}
     >
-      Official
+      Available
     </button>
   </div>
 
@@ -289,8 +289,8 @@ async function fetchMarketplacePackages() {
       <div class="filter-bar">
         <input
           type="text"
-          placeholder="Search official packages..."
-          bind:value={officialQuery}
+          placeholder="Search available packages..."
+          bind:value={availableQuery}
           class="search-input"
         />
         <button
@@ -318,11 +318,11 @@ async function fetchMarketplacePackages() {
       </div>
 
       {#if marketplaceLoading}
-        <div class="status">Loading official packages...</div>
+        <div class="status">Loading available packages...</div>
       {:else if marketplaceError}
         <div class="status error">Error: {marketplaceError}</div>
       {:else if filteredPackages.length === 0}
-        <div class="status">No official packages match your search.</div>
+        <div class="status">No available packages match your search.</div>
       {:else}
         {#each filteredPackages as pkg}
           <div class="package-card">

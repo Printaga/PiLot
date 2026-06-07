@@ -1,6 +1,7 @@
 <script lang="ts">
   import MessageBubble from "./MessageBubble.svelte";
   import VoiceCapture from "./VoiceCapture.svelte";
+  import ContextIndicator from "./ContextIndicator.svelte";
 
   interface ImageContent {
   type: "image";
@@ -104,6 +105,11 @@ interface ToolCallResult {
     tokensOut?: number;
     tokensTotal?: number;
     tokensCacheRead?: number;
+    contextPercent?: number | null;
+    contextTokens?: number | null;
+    contextWindow?: number;
+    autoCompaction?: boolean;
+    onCompact?: () => void;
   }
 
   let {
@@ -120,6 +126,11 @@ interface ToolCallResult {
     tokensOut = 0,
     tokensTotal = 0,
     tokensCacheRead = 0,
+    contextPercent = null,
+    contextTokens = null,
+    contextWindow = 0,
+    autoCompaction = true,
+    onCompact = () => {},
   }: Props = $props();
   let messagesContainer: HTMLDivElement | null = null;
   let transcriptWindowSize = $state(100);
@@ -1194,6 +1205,13 @@ interface ToolCallResult {
         <span class="token-label">Total</span>
         <span class="token-value">{tokensTotal.toLocaleString()}</span>
       </span>
+      <ContextIndicator
+        percent={contextPercent}
+        contextTokens={contextTokens}
+        contextWindow={contextWindow}
+        autoCompaction={autoCompaction}
+        onCompact={onCompact}
+      />
     </div>
   </div>
 </div>

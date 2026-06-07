@@ -1,6 +1,4 @@
 <script lang="ts">
-	import ContextIndicator from './ContextIndicator.svelte';
-
 	interface Model {
 		id: string;
 		provider: string;
@@ -18,11 +16,6 @@
 		models: Model[];
 		onSelectFavorite: (modelId: string) => void;
 		onThinkingLevelChange: (level: string) => void;
-		contextPercent: number | null;
-		contextTokens: number | null;
-		contextWindow: number;
-		autoCompaction: boolean;
-		onCompact?: () => void;
 		onRenameSession?: () => void;
 		onSwitchToModels?: () => void;
 		onRunUpdate?: () => void;
@@ -42,11 +35,6 @@
 		models = [],
 		onSelectFavorite,
 		onThinkingLevelChange,
-		contextPercent = null,
-		contextTokens = null,
-		contextWindow = 0,
-		autoCompaction = true,
-		onCompact = () => {},
 		onRenameSession = () => {},
 		onSwitchToModels = () => {},
 		onRunUpdate = () => {},
@@ -212,14 +200,6 @@
 				<span class="update-badge">{packageUpdateCount}</span>
 			{/if}
 		</button>
-
-		<ContextIndicator
-			percent={contextPercent}
-			{contextTokens}
-			{contextWindow}
-			{autoCompaction}
-			{onCompact}
-		/>
 		
 		<div class="think-wrapper" bind:this={thinkWrapperEl}>
 			<button

@@ -13,6 +13,8 @@ import {
 	getAgentDir,
 	AgentSession,
 	AgentSessionEvent,
+	DefaultResourceLoader,
+	type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
 
@@ -754,6 +756,24 @@ export class PiAgentProvider
 		this.config = config;
 	}
 
+	/** Reload session resources (extensions, skills, prompts) when discovery settings change. */
+	async reloadSessionResources(): Promise<void> {
+		if (!this.session) return;
+
+		try {
+			// Call reload on the session's resource loader to pick up setting changes
+			const rl = (this.session as any).resourceLoader;
+			if (rl && typeof rl.reload === 'function') {
+				await rl.reload();
+				this.logDebug("[PI] Resource loader reloaded");
+			}
+			// Refresh the webview with updated resources
+			await this.sendSessionResources();
+		} catch (e) {
+			this.logError("[PI] Failed to reload session resources:", e);
+		}
+	}
+
 	get webview(): vscode.Webview | undefined {
 		return this._webview;
 	}
@@ -990,9 +1010,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 
+		// Build createAgentSession options from VS Code settings to match PI CLI behavior
+		const sessionOpts = this.buildSessionOptions(cwd);
+
 		const { session } = await createAgentSession({
-			cwd,
-			agentDir: getAgentDir(),
+			...sessionOpts,
 			sessionManager,
 			authStorage,
 			modelRegistry,
@@ -1002,6 +1024,79 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.session.subscribe(this.handleSessionEvent.bind(this));
 
 		return this.session;
+	}
+
+	/** Build session options from VS Code configuration to match PI CLI behavior. */
+	private buildSessionOptions(cwd: string): {
+		cwd: string;
+		agentDir: string;
+		resourceLoader: ResourceLoader;
+		tools?: string[];
+		noTools?: "all" | "builtin";
+	} {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+
+		// Read extra resource paths
+		const extraExtensions = config.get<string[]>("extraExtensions", []);
+		const extraSkills = config.get<string[]>("extraSkills", []);
+		const extraPromptTemplates = config.get<string[]>("extraPromptTemplates", []);
+
+		// Read discovery flags
+		const disableExtensions = config.get<boolean>("disableExtensionDiscovery", false);
+		const disableSkills = config.get<boolean>("disableSkillDiscovery", false);
+		const disablePromptTemplates = config.get<boolean>("disablePromptTemplateDiscovery", false);
+		const disableContextFiles = config.get<boolean>("disableContextFiles", false);
+
+		// Read system prompt settings
+		const systemPrompt = config.get<string | null>("systemPrompt", null);
+		const appendSystemPrompts = config.get<string[]>("appendSystemPrompts", []);
+
+		// Read tool preset settings
+		const toolPreset = config.get<string>("toolPreset", "default");
+		const customTools = config.get<string[]>("customTools", []);
+
+		// Build tools array based on preset
+		let tools: string[] | undefined;
+		let noTools: "all" | "builtin" | undefined;
+
+		switch (toolPreset) {
+			case "none":
+				noTools = "all";
+				break;
+			case "review":
+				tools = ["read", "grep", "find", "ls"];
+				break;
+			case "custom":
+				tools = customTools.length > 0 ? customTools : undefined;
+				break;
+			case "default":
+				// Default: no restrictions, use built-in tools
+				break;
+		}
+
+		// Create a resource loader with VS Code settings applied
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: getAgentDir(),
+			settingsManager: this.settingsManager,
+			additionalExtensionPaths: extraExtensions.length > 0 ? extraExtensions : undefined,
+			additionalSkillPaths: extraSkills.length > 0 ? extraSkills : undefined,
+			additionalPromptTemplatePaths: extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
+			noExtensions: disableExtensions,
+			noSkills: disableSkills,
+			noPromptTemplates: disablePromptTemplates,
+			noContextFiles: disableContextFiles,
+			systemPrompt: systemPrompt || undefined,
+			appendSystemPrompt: appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
+		});
+
+		return {
+			cwd,
+			agentDir: getAgentDir(),
+			resourceLoader,
+			tools,
+			noTools,
+		};
 	}
 
 	async newSession() {
@@ -1044,6 +1139,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			let contextFiles: Array<{ path: string }> = [];
 			let skills: any[] = [];
 			let extensions: any[] = [];
+			let prompts: any[] = [];
 			try {
 				const rl = (this.session as any).resourceLoader;
 				if (rl) {
@@ -1053,11 +1149,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					skills = sr.skills || [];
 					const er = rl.getExtensions();
 					extensions = er.extensions || [];
+					const pr = rl.getPrompts?.();
+					prompts = pr?.prompts || [];
 				}
 			} catch {
 				contextFiles = [];
 				skills = [];
 				extensions = [];
+				prompts = [];
 			}
 
 			// Collect VS Code active extensions
@@ -1101,6 +1200,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 						sourceInfo: e.sourceInfo ? { name: e.sourceInfo.name } : null,
 					})),
 					extensionCount: extensions.length,
+					prompts: prompts.map((p: any) => ({
+						name: p.name,
+						description: p.description,
+					})),
+					promptCount: prompts.length,
 					vscodeExtensions,
 					vscodeExtensionCount: vscodeExtensions.length,
 					contextFiles: contextFiles.map((f: any) => ({ path: f.path })),
@@ -1134,9 +1238,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.config.sessionDir,
 			cwd,
 		);
+
+		// Build session options from VS Code configuration to match PI CLI behavior
+		const sessionOpts = this.buildSessionOptions(cwd);
+
 		const { session } = await createAgentSession({
-			cwd,
-			agentDir: getAgentDir(),
+			...sessionOpts,
 			sessionManager,
 			authStorage: this.authStorage,
 			modelRegistry: this.modelRegistry,

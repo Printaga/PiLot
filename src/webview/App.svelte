@@ -634,6 +634,10 @@
 		isStreaming = false;
 	}
 
+	function handleCompact() {
+		sendMessage({ type: 'compact' });
+	}
+
 	function handleToggleVoice() {
 		sendMessage({ type: 'toggle-voice-capture' });
 	}
@@ -654,10 +658,6 @@
 		{models}
 		onSelectFavorite={handleSelectFavorite}
 		onThinkingLevelChange={handleSetThinkingLevel}
-		contextPercent={contextPercent}
-		contextTokens={contextTokens}
-		contextWindow={contextWindow}
-		autoCompaction={autoCompaction}
 		onRenameSession={handleRenameSession}
 		onSwitchToModels={() => activeTab = 'models'}
 		onRunUpdate={() => sendMessage({ type: 'checkForUpdates' })}
@@ -718,7 +718,26 @@
 
 		<main class="content">
 			{#if activeTab === 'chat'}
-				<ChatPanel {messages} {isStreaming} onSend={handleSendPrompt} onNewSession={handleNewSession} onAbort={handleAbort} {sessionResources} {isListening} onToggleVoice={handleToggleVoice} bind:inputText={draftInputText} {tokensIn} {tokensOut} {tokensTotal} {tokensCacheRead} />
+				<ChatPanel 
+					{messages} 
+					{isStreaming} 
+					onSend={handleSendPrompt} 
+					onNewSession={handleNewSession} 
+					onAbort={handleAbort} 
+					{sessionResources} 
+					{isListening} 
+					onToggleVoice={handleToggleVoice} 
+					bind:inputText={draftInputText} 
+					{tokensIn} 
+					{tokensOut} 
+					{tokensTotal} 
+					{tokensCacheRead}
+					{contextPercent}
+					{contextTokens}
+					{contextWindow}
+					{autoCompaction}
+					onCompact={handleCompact}
+				/>
 			{:else if activeTab === 'sessions'}
 				<SessionTree />
 			{:else if activeTab === 'models'}

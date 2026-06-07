@@ -61,6 +61,21 @@ export async function activate(context: vscode.ExtensionContext) {
 					thinkingLevel: validateThinkingLevel(newConfig.get('thinkingLevel')),
 					sessionDir: newConfig.get('sessionDir', '')
 				});
+
+				// Reload session resources when discovery or resource settings change
+				if (e.affectsConfiguration('pi-agent.disableExtensionDiscovery') ||
+					e.affectsConfiguration('pi-agent.disableSkillDiscovery') ||
+					e.affectsConfiguration('pi-agent.disablePromptTemplateDiscovery') ||
+					e.affectsConfiguration('pi-agent.disableContextFiles') ||
+					e.affectsConfiguration('pi-agent.extraExtensions') ||
+					e.affectsConfiguration('pi-agent.extraSkills') ||
+					e.affectsConfiguration('pi-agent.extraPromptTemplates') ||
+					e.affectsConfiguration('pi-agent.systemPrompt') ||
+					e.affectsConfiguration('pi-agent.appendSystemPrompts')) {
+					provider.reloadSessionResources().catch((err) => {
+						console.error('[PI] Failed to reload session resources:', err);
+					});
+				}
 			}
 		})
 	);
