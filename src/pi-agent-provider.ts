@@ -313,7 +313,7 @@ function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
 	// Prefer extensionUri (from ExtensionContext) because getExtension requires
 	// an exact publisher.name match that may break if the extension ID changes.
 	const extensionPath = extensionUri?.fsPath ||
-		vscode.extensions.getExtension("pi-agent.pilots-studio")?.extensionPath ||
+		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")?.extensionPath ||
 		"";
 	const voiceDir = path.join(extensionPath, "media", "voice");
 
@@ -2695,7 +2695,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			this.voiceHelperProcess.on("error", (err) => {
 				this.logError("[PI Voice Helper error]:", err);
-				this.sendVoiceMessage("voice-listening-changed", { listening: false });
+				// Detect missing library errors on Linux (e.g., missing ALSA)
+				const errMsg = err.message || String(err);
+				if (process.platform === "linux" && (errMsg.includes("error while loading shared libraries") || errMsg.includes("cannot open shared object file"))) {
+					vscode.window.showErrorMessage(
+						"Voice capture failed: Missing ALSA library. Install `libasound2` (Debian/Ubuntu) or `alsa-lib` (Fedora/RHEL) for microphone support.",
+					);
+				} else {
+					this.sendVoiceMessage("voice-listening-changed", { listening: false });
+				}
 				this.isListening = false;
 			});
 

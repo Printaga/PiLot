@@ -9,7 +9,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	const provider = new PiAgentProvider(context, {
 		defaultModel: config.get('defaultModel', 'anthropic/claude-sonnet-4-5'),
 		defaultProvider: config.get('defaultProvider', 'anthropic'),
-		autoContext: config.get('autoContext', true),
+		autoContext: config.get('context.autoAttach', true),
 		maxTokens: config.get('maxTokens', 8192),
 		thinkingLevel: validateThinkingLevel(config.get('thinkingLevel')),
 		sessionDir: config.get('sessionDir', '')
@@ -56,7 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				provider.updateConfig({
 					defaultModel: newConfig.get('defaultModel', 'anthropic/claude-sonnet-4-5'),
 					defaultProvider: newConfig.get('defaultProvider', 'anthropic'),
-					autoContext: newConfig.get('autoContext', true),
+					autoContext: newConfig.get('context.autoAttach', true),
 					maxTokens: newConfig.get('maxTokens', 8192),
 					thinkingLevel: validateThinkingLevel(newConfig.get('thinkingLevel')),
 					sessionDir: newConfig.get('sessionDir', '')

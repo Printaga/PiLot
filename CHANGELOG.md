@@ -2,6 +2,14 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed voice helper path resolution with correct extension ID
+- Fixed `context.autoAttach` setting key to match package.json configuration
+- Added user-friendly error message when voice helper fails due to missing ALSA libraries on Linux
+
 ## [1.2.0] - 2026-06-07
 
 ### Added
@@ -21,7 +29,6 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Fix hotkeys documentation to match actual keybindings
 - Removed leftover mock data from the capabilities tab
 - Minor fixes to the GUI layout and labels
-- Known issues
 
 ## [1.1.0] - 2026-06-06
 
