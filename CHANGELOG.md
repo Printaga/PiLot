@@ -2,9 +2,23 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [1.1.0] - 2026-06-05
+## [1.2.0] - 2026-06-07
 
-### Features
+### Updated
+
+- Updated and simplified README.md documentation
+
+### Fixed
+
+- Fixed PI binary resolution with multiple installations, custom paths, and relative workspace paths
+- Added proper error messages when the PI binary is not found
+- Made CLI commands respect the `pi-agent.binaryPath` setting instead of hardcoding "pi"
+- Added executable permission checks and improved binary validation via PATH
+- Removed leftover mock data from the capabilities tab
+
+## [1.1.0] - 2026-06-06
+
+### Added
 
 - Added version check for PI and PI packages in the GUI showing available updates
 

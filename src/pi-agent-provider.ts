@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
 	createAgentSession,
 	SessionManager,
@@ -39,8 +39,57 @@ function stripAnsi(text: string): string {
 	return result;
 }
 
-// Find pi binary - check workspace node_modules first, then global paths
+// Find pi binary - check VS Code setting first, then workspace, then global paths
+function resolvePiBinaryFromSetting(rawPath: string): string | null {
+	const trimmed = rawPath.trim();
+	if (!trimmed || trimmed === "pi") {
+		return null; // Use default resolution
+	}
+
+	// If it's an absolute path, verify and return it
+	if (path.isAbsolute(trimmed)) {
+		try {
+			fs.accessSync(
+				trimmed,
+				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+			);
+			return trimmed;
+		} catch {
+			return null;
+		}
+	}
+
+	// If it looks like a relative path (contains separators), resolve from workspace root
+	const hasPathSep = trimmed.includes("/") || (process.platform === "win32" && trimmed.includes("\\"));
+	if (hasPathSep) {
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		const basePath = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const resolvedPath = path.join(basePath, trimmed);
+		try {
+			fs.accessSync(
+				resolvedPath,
+				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+			);
+			return resolvedPath;
+		} catch {
+			return null;
+		}
+	}
+
+	// Treat as simple command name (like "my-pi-custom" or "pi-nightly")
+	return trimmed;
+}
+
 function findPiBinary(): string {
+	// Check VS Code setting first
+	const settingPath = vscode.workspace
+		.getConfiguration("pi-agent")
+		.get<string>("binaryPath", "pi");
+	const settingResult = resolvePiBinaryFromSetting(settingPath);
+	if (settingResult) {
+		return settingResult;
+	}
+
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 
@@ -92,6 +141,47 @@ function findPiBinary(): string {
 	}
 
 	return "pi";
+}
+
+/** Resolve pi binary to absolute path, returning null if not found. */
+function resolvePiBinary(): string | null {
+	const binary = findPiBinary();
+	// If it's an absolute path, verify execute permissions (on Windows, just check existence)
+	if (path.isAbsolute(binary)) {
+		try {
+			fs.accessSync(
+				binary,
+				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+			);
+			return binary;
+		} catch {
+			return null;
+		}
+	}
+	// For command names (like "pi" or custom binary names), check if they exist on PATH
+	// Use shell with proper quoting to handle spaces and special characters
+	try {
+		if (process.platform === "win32") {
+			// Windows: 'where' command checks for binary existence
+			const result = spawnSync("where", [binary], { shell: true, timeout: 1000 });
+			if (result.status === 0 && result.stdout) {
+				const resolved = result.stdout.toString().split(/\r?\n/)[0]?.trim();
+				return resolved || null;
+			}
+			return null;
+		} else {
+			// Unix: use shell with command -v to check PATH
+			// shell: true makes the shell command discoverable via PATH
+			const result = spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, { shell: true, timeout: 1000 });
+			if (result.status === 0 && result.stdout) {
+				const resolved = result.stdout.toString().trim();
+				return resolved || null;
+			}
+			return null;
+		}
+	} catch {
+		return null;
+	}
 }
 
 function parseInstalledPackages(output: string): InstalledPackage[] {
@@ -165,13 +255,16 @@ function shellQuote(arg: string): string {
 	return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-function getShellCommand(args: string[]) {
+/** Build a shell command object for spawning pi via shell (Unix only). */
+function getShellCommand(binaryPath: string, args: string[]): { command: string; args: string[] } | null {
 	if (process.platform === "win32") {
 		return null;
 	}
 
 	const shell = process.env.SHELL || "/bin/bash";
-	const command = [findPiBinary(), ...args].map(shellQuote).join(" ");
+	const quotedBinary = shellQuote(binaryPath);
+	const quotedArgs = args.map(shellQuote).join(" ");
+	const command = `${quotedBinary} ${quotedArgs}`;
 	return { command: shell, args: ["-lc", command] };
 }
 
@@ -180,7 +273,8 @@ function execFileAsync(
 	args: string[],
 ): Promise<CommandResult> {
 	return new Promise((resolve) => {
-		execFile(command, args, (error, stdout, stderr) => {
+		// execFile with shell: true resolves command via PATH on all platforms
+		execFile(command, args, { shell: true }, (error, stdout, stderr) => {
 			resolve({
 				code:
 					error && "code" in error && typeof error.code === "number"
@@ -494,6 +588,8 @@ export class PiAgentProvider
 	private sessionList: SessionItem[] = [];
 	private _onDidChangeTreeData = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+	/** Resolved absolute path to pi binary, set at initialization. */
+	private resolvedBinaryPath: string | null = null;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -512,6 +608,18 @@ export class PiAgentProvider
 		this.config = config;
 		this.logChannel = vscode.window.createOutputChannel("PiLot Studio");
 		this.messageHandler = new MessageHandler(this);
+	}
+
+	/** Resolve the pi binary once at startup, logging the result. */
+	private resolvePiBinaryAtStartup(): void {
+		this.resolvedBinaryPath = resolvePiBinary();
+		if (this.resolvedBinaryPath) {
+			this.log(`Resolved pi binary: ${this.resolvedBinaryPath}`);
+		} else {
+			this.logError(
+				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.",
+			);
+		}
 	}
 
 	/** Write to the PiLot Studio output channel (always shown). */
@@ -545,6 +653,17 @@ export class PiAgentProvider
 
 	async initialize() {
 		if (this.isInitialized) return;
+
+		// Resolve pi binary once at startup
+		this.resolvePiBinaryAtStartup();
+
+		// Prepend resolved binary directory to PATH for SDK internals (only for absolute paths)
+		const originalPath = process.env.PATH;
+		if (this.resolvedBinaryPath && path.isAbsolute(this.resolvedBinaryPath)) {
+			const binaryDir = path.dirname(this.resolvedBinaryPath);
+			const pathSep = process.platform === "win32" ? ";" : ":";
+			process.env.PATH = `${binaryDir}${pathSep}${process.env.PATH || ""}`;
+		}
 
 		try {
 			this.authStorage = AuthStorage.create();
@@ -580,7 +699,12 @@ export class PiAgentProvider
 			}
 
 			this.isInitialized = true;
+
 		} catch (error) {
+			// Restore PATH on failure
+			if (originalPath !== undefined && this.resolvedBinaryPath) {
+				process.env.PATH = originalPath;
+			}
 			this.logError("Failed to initialize PiLot Studio:", error);
 			vscode.window.showErrorMessage(`Failed to initialize PiLot Studio: ${error}`);
 		}
@@ -749,7 +873,8 @@ export class PiAgentProvider
 	}
 
 	private async listPackagesFromCli(): Promise<InstalledPackage[]> {
-		const direct = await execFileAsync(findPiBinary(), ["list"]);
+		const binaryPath = this.resolvedBinaryPath || findPiBinary();
+		const direct = await execFileAsync(binaryPath, ["list"]);
 		let packages = parseInstalledPackages(direct.stdout);
 		this.logDebug("[PI] listPackagesFromCli: direct parsed packages:", packages);
 
@@ -757,7 +882,7 @@ export class PiAgentProvider
 			return packages;
 		}
 
-		const shellCommand = getShellCommand(["list"]);
+		const shellCommand = getShellCommand(binaryPath, ["list"]);
 		if (!shellCommand) {
 			if (direct.stderr) {
 			this.logError("[PI] listPackagesFromCli error:", direct.stderr);
@@ -1762,24 +1887,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	private _resolveCliModelIds(): Promise<Set<string>> {
-		return new Promise<Set<string>>((resolve) => {
-			execFile('pi', ['--list-models'], {
-				timeout: 60000,
-				maxBuffer: 10 * 1024 * 1024,
-			}, (_error, stdout, stderr) => {
-				const output = (stderr || '') + '\n' + (stdout || '');
-				const models = new Set<string>();
+		const binaryPath = this.resolvedBinaryPath || findPiBinary();
+		return execFileAsync(binaryPath, ["--list-models"]).then(({ stdout, stderr }) => {
+			const output = (stderr || '') + '\n' + (stdout || '');
+			const models = new Set<string>();
 
-				for (const line of output.split('\n')) {
-					// Match: "provider  modelId  context  max-out  thinking  images"
-					const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
-					if (match && match[1] !== 'provider' && !match[0].startsWith('Warning')) {
-						models.add(`${match[1]}/${match[2]}`);
-					}
+			for (const line of output.split('\n')) {
+				// Match: "provider  modelId  context  max-out  thinking  images"
+				const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
+				if (match && match[1] !== 'provider' && !match[0].startsWith('Warning')) {
+					models.add(`${match[1]}/${match[2]}`);
 				}
+			}
 
-				resolve(models);
-			});
+			return models;
+		}).catch(() => {
+			this.logError("[PI] Failed to list CLI models - is 'pi' installed and on PATH?");
+			return new Set<string>();
 		});
 	}
 
@@ -2130,12 +2254,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	private spawnPackageCommand(args: string[]): ChildProcess {
-		const shellCommand = getShellCommand(args);
-		if (shellCommand) {
-			return spawn(shellCommand.command, shellCommand.args);
+		const binaryPath = this.resolvedBinaryPath || findPiBinary();
+		// Use shell to resolve via PATH on all platforms when binaryPath is a simple name
+		if (binaryPath === "pi" || !path.isAbsolute(binaryPath)) {
+			return spawn(binaryPath, args, { shell: true });
 		}
-
-		return spawn(findPiBinary(), args);
+		// On non-Windows, use shell for better output streaming
+		if (process.platform !== "win32") {
+			const shellCommand = getShellCommand(binaryPath, args);
+			if (shellCommand) {
+				return spawn(shellCommand.command, shellCommand.args);
+			}
+		}
+		return spawn(binaryPath, args);
 	}
 
 	private async runPackageCommand(args: string[]): Promise<void> {
