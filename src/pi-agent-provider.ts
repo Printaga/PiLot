@@ -1011,7 +1011,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 
 		// Build createAgentSession options from VS Code settings to match PI CLI behavior
-		const sessionOpts = this.buildSessionOptions(cwd);
+		const sessionOpts = await this.buildSessionOptions(cwd);
 
 		const { session } = await createAgentSession({
 			...sessionOpts,
@@ -1027,13 +1027,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	/** Build session options from VS Code configuration to match PI CLI behavior. */
-	private buildSessionOptions(cwd: string): {
+	private async buildSessionOptions(cwd: string): Promise<{
 		cwd: string;
 		agentDir: string;
 		resourceLoader: ResourceLoader;
 		tools?: string[];
 		noTools?: "all" | "builtin";
-	} {
+	}> {
 		const config = vscode.workspace.getConfiguration("pi-agent");
 
 		// Read extra resource paths
@@ -1089,6 +1089,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			systemPrompt: systemPrompt || undefined,
 			appendSystemPrompt: appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
 		});
+
+		// Load skills, extensions, prompts, and context files from settings
+		await resourceLoader.reload();
 
 		return {
 			cwd,
@@ -1240,7 +1243,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		);
 
 		// Build session options from VS Code configuration to match PI CLI behavior
-		const sessionOpts = this.buildSessionOptions(cwd);
+		const sessionOpts = await this.buildSessionOptions(cwd);
 
 		const { session } = await createAgentSession({
 			...sessionOpts,
@@ -1734,7 +1737,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 							"⌨ **Keyboard Shortcuts**\n" +
 							"Ctrl+Shift+Alt+P — Open PiLot Studio\n" +
 							"Ctrl+Shift+I — Focus chat input\n" +
-							"Ctrl+Shift+N — New session\n" +
+							"Ctrl+Shift+Alt+N — New session\n" +
 							"Ctrl+Shift+A — Attach file\n" +
 							"Ctrl+Shift+; — Toggle dictation\n" +
 							"Type / for slash commands",

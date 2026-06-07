@@ -9,9 +9,10 @@
 		{ name: 'read', description: 'Read files from the filesystem', enabled: true },
 		{ name: 'bash', description: 'Execute shell commands', enabled: true },
 		{ name: 'edit', description: 'Edit files with diffs', enabled: true },
-		{ name: 'glob', description: 'Find files by pattern', enabled: true },
+		{ name: 'find', description: 'Find files by pattern', enabled: true },
 		{ name: 'grep', description: 'Search file contents', enabled: true },
-		{ name: 'write', description: 'Create new files', enabled: true }
+		{ name: 'write', description: 'Create new files', enabled: true },
+		{ name: 'ls', description: 'List directory contents', enabled: true }
 	]);
 
 	function toggleTool(index: number) {

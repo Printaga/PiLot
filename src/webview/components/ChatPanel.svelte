@@ -64,6 +64,11 @@ interface ToolCallResult {
     path: string;
   }
 
+  interface PromptTemplate {
+    name: string;
+    description?: string;
+  }
+
   interface SessionResources {
     contextFiles: ContextFile[];
     contextFileCount: number;
@@ -73,6 +78,8 @@ interface ToolCallResult {
     extensionCount: number;
     vscodeExtensions: VSCodeExtension[];
     vscodeExtensionCount: number;
+    prompts: PromptTemplate[];
+    promptCount: number;
     packages: Package[];
     packageCount: number;
   }
@@ -86,6 +93,8 @@ interface ToolCallResult {
     extensionCount: 0,
     vscodeExtensions: [],
     vscodeExtensionCount: 0,
+    prompts: [],
+    promptCount: 0,
     packages: [],
     packageCount: 0,
   };
@@ -260,6 +269,7 @@ interface ToolCallResult {
       resources.contextFileCount > 0 ||
         resources.skillCount > 0 ||
         resources.extensionCount > 0 ||
+        resources.promptCount > 0 ||
         resources.packageCount > 0,
     ),
   );
@@ -287,6 +297,16 @@ interface ToolCallResult {
           )
           .join("\n")
       : "No PI extensions loaded",
+  );
+  const promptsTitle = $derived(
+    resources.prompts.length > 0
+      ? resources.prompts
+          .map(
+            (prompt, i) =>
+              `${i + 1}. ${prompt.name}${prompt.description ? ` — ${prompt.description}` : ""}`,
+          )
+          .join("\n")
+      : "No prompts loaded",
   );
 
   const packagesTitle = $derived(
@@ -767,6 +787,20 @@ interface ToolCallResult {
               /></svg
             >
             <span>{resources.extensionCount} Exts</span>
+          </div>
+        {/if}
+        {#if resources.promptCount > 0}
+          <div class="resource-badge" title={promptsTitle} data-type="prompts">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              ><path d="M12 2v4" /><path d="M12 22v-4" /><path d="M4.93 4.93l2.83 2.83" /><path d="M16.24 16.24l2.83 2.83" /><path d="M2 12h4" /><path d="M18 12h4" /><path d="M4.93 19.07l2.83-2.83" /><path d="M16.24 7.76l2.83-2.83" /></svg
+            >
+            <span>{resources.promptCount} Prompts</span>
           </div>
         {/if}
         {#if resources.packageCount > 0}

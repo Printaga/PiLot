@@ -92,7 +92,7 @@
 		<section class="settings-section">
 			<h4>About</h4>
 			<div class="about-info">
-				<p><strong>PiLot Studio</strong> v0.1.0</p>
+				<p><strong>PiLot Studio</strong> v1.2.0</p>
 				<p>Integrates the PI coding agent into VS Code</p>
 				<p class="muted">Powered by @earendil-works/pi-coding-agent</p>
 			</div>

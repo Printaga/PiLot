@@ -373,7 +373,7 @@ async function fetchMarketplacePackages() {
 
   <div class="footer">
     <a
-      href="https://shittycodingagent.ai/packages"
+      href="https://pi.dev/packages"
       target="_blank"
       class="browse-link">Browse all packages ↗</a
     >

@@ -52,6 +52,7 @@
     "onCommand:pi-agent.newChatInEditor",
     "onCommand:pi-agent.toggleVoiceCapture",
     "onCommand:pi-agent.addFileToChat",
+    "onCommand:pi-agent.attachFile",
     "onCommand:pi-agent.listResources",
     "onCommand:pi-agent.installResource",
     "onCommand:pi-agent.removeResource",
@@ -133,6 +134,10 @@
       {
         "command": "pi-agent.addFileToChat",
         "title": "Add File to Chat"
+      },
+      {
+        "command": "pi-agent.attachFile",
+        "title": "Attach Files to Chat"
       },
       {
         "command": "pi-agent.listResources",
@@ -261,6 +266,30 @@
             "default": "",
             "order": 2,
             "markdownDescription": "Directory where pi stores its auth, models, sessions, and other agent files. Leave empty to use `~/.pi/agent`."
+          },
+          "pi-agent.sessionDir": {
+            "type": "string",
+            "default": "",
+            "order": 3,
+            "markdownDescription": "Optional subdirectory inside the agent directory for storing sessions. Leave empty to use the default sessions folder."
+          },
+          "pi-agent.defaultModel": {
+            "type": "string",
+            "default": "anthropic/claude-sonnet-4-5",
+            "order": 4,
+            "markdownDescription": "Default model to use for new sessions (format: provider/model-id)."
+          },
+          "pi-agent.defaultProvider": {
+            "type": "string",
+            "default": "anthropic",
+            "order": 5,
+            "markdownDescription": "Default provider for model selection (used with defaultModel)."
+          },
+          "pi-agent.maxTokens": {
+            "type": "number",
+            "default": 8192,
+            "order": 6,
+            "markdownDescription": "Maximum tokens for model responses."
           },
           "pi-agent.offline": {
             "type": "boolean",
@@ -508,9 +537,7 @@
               "tiny",
               "base-q5_1",
               "base",
-              "tiny.en-q5_1",
               "tiny.en",
-              "base.en-q5_1",
               "base.en"
             ],
             "enumDescriptions": [
@@ -519,11 +546,9 @@
               "A larger multilingual model with a moderate speed tradeoff.",
               "The highest-accuracy multilingual option in the built-in fast set.",
               "Fast English-only advanced option with a smaller download size.",
-              "English-only advanced option with the highest tiny-model accuracy.",
-              "A larger English-only advanced option with a moderate speed tradeoff.",
-              "The highest-accuracy English-only option in the built-in fast set."
+              "English-only advanced option with the highest tiny-model accuracy."
             ],
-            "markdownDescription": "Choose which local dictation model to use for the built-in dictation path. `tiny-q5_1` is the default fast multilingual option, while the `*.en*` models are English-only advanced options."
+            "markdownDescription": "Choose which local dictation model to use for the built-in dictation path. `tiny-q5_1` is the default fast multilingual option, while the `*.en` models are English-only advanced options."
           }
         }
       },
