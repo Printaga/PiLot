@@ -11,10 +11,10 @@
 
 	let { activities }: Props = $props();
 
-	const typeConfig: Record<string, { label: string; icon: string }> = {
-		extension: { label: "pkg", icon: "📦" },
-		tool: { label: "tool", icon: "⚙️" },
-		system: { label: "sys", icon: "⚡" },
+	const typeConfig: Record<string, { label: string }> = {
+		extension: { label: "pkg" },
+		tool: { label: "tool" },
+		system: { label: "sys" },
 	};
 
 	const sortedActivities = $derived(
@@ -32,6 +32,10 @@
 			</span>
 		{/each}
 	</div>
+{:else}
+	<div class="activity-bar activity-bar-empty">
+		<span class="activity-placeholder">No active package output</span>
+	</div>
 {/if}
 
 <style>
@@ -39,19 +43,30 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-		padding: 0 var(--space-4);
-		min-height: 24px;
-		max-height: 28px;
+		padding: 2px var(--space-4);
+		min-height: 22px;
 		overflow-x: auto;
 		overflow-y: hidden;
 		background: var(--color-surface-2);
-		border-top: 1px solid oklch(from var(--color-border) l c h / 0.1);
+		border-top: 1px solid oklch(from var(--color-border) l c h / 0.15);
 		flex-shrink: 0;
 		scrollbar-width: none;
 	}
 
 	.activity-bar::-webkit-scrollbar {
 		display: none;
+	}
+
+	.activity-bar-empty {
+		opacity: 0.4;
+	}
+
+	.activity-placeholder {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		font-weight: 500;
+		color: var(--color-text-muted);
+		white-space: nowrap;
 	}
 
 	.activity-pill {
@@ -66,7 +81,7 @@
 		white-space: nowrap;
 		animation: pill-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 		flex-shrink: 0;
-		max-width: 220px;
+		max-width: 280px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}

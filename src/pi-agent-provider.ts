@@ -1456,9 +1456,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Derive activity statuses from session events
 		if (event.type === "tool_execution_start") {
 			const toolName = event.toolName || "tool";
+			// Build a brief description from args for common tools
+			let description = toolName;
+			const args = event.args;
+			if (args && typeof args === "object") {
+				if (args.file_path || args.filePath || args.path) {
+					description = `${toolName}: ${args.file_path || args.filePath || args.path}`;
+				} else if (args.command) {
+					description = `${toolName}: ${String(args.command).slice(0, 60)}`;
+				} else if (args.pattern) {
+					description = `${toolName}: ${String(args.pattern).slice(0, 60)}`;
+				} else if (args.glob) {
+					description = `${toolName}: ${args.glob}`;
+				}
+			}
 			this.notifyWebview({
 				type: "activity-start",
-				data: { key: `tool:${event.toolCallId}`, text: `${toolName}`, activityType: "tool" },
+				data: { key: `tool:${event.toolCallId}`, text: description, activityType: "tool" },
 			});
 		} else if (event.type === "tool_execution_end") {
 			this.notifyWebview({
@@ -1466,15 +1480,39 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				data: { key: `tool:${event.toolCallId}` },
 			});
 		} else if (event.type === "compaction_start") {
+			let compactText = "Compacting context";
+			if (event.reason === "threshold") {
+				compactText = "Auto-compacting (threshold reached)";
+			} else if (event.reason === "overflow") {
+				compactText = "Auto-compacting (context overflow)";
+			} else if (event.reason === "manual") {
+				compactText = "Compacting context";
+			}
 			this.notifyWebview({
 				type: "activity-start",
-				data: { key: "compaction", text: "Compacting context", activityType: "system" },
+				data: { key: "compaction", text: compactText, activityType: "system" },
 			});
 		} else if (event.type === "compaction_end") {
-			this.notifyWebview({
-				type: "activity-end",
-				data: { key: "compaction" },
-			});
+			// Show compaction result — clear after 3s to show briefly
+			if (event.errorMessage) {
+				this.notifyWebview({
+					type: "activity-start",
+					data: { key: "compaction", text: `Compaction error: ${event.errorMessage}`, activityType: "system" },
+				});
+			} else if (event.aborted) {
+				this.notifyWebview({
+					type: "activity-start",
+					data: { key: "compaction", text: "Compaction aborted", activityType: "system" },
+				});
+			} else {
+				this.notifyWebview({
+					type: "activity-start",
+					data: { key: "compaction", text: "Context compacted ✓", activityType: "system" },
+				});
+			}
+			setTimeout(() => {
+				this.notifyWebview({ type: "activity-end", data: { key: "compaction" } });
+			}, 3000);
 		} else if (event.type === "auto_retry_start") {
 			const attempt = event.attempt || 1;
 			this.notifyWebview({
@@ -1507,20 +1545,32 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	/**
 	 * Bind a custom ExtensionUIContext to the session's extension runner
 	 * so that ctx.ui.setStatus() calls from packages are forwarded to the webview.
+	 *
+	 * We set the UI context on the extension runner directly (not via bindExtensions)
+	 * because createAgentSession already initializes and binds the runner during
+	 * construction. Calling bindExtensions again would re-emit session_start and
+	 * re-discover resources. Instead, we replace the no-op UI context with our own
+	 * and also set it on the session's _extensionUIContext field so that reload()
+	 * preserves it.
 	 */
 	private bindExtensionUI(): void {
 		if (!this.session) return;
 
 		try {
 			const runner = this.session.extensionRunner;
-			if (!runner) return;
+			if (!runner) {
+				this.logDebug("[PI] No extension runner found, skipping UI context binding");
+				return;
+			}
 
 			// Create a UI context that forwards setStatus calls to the webview
-			runner.setUIContext({
+			const uiContext = {
 				select: async () => undefined,
 				confirm: async () => false,
 				input: async () => undefined,
-				notify: () => {},
+				notify: (message: string, type?: string) => {
+					this.logDebug(`[PI] Extension notify: ${type || "info"}: ${message}`);
+				},
 				onTerminalInput: () => () => {},
 				setStatus: (key: string, text: string | undefined) => {
 					if (text === undefined || text === null) {
@@ -1528,12 +1578,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					} else {
 						this.extensionStatuses.set(key, text);
 					}
+					this.logDebug(`[PI] Extension setStatus: ${key} = ${text}`);
 					this.notifyWebview({
 						type: "extension-status",
 						data: { key, text: text ?? undefined },
 					});
 				},
-				setWorkingMessage: () => {},
+				setWorkingMessage: (message?: string) => {
+					if (message) {
+						this.notifyWebview({
+							type: "activity-start",
+							data: { key: "_working", text: message, activityType: "system" },
+						});
+					} else {
+						this.notifyWebview({ type: "activity-end", data: { key: "_working" } });
+					}
+				},
 				setWorkingVisible: () => {},
 				setWorkingIndicator: () => {},
 				setHiddenThinkingLabel: () => {},
@@ -1557,18 +1617,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				setTheme: () => ({ success: false, error: "UI not available" }),
 				getToolsExpanded: () => false,
 				setToolsExpanded: () => {},
-			});
+			};
 
-			this.logDebug("[PI] Bound extension UI context for setStatus forwarding");
+			// Set the UI context on the runner so extension setStatus calls reach us
+			runner.setUIContext(uiContext);
 
-			// Also bind extensions with our UI context
-			this.session.bindExtensions({
-				uiContext: runner.getUIContext(),
-			}).catch((err: unknown) => {
-				this.logError("[PI] bindExtensions failed:", err);
-			});
+			// Also set the internal _extensionUIContext field so session.reload() preserves it.
+			// This is accessed via the session's private field, which we set using bracket notation
+			// since AgentSession doesn't expose a public setter for this.
+			(this.session as any)._extensionUIContext = uiContext;
 
-			// Start polling extension statuses as a fallback
+			const extensionCount = runner.getExtensionPaths?.()?.length ?? 0;
+			this.logDebug(`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`);
+
+			// Re-apply bindings so the new UI context is used by the runner
+			(this.session as any)._applyExtensionBindings?.(runner);
+
+			// Send any statuses that extensions may have already set during initialization
+			if (this.extensionStatuses.size > 0) {
+				this.notifyWebview({
+					type: "extension-statuses-full",
+					data: Object.fromEntries(this.extensionStatuses),
+				});
+			}
+
+			// Start polling extension statuses as a sync mechanism
 			this.startStatusPoller();
 		} catch (err) {
 			this.logError("[PI] Failed to bind extension UI context:", err);

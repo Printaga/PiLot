@@ -48,6 +48,34 @@
 - ⚠️ Ask first: Change `package.json` contributions, add dependencies, alter packaging/publishing flow, or change the extension's public configuration surface.
 - 🚫 Never: Commit secrets, bypass PI settings sync, or weaken webview resource restrictions/CSP handling.
 
+## Architecture & Key Patterns
+
+### Extension ↔ Webview Communication
+- All messages from extension host → webview go through `PiAgentProvider.notifyWebview({ type, data })` which calls `view.webview.postMessage()`.
+- All messages from webview → extension host go through `window.vscode.postMessage({ type, data })` and are handled by `MessageHandler.handle()`.
+- When adding new message types, add both the send side in `pi-agent-provider.ts` and the receive side in `App.svelte`'s `handleVSCodeMessage` switch.
+
+### PI SDK Integration (AgentSession & Extensions)
+- The VS Code extension uses `createAgentSession()` from `@earendil-works/pi-coding-agent` which creates its own `ExtensionRunner` internally during construction.
+- The runner starts with a `noOpUIContext` — all `ctx.ui.setStatus()`, `notify()`, `setWorkingMessage()` etc. calls from PI packages are silently discarded unless we replace it.
+- **Never call `session.bindExtensions()` after construction** — it re-emits `session_start` and re-discovers resources, causing double-initialization. Instead, use `runner.setUIContext()` directly and set `(session as any)._extensionUIContext` to persist across `session.reload()`.
+- Call `(session as any)._applyExtensionBindings?.(runner)` after setting the UI context so the runner picks up the new context immediately.
+- The `AgentSessionEvent` types (`tool_execution_start/end`, `compaction_start/end`, `auto_retry_start/end`, etc.) are defined in `@earendil-works/pi-agent-core` and re-exported through `pi-coding-agent`.
+
+### Activity / Package Status Bar
+- The PI TUI shows package activity via a `FooterDataProvider` that aggregates extension statuses from `ctx.ui.setStatus(key, text)`, git branch, token stats, and model info.
+- In the VS Code extension, we replicate this with:
+  - **Extension statuses** — forwarded from our custom `ExtensionUIContext.setStatus()` implementation to the webview as `extension-status` messages.
+  - **Derived activity** — tool executions, compaction, auto-retries are derived from `AgentSessionEvent` and sent as `activity-start`/`activity-end` messages.
+  - **The `ActivityBar` Svelte component** renders these at the bottom of the chat panel as color-coded animated pills (extension=primary, tool=green, system=amber).
+- Extension statuses persist until explicitly cleared (matching PI TUI behavior). Derived activities auto-clear when their end event arrives.
+- Tool execution descriptions include arg previews (file paths, commands, patterns) when available.
+
+### Webview State Management
+- Svelte 5 runes (`$state`, `$derived`, `$effect`) are used throughout — no stores.
+- State flows: `App.svelte` owns top-level state → passes as props → child components emit events via callbacks.
+- Message handling centralized in `App.svelte`'s `handleVSCodeMessage` which dispatches to state updates.
+
 ## Agent Platforms
 
 - Universal instructions file in use: `AGENTS.md`

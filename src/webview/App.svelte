@@ -186,6 +186,32 @@
     return () => window.removeEventListener("keydown", handleKeydown);
   });
 
+  /** Extract text content from an AssistantMessage (content may be a string or array of content blocks). */
+  function extractTextFromAssistantMessage(msg: any): string {
+    if (!msg) return "";
+    if (typeof msg.content === "string") return msg.content;
+    if (Array.isArray(msg.content)) {
+      return msg.content
+        .filter((c: any) => c.type === "text" && typeof c.text === "string")
+        .map((c: any) => c.text)
+        .join("");
+    }
+    return "";
+  }
+
+  /** Extract thinking content from an AssistantMessage. */
+  function extractThinkingFromAssistantMessage(msg: any): string | undefined {
+    if (!msg) return undefined;
+    if (Array.isArray(msg.content)) {
+      const thinkingBlocks = msg.content.filter(
+        (c: any) => c.type === "thinking" && typeof c.thinking === "string",
+      );
+      if (thinkingBlocks.length === 0) return undefined;
+      return thinkingBlocks.map((c: any) => c.thinking).join("\n");
+    }
+    return undefined;
+  }
+
   function handleVSCodeMessage(event: MessageEvent) {
     const { type, data } = event.data;
 
@@ -447,13 +473,18 @@
               ];
             }
           }
+          // Extract initial text content from the message if available
+          // (covers non-streaming providers or partial content in start event)
+          const startContent = extractTextFromAssistantMessage(event.message);
+          const startThinking = extractThinkingFromAssistantMessage(event.message);
           if (msgRole === "assistant" || !msgRole || msgRole === "system") {
             messages = [
               ...messages,
               {
                 role: msgRole || "assistant",
-                content: "",
-                timestamp: Date.now(),
+                content: startContent || "",
+                thinking: startThinking || undefined,
+                timestamp: event.message?.timestamp || Date.now(),
                 isStreaming: true,
               },
             ];
@@ -464,10 +495,19 @@
       case "message_end":
         if (messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
+          // Extract final content from the completed message to ensure nothing is lost
+          const finalContent = extractTextFromAssistantMessage(event.message);
+          const finalThinking = extractThinkingFromAssistantMessage(event.message);
           if (lastMsg.isStreaming) {
             messages = [
               ...messages.slice(0, -1),
-              { ...lastMsg, isStreaming: false },
+              {
+                ...lastMsg,
+                // Use the final message content if it's more complete than what we accumulated
+                content: finalContent || lastMsg.content || "",
+                thinking: finalThinking || lastMsg.thinking,
+                isStreaming: false,
+              },
             ];
           }
         }
@@ -495,6 +535,7 @@
             ];
           }
         }
+        // Handle thinking deltas — append to the thinking buffer
         if (
           event.assistantMessageEvent?.type === "thinking_delta" &&
           messages.length > 0
@@ -513,6 +554,7 @@
           }
           break;
         }
+        // Handle text deltas — append to the content buffer
         if (
           event.assistantMessageEvent?.type === "text_delta" &&
           messages.length > 0
@@ -527,6 +569,46 @@
               },
             ];
           }
+          break;
+        }
+        // For other message_update events (text_end, thinking_end, toolcall_*),
+        // sync content from the partial message if it's more complete than what we have.
+        // This ensures content is captured even if some delta events were dropped.
+        if (
+          event.assistantMessageEvent &&
+          event.message &&
+          messages.length > 0
+        ) {
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg.isStreaming) {
+            const partialContent = extractTextFromAssistantMessage(event.message);
+            const partialThinking = extractThinkingFromAssistantMessage(event.message);
+            // Only update if the partial message content is longer than what we've accumulated
+            if (
+              partialContent &&
+              partialContent.length > (lastMsg.content || "").length
+            ) {
+              messages = [
+                ...messages.slice(0, -1),
+                {
+                  ...lastMsg,
+                  content: partialContent,
+                  thinking: partialThinking || lastMsg.thinking,
+                },
+              ];
+            } else if (
+              partialThinking &&
+              partialThinking.length > (lastMsg.thinking || "").length
+            ) {
+              messages = [
+                ...messages.slice(0, -1),
+                {
+                  ...lastMsg,
+                  thinking: partialThinking,
+                },
+              ];
+            }
+          }
         }
         break;
 
@@ -535,10 +617,26 @@
         if (messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           if (lastMsg.isStreaming) {
+            // Try to extract content from the last agent message in the event
+            let agentEndContent: string | undefined;
+            let agentEndThinking: string | undefined;
+            if (event.messages && Array.isArray(event.messages)) {
+              // Find last assistant message from the agent_end payload
+              for (let i = event.messages.length - 1; i >= 0; i--) {
+                const m = event.messages[i];
+                if (m.role === "assistant") {
+                  agentEndContent = extractTextFromAssistantMessage(m);
+                  agentEndThinking = extractThinkingFromAssistantMessage(m);
+                  break;
+                }
+              }
+            }
             messages = [
               ...messages.slice(0, -1),
               {
                 ...lastMsg,
+                content: agentEndContent || lastMsg.content || "",
+                thinking: agentEndThinking || lastMsg.thinking,
                 isStreaming: false,
               },
             ];
