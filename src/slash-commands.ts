@@ -3,6 +3,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { serializeMessages } from "./message-serializer.js";
 
 /** Context provided to slash command handlers */
 export interface SlashCommandContext {
@@ -141,10 +142,19 @@ export async function tryHandleSlashCommand(
 			if (!ctx.session) return true;
 			try {
 				let filePath: string;
-				if (args.endsWith(".jsonl")) {
-					filePath = ctx.session.exportToJsonl(args || undefined);
+
+				// When only a format extension is given (e.g. ".html", ".md", ".jsonl"),
+				// generate a proper timestamped filename in the workspace / cwd.
+				const resolvedArgs = args && args.startsWith(".")
+					? `session-${new Date().toISOString().replace(/[:.]/g, "-")}${args}`
+					: (args || undefined);
+
+				if (resolvedArgs?.endsWith(".jsonl")) {
+					filePath = ctx.session.exportToJsonl(resolvedArgs);
+				} else if (resolvedArgs?.endsWith(".md")) {
+					filePath = exportSessionToMarkdown(ctx.session, resolvedArgs);
 				} else {
-					filePath = await ctx.session.exportToHtml(args || undefined);
+					filePath = await ctx.session.exportToHtml(resolvedArgs);
 				}
 				const uri = vscode.Uri.file(filePath);
 				await vscode.commands.executeCommand("vscode.open", uri);
@@ -326,4 +336,102 @@ export async function tryHandleSlashCommand(
 		default:
 			return false;
 	}
+}
+
+// ── Markdown export ────────────────────────────────────────────────────────
+
+/**
+ * Export the current session to a Markdown file.
+ * Serializes messages into a readable markdown conversation log.
+ */
+export function exportSessionToMarkdown(
+	session: NonNullable<SlashCommandContext["session"]>,
+	outputPath?: string,
+): string {
+	const filePath = outputPath
+		? path.resolve(outputPath)
+		: path.join(
+				process.cwd(),
+				`session-${new Date().toISOString().replace(/[:.]/g, "-")}.md`,
+		  );
+
+	const dir = path.dirname(filePath);
+	if (!fs.existsSync(dir)) {
+		fs.mkdirSync(dir, { recursive: true });
+	}
+
+	const serialized = serializeMessages(session.messages);
+
+	const lines: string[] = [];
+	lines.push(`# Chat Session`);
+	if (session.sessionName) {
+		lines.push(`**Session:** ${session.sessionName}`);
+	}
+	lines.push(`**Date:** ${new Date().toLocaleString()}`);
+	lines.push(`**Session ID:** ${session.sessionId}`);
+	const stats = session.getSessionStats();
+	if (stats) {
+		lines.push(`**Messages:** ${stats.totalMessages ?? "N/A"}`);
+		if (stats.tokens) {
+			lines.push(
+				`**Tokens:** ${(stats.tokens.total ?? 0).toLocaleString()}`,
+			);
+		}
+	}
+	lines.push("");
+	lines.push("---");
+	lines.push("");
+
+	for (const msg of serialized) {
+		const timestamp = msg.timestamp
+			? new Date(msg.timestamp).toLocaleTimeString()
+			: "";
+
+		if (msg.role === "user") {
+			lines.push(`## 👤 User ${timestamp ? `(${timestamp})` : ""}`);
+			lines.push("");
+			if (msg.content) {
+				lines.push(msg.content);
+				lines.push("");
+			}
+			if (msg.images && msg.images.length > 0) {
+				lines.push(`> _[${msg.images.length} image(s) attached]_`);
+				lines.push("");
+			}
+		} else if (msg.role === "assistant") {
+			lines.push(`## 🤖 Assistant ${timestamp ? `(${timestamp})` : ""}`);
+			lines.push("");
+			if (msg.thinking) {
+				lines.push("> 💭 _Thinking_");
+				lines.push(">");
+				lines.push(
+					"> " + msg.thinking.replace(/\n/g, "\n> "),
+				);
+				lines.push("");
+			}
+			if (msg.content) {
+				lines.push(msg.content);
+				lines.push("");
+			}
+		} else if (msg.role === "system") {
+			lines.push(`## ⚙️ System ${timestamp ? `(${timestamp})` : ""}`);
+			lines.push("");
+			if (msg.content) {
+				lines.push("```");
+				lines.push(msg.content);
+				lines.push("```");
+				lines.push("");
+			}
+		}
+	}
+
+	lines.push("---");
+	lines.push("");
+	lines.push(
+		`_Exported from PiLot Studio on ${new Date().toLocaleString()}_`,
+	);
+	lines.push("");
+
+	fs.writeFileSync(filePath, lines.join("\n"), "utf-8");
+	return filePath;
 }

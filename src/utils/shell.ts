@@ -50,7 +50,9 @@ export function execFileAsync(
 				code:
 					error && "code" in error && typeof error.code === "number"
 						? error.code
-						: 0,
+						: error
+							? 1
+							: 0,
 				stdout: stdout || "",
 				stderr: stderr || "",
 			});

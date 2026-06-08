@@ -196,11 +196,7 @@ async function fetchMarketplacePackages() {
 
   onMount(() => {
     const vscode = getVsCodeApi();
-
-    if (vscode?.postMessage) {
-      vscode.postMessage({ type: "listPackages" });
-    } else {
-    }
+    vscode?.postMessage({ type: "listPackages" });
 
     fetchMarketplacePackages();
   });
@@ -286,35 +282,39 @@ async function fetchMarketplacePackages() {
     </div>
   {:else}
     <div class="packages-content">
-      <div class="filter-bar">
-        <input
-          type="text"
-          placeholder="Search available packages..."
-          bind:value={availableQuery}
-          class="search-input"
-        />
-        <button
-          class="refresh-btn"
-          onclick={fetchMarketplacePackages}
-          title="Refresh">↻</button
-        >
-        <select bind:value={typeFilter} class="filter-select">
-          <option value="all">All Types</option>
-          <option value="extensions">Extensions</option>
-          <option value="skills">Skills</option>
-          <option value="prompts">Prompts</option>
-          <option value="themes">Themes</option>
-        </select>
-        <select bind:value={sortOption} class="filter-select">
-          <option value="downloads">Most Downloads</option>
-          <option value="newest">Newest</option>
-          <option value="name">A-Z</option>
-        </select>
-        <button
-          class="update-btn"
-          onclick={updatePackages}
-          title="Update all packages">Update</button
-        >
+        <div class="available-filter">
+        <div class="search-row">
+          <input
+            type="text"
+            placeholder="Search available packages..."
+            bind:value={availableQuery}
+            class="search-input"
+          />
+        </div>
+        <div class="filter-row">
+          <button
+            class="refresh-btn"
+            onclick={fetchMarketplacePackages}
+            title="Refresh">↻</button
+          >
+          <select bind:value={typeFilter} class="filter-select">
+            <option value="all">All Types</option>
+            <option value="extensions">Extensions</option>
+            <option value="skills">Skills</option>
+            <option value="prompts">Prompts</option>
+            <option value="themes">Themes</option>
+          </select>
+          <select bind:value={sortOption} class="filter-select">
+            <option value="downloads">Most Downloads</option>
+            <option value="newest">Newest</option>
+            <option value="name">A-Z</option>
+          </select>
+          <button
+            class="update-btn"
+            onclick={updatePackages}
+            title="Update all packages">Update</button
+          >
+        </div>
       </div>
 
       {#if marketplaceLoading}
@@ -444,6 +444,22 @@ async function fetchMarketplacePackages() {
     display: flex;
     gap: var(--space-3);
     margin-bottom: var(--space-4);
+  }
+
+  .available-filter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .search-row {
+    display: flex;
+  }
+
+  .filter-row {
+    display: flex;
+    gap: var(--space-3);
   }
 
   .search-input {

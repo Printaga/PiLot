@@ -107,15 +107,16 @@
 		padding: 0;
 		background: var(--color-surface-2);
 		border: 1px solid var(--color-border);
-		border-radius: var(--radius-full);
-		transition: all var(--transition-interactive);
+		border-radius: 0;
+		transition: all var(--transition-fast);
 		cursor: pointer;
 	}
 
 	.ctx-indicator:hover {
 		border-color: var(--color-primary);
-		background: var(--surface-tint);
-		transform: scale(1.05);
+		background: var(--color-surface);
+		transform: translate(-2px, -2px);
+		box-shadow: 2px 2px 0px var(--color-primary);
 	}
 
 	.ctx-indicator.compacting {
@@ -124,7 +125,7 @@
 	}
 
 	.auto-on {
-		box-shadow: 0 0 0 1px oklch(from var(--color-primary) l c h / 0.3);
+		box-shadow: 2px 2px 0px var(--color-primary);
 	}
 
 	.ctx-circle {
@@ -133,6 +134,7 @@
 
 	.ctx-label {
 		position: absolute;
+		font-family: var(--font-mono);
 		font-size: 9px;
 		font-weight: 800;
 		font-variant-numeric: tabular-nums;

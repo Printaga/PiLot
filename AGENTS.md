@@ -6,49 +6,49 @@
 - Compile TS: `pnpm run compile`
 - Test: `pnpm test`
 - Lint: `pnpm run lint`
-- Dev server (UI): `pnpm run webview:serve` (browser) or `pnpm run webview:dev` (VS Code host watch)
-- Package: `pnpm run package`
+- Dev server (browser): `pnpm run webview:serve`
+- Dev watch (VS Code host assets): `pnpm run webview:dev`
+- Package extension: `pnpm run package`
 
 ## Tech Stack
 
-- **Languages**: TypeScript `^6.0.3` (NodeNext/ESM)
-- **Frameworks**: Svelte `^5.56.0` (for webview UI), VS Code Extension Host
-- **Tooling**: Vite `^8.0.15`, ESLint `^10.4.1`, Mocha + `@vscode/test-electron`
-- **Platform**: Node.js `>=24.16.0`
-- **Key Dependencies**: `@earendil-works/pi-coding-agent@0.78.0`
-- **User Preferences**: Preferred stack includes SvelteKit v2.60.1+, SQLite (with better-sqlite3 v12.9.0+). (Note: SvelteKit/SQLite not currently active in this repo, but use these versions if adding them).
+- TypeScript `^6.0.3` (NodeNext/ESM), Node.js `>=24.16.0`
+- Svelte `^5.56.0` for the webview UI, VS Code Extension Host for the extension runtime
+- Vite `^8.0.15`, ESLint `^10.4.1`, Mocha + `@vscode/test-electron`, esbuild `^0.28.0`
+- Key runtime dependency: `@earendil-works/pi-coding-agent@^0.78.0`
+- Preferred additions if new stack is introduced: SvelteKit `v2.60.1+`, SQLite with `better-sqlite3 v12.9.0+`
 
 ## Project Structure
 
-- `src/extension.ts` — extension activation and command registration
-- `src/commands/` — VS Code commands (explain, refactor, analyze)
-- `src/webview/` — Svelte app source code
-- `src/test/` — extension test runner and tests
-- `src/pi-agent-provider.ts` — webview provider, session lifecycle, model/settings sync
-- `dist/` — compiled extension output and built webview assets
-- `dist-tsc/` — output from tests/compiler
-- `docs/` — see [README.md](./README.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)
+- `src/extension.ts` — extension activation and command registration entry point
+- `src/pi-agent-provider.ts` — session lifecycle, webview bridge, settings sync, package/resource actions
+- `src/webview/` — Svelte app, components, styles, and browser-side types
+- `src/test/` — extension test runner plus unit and integration-style tests
+- `src/utils/` — shared utilities such as shell helpers
+- `media/` — extension icons, screenshots, and bundled voice binaries
+- `README.md` — product usage, setup, and high-level development notes
+- `CHANGELOG.md` — released changes
 
 ## Conventions
 
-- **Settings Sync**: Keep VS Code settings and PI TUI/CLI settings synchronized via `pi-agent-provider.ts`.
-- **Webview Isolation**: Keep webview-specific code strictly inside `src/webview/` (`tsconfig.webview.json`). Extension TS compilation excludes this.
-- **Webview Loading**: Assets load from `dist/webview/index.html`. Rebuild webview on UI asset changes.
-- **CSP & Assets**: `getWebviewContent()` rewrites Vite asset paths, strips `crossorigin`, and removes hardcoded CSP for VS Code compatibility.
-- **Package Manager**: Use `pnpm` exclusively. `pnpm-lock.yaml` is the source of truth. Do not use npm or yarn.
+- Keep VS Code settings and PI CLI/TUI settings synchronized through `src/pi-agent-provider.ts`.
+- Keep webview-only code inside `src/webview/`; extension TypeScript compilation excludes it via `tsconfig.webview.json`.
+- Webview assets are produced into `dist/webview/`; rebuild the webview after UI asset changes before packaging.
+- `getWebviewContent()` is responsible for VS Code-safe asset rewriting; do not weaken CSP or resource restrictions.
+- Use `pnpm` exclusively. Treat `pnpm-lock.yaml` as the source of truth.
 
 ## Git Workflow
 
-- No specific branch naming, commit convention, or PR process is documented.
-- Do not invent a workflow; follow the user's instructions and existing repository history if asked.
+- No branch naming, commit convention, or PR template is documented in-repo.
+- Follow the user's instructions and existing history instead of inventing a workflow.
 
 ## Boundaries
 
-- ✅ **Always**: Refactor files under `src/`, improve Svelte UI in `src/webview/`, add focused lint/test coverage to reduce risk.
-- ⚠️ **Ask first**: Change `package.json` contributions, add dependencies, alter packaging/publishing flow, or change the extension's public configuration surface.
-- 🚫 **Never**: Commit secrets, weaken webview resource restrictions, or bypass the settings sync with the PI TUI/CLI.
+- ✅ Always: Refactor files under `src/`, improve the Svelte UI under `src/webview/`, and add focused lint/test coverage when it meaningfully reduces risk.
+- ⚠️ Ask first: Change `package.json` contributions, add dependencies, alter packaging/publishing flow, or change the extension's public configuration surface.
+- 🚫 Never: Commit secrets, bypass PI settings sync, or weaken webview resource restrictions/CSP handling.
 
 ## Agent Platforms
 
-- **Universal instructions file**: `AGENTS.md` (this file).
-- No platform-specific instruction files detected (`.github/`, `.claude/`, `.cursor/`, `.windsurf/`).
+- Universal instructions file in use: `AGENTS.md`
+- No platform-specific instruction files detected under `.github/`, `.claude/`, `.cursor/`, or `.windsurf/`

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import * as fs from "node:fs/promises";
 
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -102,6 +103,14 @@ export class PiAgentProvider
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 	/** Resolved absolute path to pi binary, set at initialization. */
 	private resolvedBinaryPath: string | null = null;
+
+	/** Extension activity statuses forwarded from packages via ctx.ui.setStatus(). Cleared only when the extension explicitly clears them. */
+	private extensionStatuses = new Map<string, string>();
+	/** Interval handle for polling extension statuses from the runner. */
+	private statusPoller: ReturnType<typeof setInterval> | undefined;
+
+	/** Tracks whether auto-naming has been triggered for the current session. Reset on new/switch session. */
+	private _autoNamingTriggered = false;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -504,7 +513,84 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.session = session;
 		this.session.subscribe(this.handleSessionEvent.bind(this));
 
+		// Bind extension UI context so package setStatus(") calls reach the webview
+		this.bindExtensionUI();
+
 		return this.session;
+	}
+
+	/**
+	 * Auto-generate a descriptive session name from the first user/assistant exchange,
+	 * if the session doesn't already have a name.
+	 */
+	private autoGenerateSessionName(): void {
+		if (!this.session) return;
+		if (this.session.sessionName) return;
+
+		const messages = this.session.messages;
+		if (messages.length < 2) return;
+
+		const firstUserMsg = messages.find((m) => m.role === "user");
+		const firstAssistantMsg = messages.find((m) => m.role === "assistant");
+
+		if (!firstUserMsg) return;
+
+		const userText = extractTextFromMessage(firstUserMsg);
+		const assistantText = firstAssistantMsg
+			? extractTextFromMessage(firstAssistantMsg)
+			: "";
+
+		const name = generateSessionName(userText, assistantText);
+		if (name) {
+			this.logDebug("[PI] Auto-generated session name:", name);
+			this.session.setSessionName(name);
+		}
+	}
+
+	async deleteSessions(sessionIds: string[]) {
+		const cwd =
+			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		try {
+			const allSessions = await SessionManager.list(
+				cwd,
+				this.config.sessionDir,
+			);
+			await Promise.all(
+				sessionIds.map(async (sessionId) => {
+					try {
+						const targetSessionInfo = allSessions.find(
+							(s) => s.id === sessionId,
+						);
+						if (targetSessionInfo) {
+							await fs.unlink(targetSessionInfo.path);
+						}
+					} catch (error) {
+						this.logError(
+							`[PI] Failed to delete session ${sessionId}:`,
+							error,
+						);
+						throw error;
+					}
+				}),
+			);
+
+			if (
+				this.session &&
+				sessionIds.includes(this.session.sessionId)
+			) {
+				this.session.dispose();
+				this.session = undefined;
+				await this.newSession();
+			}
+
+			await this.refreshSessionList();
+		} catch (error) {
+			this.logError("[PI] Failed to delete sessions:", error);
+			vscode.window.showErrorMessage(
+				`Failed to delete sessions: ${String(error)}`,
+			);
+			throw error;
+		}
 	}
 
 	/** Build session options from VS Code configuration to match PI CLI behavior. */
@@ -584,7 +670,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async newSession() {
+		this._autoNamingTriggered = false;
 		// Dispose old session properly before creating a new one
+		this.stopStatusPoller();
+		this.extensionStatuses.clear();
+		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
 			this.session.dispose();
 			this.session = undefined as any;
@@ -703,6 +793,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async switchSession(sessionId: string) {
+		this._autoNamingTriggered = false;
 		// Find the session info from the list
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -711,6 +802,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!info) return;
 
 		// Dispose old session
+		this.stopStatusPoller();
+		this.extensionStatuses.clear();
+		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
 			this.session.dispose();
 			this.session = undefined;
@@ -1348,6 +1442,51 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				this.logError("[PI] sendSessionResources in event handler failed:", e),
 			);
 		}
+
+		// Auto-generate a session name on the first successful assistant response
+		if (
+			event.type === "agent_end" &&
+			!event.willRetry &&
+			!this._autoNamingTriggered
+		) {
+			this._autoNamingTriggered = true;
+			this.autoGenerateSessionName();
+		}
+
+		// Derive activity statuses from session events
+		if (event.type === "tool_execution_start") {
+			const toolName = event.toolName || "tool";
+			this.notifyWebview({
+				type: "activity-start",
+				data: { key: `tool:${event.toolCallId}`, text: `${toolName}`, activityType: "tool" },
+			});
+		} else if (event.type === "tool_execution_end") {
+			this.notifyWebview({
+				type: "activity-end",
+				data: { key: `tool:${event.toolCallId}` },
+			});
+		} else if (event.type === "compaction_start") {
+			this.notifyWebview({
+				type: "activity-start",
+				data: { key: "compaction", text: "Compacting context", activityType: "system" },
+			});
+		} else if (event.type === "compaction_end") {
+			this.notifyWebview({
+				type: "activity-end",
+				data: { key: "compaction" },
+			});
+		} else if (event.type === "auto_retry_start") {
+			const attempt = event.attempt || 1;
+			this.notifyWebview({
+				type: "activity-start",
+				data: { key: "retry", text: `Retry ${attempt}/${event.maxAttempts || "?"}`, activityType: "system" },
+			});
+		} else if (event.type === "auto_retry_end") {
+			this.notifyWebview({
+				type: "activity-end",
+				data: { key: "retry" },
+			});
+		}
 	}
 
 	/** Serialize AgentSession messages to webview-friendly format */
@@ -1362,6 +1501,120 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				type: "session-stats",
 				data: { tokens: stats.tokens },
 			});
+		}
+	}
+
+	/**
+	 * Bind a custom ExtensionUIContext to the session's extension runner
+	 * so that ctx.ui.setStatus() calls from packages are forwarded to the webview.
+	 */
+	private bindExtensionUI(): void {
+		if (!this.session) return;
+
+		try {
+			const runner = this.session.extensionRunner;
+			if (!runner) return;
+
+			// Create a UI context that forwards setStatus calls to the webview
+			runner.setUIContext({
+				select: async () => undefined,
+				confirm: async () => false,
+				input: async () => undefined,
+				notify: () => {},
+				onTerminalInput: () => () => {},
+				setStatus: (key: string, text: string | undefined) => {
+					if (text === undefined || text === null) {
+						this.extensionStatuses.delete(key);
+					} else {
+						this.extensionStatuses.set(key, text);
+					}
+					this.notifyWebview({
+						type: "extension-status",
+						data: { key, text: text ?? undefined },
+					});
+				},
+				setWorkingMessage: () => {},
+				setWorkingVisible: () => {},
+				setWorkingIndicator: () => {},
+				setHiddenThinkingLabel: () => {},
+				setWidget: () => {},
+				setFooter: () => {},
+				setHeader: () => {},
+				setTitle: () => {},
+				custom: async <T>() => undefined as unknown as T,
+				pasteToEditor: () => {},
+				setEditorText: () => {},
+				getEditorText: () => "",
+				editor: async () => undefined,
+				addAutocompleteProvider: () => {},
+				setEditorComponent: () => {},
+				getEditorComponent: () => undefined,
+				get theme() {
+					return undefined as unknown as import("@earendil-works/pi-coding-agent").ExtensionUIContext["theme"];
+				},
+				getAllThemes: () => [],
+				getTheme: () => undefined,
+				setTheme: () => ({ success: false, error: "UI not available" }),
+				getToolsExpanded: () => false,
+				setToolsExpanded: () => {},
+			});
+
+			this.logDebug("[PI] Bound extension UI context for setStatus forwarding");
+
+			// Also bind extensions with our UI context
+			this.session.bindExtensions({
+				uiContext: runner.getUIContext(),
+			}).catch((err: unknown) => {
+				this.logError("[PI] bindExtensions failed:", err);
+			});
+
+			// Start polling extension statuses as a fallback
+			this.startStatusPoller();
+		} catch (err) {
+			this.logError("[PI] Failed to bind extension UI context:", err);
+		}
+	}
+
+	/** Start polling extension statuses from the runner as a fallback/sync mechanism. */
+	private startStatusPoller(): void {
+		this.stopStatusPoller();
+		this.statusPoller = setInterval(() => {
+			this.pollExtensionStatuses();
+		}, 2000);
+	}
+
+	/** Stop the status poller. */
+	private stopStatusPoller(): void {
+		if (this.statusPoller !== undefined) {
+			clearInterval(this.statusPoller);
+			this.statusPoller = undefined;
+		}
+	}
+
+	/**
+	 * Poll the extension runner for all current extension statuses.
+	 * This syncs statuses in case setStatus was called before our UI context was attached
+	 * or by extensions that bypass the UI context.
+	 */
+	private pollExtensionStatuses(): void {
+		if (!this.session) return;
+
+		try {
+			const runner = this.session.extensionRunner;
+			if (!runner || !runner.hasUI()) return;
+
+			// The extension runner stores statuses via the FooterDataProvider.
+			// Since we can't access FooterDataProvider directly from the extension host,
+			// we rely on the setStatus forwarding from our UI context.
+			// This poller is a safety net — send the current full map.
+			if (this.extensionStatuses.size > 0) {
+				this.notifyWebview({
+					type: "extension-statuses-full",
+					data: Object.fromEntries(this.extensionStatuses),
+				});
+			}
+		} catch {
+			// Silently ignore — session may be disposed
 		}
 	}
 
@@ -1433,6 +1686,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				// Send loading end
 				this.notifyWebview({ type: "loading", data: { loading: false } });
 				if (code === 0) {
+					this.notifyWebview({ type: "packages-updated" });
 					resolve();
 				} else {
 					reject(new Error(output || `Command failed with code ${code}`));
@@ -1567,10 +1821,111 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	dispose() {
+		this.stopStatusPoller();
+		this.extensionStatuses.clear();
 		this._onDidChangeTreeData.dispose();
 		if (this.session) {
 			this.session.dispose();
 		}
 		this.voiceManager.dispose();
 	}
+}
+
+// ── Auto-naming helpers ──────────────────────────────────────────────────────
+
+/**
+ * Extract text content from an AgentMessage, handling both string content
+ * and structured content arrays (TextContent | ImageContent).
+ */
+export function extractTextFromMessage(msg: {
+	role: string;
+	content: string | Array<{ type: string; text?: string }> | null;
+}): string {
+	if (!msg.content) return "";
+	if (typeof msg.content === "string") return msg.content;
+	return msg.content
+		.filter((c): c is { type: string; text: string } => c.type === "text" && typeof c.text === "string")
+		.map((c) => c.text)
+		.join(" ");
+}
+
+/**
+ * Generate a concise, descriptive session name (≤60 chars) from the first
+ * user and assistant messages in a conversation.
+ *
+ * Prioritises the assistant's first substantive line because it tends to
+ * summarise the task more naturally. Falls back to the first user message.
+ */
+export function generateSessionName(userText: string, assistantText: string): string {
+	const clean = (text: string): string =>
+		text
+			.replace(/```[\s\S]*?```/g, "")
+			.replace(/`[^`]*`/g, "")
+			.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+			.replace(/^#+\s*/gm, "")
+			.replace(/[*_~>]/g, "")
+			.trim();
+
+	const capitalize = (s: string): string =>
+		s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+	const truncate = (s: string, max = 55): string => {
+		if (s.length <= max) return s;
+		const lastSpace = s.slice(0, max).lastIndexOf(" ");
+		const cut = lastSpace > 10 ? s.slice(0, lastSpace) : s.slice(0, max);
+		return capitalize(cut.trim());
+	};
+
+	const cleanAssistant = clean(assistantText);
+	const cleanUser = clean(userText);
+
+	// 1 — Try the assistant's first substantive line (best signal)
+	if (cleanAssistant) {
+		const lines = cleanAssistant
+			.split("\n")
+			.map((l) => l.trim())
+			.filter((l) => l.length > 5 && !l.startsWith("```"));
+
+		if (lines.length > 0) {
+			// Remove polite conversational prefixes
+			const stripped = lines[0].replace(
+				/^(I'?ll\s|Let me\s|I can\s|I will\s|I'm going to\s|Here's\s|Here is\s)/i,
+				"",
+			).trim();
+			const sentence = stripped.split(/[.!?\n]/)[0]?.trim() || stripped;
+			if (sentence.length > 3 && sentence.length < 60) {
+				return capitalize(sentence);
+			}
+			// Long sentence — take the first key phrase
+			const keyPhrase = truncate(sentence, 55);
+			if (keyPhrase.length < sentence.length) {
+				return keyPhrase + "…";
+			}
+			return keyPhrase;
+		}
+	}
+
+	// 2 — Fall back to the first user message
+	if (!cleanUser) return "";
+	if (cleanUser.length < 60) {
+		return capitalize(cleanUser);
+	}
+
+	// 3 — First sentence of user message
+	const firstSentence = cleanUser.split(/[.!?\n]/)[0]?.trim();
+	if (firstSentence) {
+		if (firstSentence.length < 60) {
+			return capitalize(firstSentence);
+		}
+		const truncated = truncate(firstSentence, 55);
+		return truncated.length < firstSentence.length
+			? truncated + "…"
+			: capitalize(truncated);
+	}
+
+	// 4 — Last resort: truncated user text
+	const truncated = truncate(cleanUser, 55);
+	return truncated.length < cleanUser.length
+		? truncated + "…"
+		: capitalize(truncated);
 }

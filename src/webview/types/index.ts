@@ -5,29 +5,33 @@ export interface ImageContent {
 	type: "image";
 	data: string;       // base64-encoded image data
 	mimeType: string;   // e.g. "image/png"
+	name?: string;
 }
 
-/** A tool call message displayed in the UI */
+export interface ToolCallResult {
+	content?: string;
+	details?: any;
+	isError?: boolean;
+}
+
 export interface ToolCallMessage {
-	tool: string;
+	toolCallId: string;
+	toolName: string;
 	args: Record<string, unknown>;
-	result?: string;
-	status: "running" | "success" | "error";
-	expandable: boolean;
-	expanded: boolean;
+	result?: ToolCallResult;
+	isError?: boolean;
+	status: "pending" | "streaming" | "complete";
 }
 
 /** A chat message in the webview */
 export interface Message {
-	id: string;
 	role: "user" | "assistant" | "system";
 	content: string;
 	thinking?: string;
 	images?: ImageContent[];
 	timestamp: number;
-	toolCalls?: ToolCallMessage[];
 	isStreaming?: boolean;
-	messageIndex?: number;
+	toolCalls?: ToolCallMessage[];
 }
 
 /** Model definition sent from extension to webview */

@@ -1,35 +1,5 @@
 <script lang="ts">
-  interface ImageContent {
-    type: "image";
-    data: string;
-    mimeType: string;
-    name?: string;
-  }
-
-  interface Message {
-    role: "user" | "assistant" | "system";
-    content: string;
-    thinking?: string;
-    timestamp: number;
-    images?: ImageContent[];
-    isStreaming?: boolean;
-    toolCalls?: ToolCallMessage[];
-  }
-
-  interface ToolCallMessage {
-    toolCallId: string;
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: ToolCallResult;
-    isError?: boolean;
-    status: "pending" | "streaming" | "complete";
-  }
-
-  interface ToolCallResult {
-    content?: string;
-    details?: any;
-    isError?: boolean;
-  }
+  import type { ImageContent, Message, ToolCallMessage } from "../types/index";
 
   interface CodeBlock {
     language: string;
@@ -63,11 +33,11 @@
     const date = new Date(timestamp);
     const now = Date.now();
     const diffMin = Math.floor((now - timestamp) / 60000);
-    if (diffMin < 1) return 'now';
+    if (diffMin < 1) return "now";
     if (diffMin < 60) return `${diffMin}m`;
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr < 24) return `${diffHr}h`;
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
   function toggleTool(toolCallId: string) {
@@ -129,26 +99,29 @@
 
   function formatArgValue(value: unknown): string {
     if (typeof value === "string") {
-      const display = value.length > 60 ? value.slice(0, 57) + '...' : value;
+      const display = value.length > 60 ? value.slice(0, 57) + "..." : value;
       return `"${display}"`;
     }
     if (typeof value === "number") return String(value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (Array.isArray(value)) return `[${value.length}]`;
-    if (value && typeof value === "object") return `{${Object.keys(value).length}}`;
+    if (value && typeof value === "object")
+      return `{${Object.keys(value).length}}`;
     return String(value);
   }
 
   const toolIconPaths: Record<string, string> = {
-    read: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6',
-    edit: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.12 2.12 0 0 1 3 3L12 16l-4 1 1-4z',
-    write: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6',
-    bash: 'M4 6h16M4 12h16M4 18h12',
-    grep: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
-    find: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
-    ls: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
+    read: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6",
+    edit: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.12 2.12 0 0 1 3 3L12 16l-4 1 1-4z",
+    write:
+      "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6",
+    bash: "M4 6h16M4 12h16M4 18h12",
+    grep: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    find: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    ls: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
   };
-  const defaultToolIconPath = 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z';
+  const defaultToolIconPath =
+    "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z";
 
   function escapeHtml(text: string): string {
     return text
@@ -186,33 +159,39 @@
       let headerMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
         const level = headerMatch[1].length;
-        htmlParts.push(`<h${level} class="md-h">${renderInline(headerMatch[2])}</h${level}>`);
+        htmlParts.push(
+          `<h${level} class="md-h">${renderInline(headerMatch[2])}</h${level}>`,
+        );
         continue;
       }
 
       // Blockquote
-      if (trimmed.startsWith('> ')) {
-        const lines = trimmed.split('\n');
-        const quoteText = lines.map(l => l.replace(/^> ?/, '')).join('<br>');
-        htmlParts.push(`<blockquote class="md-quote">${renderInline(quoteText)}</blockquote>`);
+      if (trimmed.startsWith("> ")) {
+        const lines = trimmed.split("\n");
+        const quoteText = lines.map((l) => l.replace(/^> ?/, "")).join("<br>");
+        htmlParts.push(
+          `<blockquote class="md-quote">${renderInline(quoteText)}</blockquote>`,
+        );
         continue;
       }
 
       // Unordered list
       if (/^[-*+]\s/.test(trimmed)) {
-        const items = trimmed.split('\n')
-          .filter(l => /^[-*+]\s/.test(l))
-          .map(l => `<li>${renderInline(l.replace(/^[-*+]\s+/, ''))}</li>`);
-        htmlParts.push(`<ul class="md-ul">${items.join('')}</ul>`);
+        const items = trimmed
+          .split("\n")
+          .filter((l) => /^[-*+]\s/.test(l))
+          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""))}</li>`);
+        htmlParts.push(`<ul class="md-ul">${items.join("")}</ul>`);
         continue;
       }
 
       // Ordered list
       if (/^\d+\.\s/.test(trimmed)) {
-        const items = trimmed.split('\n')
-          .filter(l => /^\d+\.\s/.test(l))
-          .map(l => `<li>${renderInline(l.replace(/^\d+\.\s+/, ''))}</li>`);
-        htmlParts.push(`<ol class="md-ol">${items.join('')}</ol>`);
+        const items = trimmed
+          .split("\n")
+          .filter((l) => /^\d+\.\s/.test(l))
+          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""))}</li>`);
+        htmlParts.push(`<ol class="md-ol">${items.join("")}</ol>`);
         continue;
       }
 
@@ -220,9 +199,12 @@
       htmlParts.push(`<p class="md-p">${renderInline(trimmed)}</p>`);
     }
 
-    let html = htmlParts.join('');
+    let html = htmlParts.join("");
     // Restore code blocks
-    html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i)] || '');
+    html = html.replace(
+      /\x00CODE(\d+)\x00/g,
+      (_, i) => codeBlocks[parseInt(i)] || "",
+    );
     return html;
   }
 
@@ -233,15 +215,18 @@
     // Inline code (backticks) — must process before bold/italic
     html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
     // Bold + italic
-    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
     // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     // Italic
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
     // Links [text](url)
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>');
+    html = html.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>',
+    );
     // Line breaks (single newlines within paragraphs)
-    html = html.replace(/\n/g, '<br>');
+    html = html.replace(/\n/g, "<br>");
     return html;
   }
 
@@ -398,17 +383,35 @@
       {#each message.toolCalls as toolCall}
         <div class="tool-call {toolCall.isError ? 'tool-error' : ''}">
           <div class="tool-header">
-          <span class="tool-icon">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d={toolIconPaths[toolCall.toolName] || defaultToolIconPath} />
-            </svg>
-          </span>
+            <span class="tool-icon">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d={toolIconPaths[toolCall.toolName] || defaultToolIconPath}
+                />
+              </svg>
+            </span>
             <span class="tool-name">{toolCall.toolName}</span>
             <span class="tool-args">{formatToolArgs(toolCall.args)}</span>
-            <span class="tool-status" class:done={toolCall.status === "complete" && !toolCall.isError} class:error={toolCall.isError} class:running={toolCall.status !== "complete"}
+            <span
+              class="tool-status"
+              class:done={toolCall.status === "complete" && !toolCall.isError}
+              class:error={toolCall.isError}
+              class:running={toolCall.status !== "complete"}
               >{toolCall.status === "complete"
-                ? toolCall.isError ? 'failed' : 'done'
-                : 'running'}</span>
+                ? toolCall.isError
+                  ? "failed"
+                  : "done"
+                : "running"}</span
+            >
             {#if toolCall.status === "complete"}
               <button
                 class="tool-toggle"
@@ -441,15 +444,68 @@
         </div>
       {/each}
     {:else if message.role === "system"}
-      <div class="system-box" class:is-error={message.content.startsWith('❌')} class:is-warning={message.content.startsWith('⚠')} class:is-success={message.content.startsWith('✅')}>
-        {#if message.content.startsWith('❌')}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-        {:else if message.content.startsWith('⚠')}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-warning)" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        {:else if message.content.startsWith('✅')}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      <div
+        class="system-box"
+        class:is-error={message.content.startsWith("❌")}
+        class:is-warning={message.content.startsWith("⚠")}
+        class:is-success={message.content.startsWith("✅")}
+      >
+        {#if message.content.startsWith("❌")}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-error)"
+            stroke-width="2.5"
+            ><circle cx="12" cy="12" r="10" /><line
+              x1="15"
+              y1="9"
+              x2="9"
+              y2="15"
+            /><line x1="9" y1="9" x2="15" y2="15" /></svg
+          >
+        {:else if message.content.startsWith("⚠")}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-warning)"
+            stroke-width="2.5"
+            ><path
+              d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+            /><line x1="12" y1="9" x2="12" y2="13" /><line
+              x1="12"
+              y1="17"
+              x2="12.01"
+              y2="17"
+            /></svg
+          >
+        {:else if message.content.startsWith("✅")}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-success)"
+            stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
+          >
         {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            ><circle cx="12" cy="12" r="10" /><line
+              x1="12"
+              y1="8"
+              x2="12"
+              y2="12"
+            /><line x1="12" y1="16" x2="12.01" y2="16" /></svg
+          >
         {/if}
         <span>{message.content}</span>
       </div>
@@ -504,8 +560,15 @@
           {#if message.images && message.images.length > 0}
             <div class="message-images">
               {#each message.images as img}
-                <button class="image-thumb-btn" onclick={() => openLightbox(getImageDataUrl(img))}>
-                  <img src={getImageDataUrl(img)} alt={img.name || 'Attached image'} class="message-image-thumb" />
+                <button
+                  class="image-thumb-btn"
+                  onclick={() => openLightbox(getImageDataUrl(img))}
+                >
+                  <img
+                    src={getImageDataUrl(img)}
+                    alt={img.name || "Attached image"}
+                    class="message-image-thumb"
+                  />
                 </button>
               {/each}
             </div>
@@ -521,7 +584,8 @@
             {:else}
               <div class="code-block-wrapper">
                 <span class="code-lang">{part.language}</span>
-                <pre class="language-{part.language}"><code>{part.code}</code></pre>
+                <pre class="language-{part.language}"><code>{part.code}</code
+                  ></pre>
               </div>
             {/if}
           {/each}
@@ -537,11 +601,30 @@
 <!-- Lightbox overlay -->
 {#if lightboxImage}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Image preview" tabindex="0" onclick={closeLightbox} onkeydown={(e) => e.key === 'Escape' && closeLightbox()}>
-    <button class="lightbox-close" onclick={closeLightbox} aria-label="Close image preview">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="18" y1="6" x2="6" y2="18"/>
-        <line x1="6" y1="6" x2="18" y2="18"/>
+  <div
+    class="lightbox-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Image preview"
+    tabindex="0"
+    onclick={closeLightbox}
+    onkeydown={(e) => e.key === "Escape" && closeLightbox()}
+  >
+    <button
+      class="lightbox-close"
+      onclick={closeLightbox}
+      aria-label="Close image preview"
+    >
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     </button>
     <img src={lightboxImage} alt="Full-size preview" class="lightbox-image" />
@@ -550,22 +633,28 @@
 
 <style>
   .message-bubble {
-    max-width: 90%;
+    max-width: 95%;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
-    animation: msg-slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
+    border-left: 2px solid transparent;
   }
 
-  @keyframes msg-slide-up {
-    from { opacity: 0; transform: translateY(12px) scale(0.985); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+  .user {
+    align-self: flex-end;
+    border-right: 4px solid var(--color-primary);
+    border-left: none;
   }
-
-  .user    { align-self: flex-end; }
-  .assistant { align-self: flex-start; }
-  .system  { align-self: center; width: 100%; max-width: 100%; }
+  .assistant {
+    align-self: flex-start;
+    border-left: 4px solid var(--color-border);
+  }
+  .system {
+    align-self: center;
+    width: 100%;
+    max-width: 100%;
+  }
 
   /* ── Images in messages ────────────────────── */
   .message-images {
@@ -580,23 +669,24 @@
     background: none;
     padding: 0;
     cursor: pointer;
-    border-radius: var(--radius-md);
+    border-radius: 0;
     overflow: hidden;
     transition: transform var(--transition-fast);
   }
 
   .image-thumb-btn:hover {
-    transform: scale(1.03);
+    transform: translate(-2px, -2px);
+    box-shadow: 2px 2px 0px var(--color-primary);
   }
 
   .message-image-thumb {
     display: block;
     max-width: 200px;
     max-height: 200px;
-    border-radius: var(--radius-md);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.25);
+    border-radius: 0;
+    border: 2px solid var(--color-border);
     object-fit: contain;
-    background: oklch(0% 0 0 / 0.05);
+    background: var(--color-bg);
   }
 
   /* ── Lightbox ───────────────────────────────── */
@@ -607,15 +697,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: oklch(0% 0 0 / 0.85);
-    backdrop-filter: blur(8px);
+    background: rgba(9, 9, 11, 0.9);
     cursor: zoom-out;
-    animation: lightbox-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes lightbox-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
   }
 
   .lightbox-close {
@@ -627,23 +710,26 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: oklch(0% 0 0 / 0.4);
-    border-radius: var(--radius-full);
-    color: white;
+    background: var(--color-surface);
+    border: 2px solid var(--color-border);
+    border-radius: 0;
+    color: var(--color-text);
     cursor: pointer;
     transition: background var(--transition-fast);
   }
 
   .lightbox-close:hover {
-    background: oklch(0% 0 0 / 0.6);
+    background: var(--color-primary);
+    color: var(--color-text-inverse);
   }
 
   .lightbox-image {
     max-width: 90vw;
     max-height: 90vh;
     object-fit: contain;
-    border-radius: var(--radius-md);
-    box-shadow: 0 20px 60px oklch(0% 0 0 / 0.5);
+    border-radius: 0;
+    box-shadow: var(--shadow-lg);
+    border: 2px solid var(--color-border);
   }
 
   /* ── Header ─────────────────────────────────── */
@@ -652,10 +738,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--space-1);
-    opacity: 0.5;
-    transition: opacity var(--transition-interactive);
+    opacity: 0.8;
   }
-  .message-bubble:hover .message-header { opacity: 1; }
 
   .message-meta {
     display: flex;
@@ -664,43 +748,46 @@
   }
 
   .role-icon {
-    width: 22px;
-    height: 22px;
-    border-radius: var(--radius-md);
+    width: 24px;
+    height: 24px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--color-primary);
-    background: var(--accent-glow);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
   }
   .user .role-icon {
-    background: oklch(from var(--color-text-inverse) l c h / 0.18);
+    background: var(--color-primary);
     color: var(--color-text-inverse);
+    border-color: var(--color-primary);
   }
   .system .role-icon {
     background: transparent;
     color: var(--color-text-muted);
+    border: none;
   }
 
   .role-name {
-    font-size: 9px;
+    font-family: var(--font-display);
+    font-size: 10px;
     font-weight: 800;
-    text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--color-text-muted);
   }
 
   .message-time {
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--color-text-muted);
     font-weight: 500;
-    font-variant-numeric: tabular-nums;
   }
 
   /* ── Content bubble ─────────────────────────── */
   .message-content {
     padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-lg);
+    border-radius: 0;
     font-size: var(--text-base);
     line-height: 1.65;
     position: relative;
@@ -708,21 +795,20 @@
   }
 
   .user .message-content {
-    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-active));
-    color: var(--color-text-inverse);
-    border-bottom-right-radius: var(--radius-sm);
-    box-shadow: 0 4px 18px oklch(from var(--color-primary) l c h / 0.28);
+    background: var(--color-surface-2);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
   }
 
   .assistant .message-content {
     background: var(--color-surface);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.35);
-    border-left: 3px solid var(--color-primary);
-    border-bottom-left-radius: var(--radius-sm);
-    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border);
+    box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
   }
   .assistant.streaming .message-content {
-    border-left-color: oklch(from var(--color-primary) l c h / 0.45);
+    border-color: var(--color-primary);
+    box-shadow: 4px 4px 0px var(--color-primary);
   }
 
   /* ── System message ─────────────────────────── */
@@ -731,46 +817,42 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-full);
-    background: oklch(from var(--color-surface-2) l c h / 0.5);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.25);
+    border-radius: 0;
+    background: var(--color-surface-2);
+    border: 1px dashed var(--color-border);
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-text-muted);
     width: fit-content;
     margin: 0 auto;
     line-height: 1.5;
-    transition: all var(--transition-fast);
   }
   .system-box.is-error {
-    background: oklch(from var(--color-error) l c h / 0.08);
-    border-color: oklch(from var(--color-error) l c h / 0.25);
+    background: rgba(239, 68, 68, 0.1);
+    border-color: var(--color-error);
     color: var(--color-error);
   }
   .system-box.is-warning {
-    background: oklch(from var(--color-warning) l c h / 0.08);
-    border-color: oklch(from var(--color-warning) l c h / 0.25);
+    background: rgba(234, 179, 8, 0.1);
+    border-color: var(--color-warning);
     color: var(--color-warning);
   }
   .system-box.is-success {
-    background: oklch(from var(--color-success) l c h / 0.08);
-    border-color: oklch(from var(--color-success) l c h / 0.25);
+    background: rgba(34, 197, 94, 0.1);
+    border-color: var(--color-success);
     color: var(--color-success);
   }
 
   /* ── Tool calls ─────────────────────────────── */
   .tool-call {
-    background: oklch(from var(--color-bg) l c h / 0.5);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.2);
-    border-radius: var(--radius-md);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 0;
     overflow: hidden;
     margin: var(--space-2) 0;
-    transition: border-color var(--transition-fast);
   }
-  .tool-call:hover { border-color: oklch(from var(--color-primary) l c h / 0.3); }
   .tool-call.tool-error {
-    border-color: oklch(from var(--color-error) l c h / 0.35);
-    background: oklch(from var(--color-error) l c h / 0.04);
+    border-color: var(--color-error);
   }
 
   .tool-header {
@@ -778,22 +860,19 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
-    background: oklch(from var(--color-surface-2) l c h / 0.3);
+    background: var(--color-surface-2);
+    font-family: var(--font-display);
     font-size: var(--text-xs);
     font-weight: 600;
     cursor: default;
     user-select: none;
-    transition: background var(--transition-fast);
-  }
-  .tool-call:not(.tool-error) .tool-header:hover {
-    background: oklch(from var(--color-primary) l c h / 0.06);
+    border-bottom: 1px solid var(--color-border);
   }
 
   .tool-icon {
     display: flex;
     align-items: center;
     color: var(--color-primary);
-    opacity: 0.85;
     flex-shrink: 0;
   }
 
@@ -802,7 +881,6 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-weight: 700;
-    letter-spacing: 0.02em;
   }
 
   .tool-args {
@@ -818,46 +896,53 @@
 
   .tool-status {
     flex-shrink: 0;
+    font-family: var(--font-display);
     font-size: 9px;
     font-weight: 700;
-    text-transform: uppercase;
     letter-spacing: 0.06em;
     padding: 2px 7px;
-    border-radius: var(--radius-full);
-    background: oklch(from var(--color-text-muted) l c h / 0.12);
+    background: var(--color-surface);
     color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
   }
   .tool-status.done {
-    background: oklch(from var(--color-success) l c h / 0.15);
+    background: rgba(34, 197, 94, 0.2);
     color: var(--color-success);
+    border-color: var(--color-success);
   }
   .tool-status.error {
-    background: oklch(from var(--color-error) l c h / 0.15);
+    background: rgba(239, 68, 68, 0.2);
     color: var(--color-error);
+    border-color: var(--color-error);
   }
   .tool-status.running {
-    background: oklch(from var(--color-primary) l c h / 0.15);
-    color: var(--color-primary);
-    animation: status-pulse 1.8s ease-in-out infinite;
-  }
-  @keyframes status-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
+    background: var(--color-primary);
+    color: var(--color-text-inverse);
+    border-color: var(--color-primary);
   }
 
   .tool-toggle {
     padding: 3px;
     color: var(--color-text-muted);
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     flex-shrink: 0;
+    background: transparent;
+    border: none;
   }
-  .tool-toggle:hover { color: var(--color-primary); background: var(--accent-glow); }
-  .tool-toggle :global(svg) { transition: transform var(--transition-bounce); }
-  .tool-toggle .rotated { transform: rotate(180deg); }
+  .tool-toggle:hover {
+    color: var(--color-primary);
+    background: var(--color-surface);
+  }
+  .tool-toggle :global(svg) {
+    transition: transform var(--transition-fast);
+  }
+  .tool-toggle .rotated {
+    transform: rotate(180deg);
+  }
 
   .tool-body {
     padding: var(--space-2) var(--space-3);
-    border-top: 1px solid oklch(from var(--color-border) l c h / 0.15);
+    background: var(--color-bg);
   }
 
   .tool-pending {
@@ -867,9 +952,10 @@
     padding: var(--space-2) 0;
   }
   .tool-loading {
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--color-text-muted);
-    font-style: italic;
+    text-transform: uppercase;
   }
 
   /* Tool result sections */
@@ -877,9 +963,9 @@
   .read-content,
   .edit-diff,
   .bash-output {
-    background: oklch(from var(--color-bg) l c h / 0.6);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.18);
-    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 0;
     padding: var(--space-2) var(--space-3);
     margin: 0;
     overflow-x: auto;
@@ -889,15 +975,39 @@
     color: var(--color-text);
   }
 
-  .read-entry      { margin-bottom: var(--space-2); }
-  .read-entry:last-child { margin-bottom: 0; }
-  .read-header     { font-size: 11px; color: var(--color-text-muted); margin-bottom: var(--space-1); font-weight: 600; }
-  .read-content    { max-height: 220px; overflow-y: auto; }
-  .edit-diff       { margin-top: var(--space-1); }
-  .bash-output     { color: var(--color-success); }
-  .bash-error      { color: var(--color-error); }
+  .read-entry {
+    margin-bottom: var(--space-2);
+  }
+  .read-entry:last-child {
+    margin-bottom: 0;
+  }
+  .read-header {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-1);
+    font-weight: 600;
+  }
+  .read-content {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .edit-diff {
+    margin-top: var(--space-1);
+  }
+  .bash-output {
+    color: var(--color-success);
+  }
+  .bash-error {
+    color: var(--color-error);
+  }
 
-  .edit-file, .grep-file, .read-file, .find-file, .ls-file, .write-status {
+  .edit-file,
+  .grep-file,
+  .read-file,
+  .find-file,
+  .ls-file,
+  .write-status {
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
@@ -906,15 +1016,15 @@
 
   /* ── Thinking section ───────────────────────── */
   .thought-container {
-    background: oklch(from var(--color-primary) l c h / 0.04);
-    border: 1px solid oklch(from var(--color-primary) l c h / 0.1);
-    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    border: 1px dashed var(--color-border);
+    border-radius: 0;
     overflow: hidden;
     margin-bottom: var(--space-3);
-    transition: all var(--transition-interactive);
+    transition: all var(--transition-fast);
   }
   .thought-container.expanded {
-    border-color: oklch(from var(--color-primary) l c h / 0.2);
+    border: 1px solid var(--color-border);
   }
 
   .thought-toggle {
@@ -923,11 +1033,19 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--space-2) var(--space-3);
-    color: var(--color-primary);
+    color: var(--color-text-muted);
     cursor: pointer;
-    transition: background var(--transition-fast);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
   }
-  .thought-toggle:hover { background: oklch(from var(--color-primary) l c h / 0.04); }
+  .thought-container.expanded .thought-toggle {
+    border-bottom-color: var(--color-border);
+  }
+  .thought-toggle:hover {
+    color: var(--color-text);
+    background: var(--color-surface);
+  }
 
   .thought-header {
     display: flex;
@@ -935,24 +1053,22 @@
     gap: var(--space-2);
   }
   .thought-label {
+    font-family: var(--font-display);
     font-size: 10px;
     font-weight: 700;
-    text-transform: uppercase;
     letter-spacing: 0.04em;
   }
   .thought-container .chevron {
-    transition: transform var(--transition-bounce);
-    opacity: 0.6;
+    transition: transform var(--transition-fast);
   }
   .thought-container.expanded .chevron {
     transform: rotate(180deg);
-    opacity: 1;
   }
   .thought-content {
     padding: var(--space-3);
     font-size: var(--text-sm);
     color: var(--color-text-muted);
-    border-top: 1px solid oklch(from var(--color-primary) l c h / 0.1);
+    background: var(--color-bg);
     font-family: var(--font-mono);
     line-height: 1.6;
     max-height: 240px;
@@ -967,29 +1083,28 @@
   .code-block-wrapper {
     position: relative;
     margin: var(--space-3) 0;
-    border-radius: var(--radius-md);
+    border-radius: 0;
     overflow: hidden;
-    border: 1px solid oklch(from var(--color-border) l c h / 0.2);
+    border: 1px solid var(--color-border);
   }
   .code-lang {
     position: absolute;
     top: 0;
     right: 0;
     padding: 2px 8px;
+    font-family: var(--font-display);
     font-size: 9px;
     font-weight: 700;
-    text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--color-text-muted);
-    background: oklch(from var(--color-surface-2) l c h / 0.7);
-    border-bottom-left-radius: var(--radius-sm);
-    border-left: 1px solid oklch(from var(--color-border) l c h / 0.2);
-    border-bottom: 1px solid oklch(from var(--color-border) l c h / 0.2);
+    background: var(--color-surface);
+    border-left: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
     z-index: 1;
   }
 
   :global(.message-content pre) {
-    background: oklch(from var(--color-bg) l c h / 0.55);
+    background: var(--color-bg);
     border: none;
     border-radius: 0;
     padding: var(--space-3) var(--space-4);
@@ -1020,8 +1135,15 @@
     animation: cursor-blink 1s ease-in-out infinite;
   }
   @keyframes cursor-blink {
-    0%, 100% { opacity: 1;  transform: scaleY(1); }
-    50%      { opacity: 0.2; transform: scaleY(0.3); }
+    0%,
+    100% {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+    50% {
+      opacity: 0.2;
+      transform: scaleY(0.3);
+    }
   }
 
   /* ── Mermaid diagrams ───────────────────────── */
@@ -1053,18 +1175,34 @@
     margin: 1em 0 0.4em;
     color: var(--color-text);
   }
-  :global(.md-h:first-child) { margin-top: 0; }
-  :global(h1.md-h) { font-size: 1.35em; }
-  :global(h2.md-h) { font-size: 1.2em; border-bottom: 1px solid oklch(from var(--color-border) l c h / 0.3); padding-bottom: 0.25em; }
-  :global(h3.md-h) { font-size: 1.1em; }
-  :global(h4.md-h) { font-size: 1.05em; }
+  :global(.md-h:first-child) {
+    margin-top: 0;
+  }
+  :global(h1.md-h) {
+    font-size: 1.35em;
+  }
+  :global(h2.md-h) {
+    font-size: 1.2em;
+    border-bottom: 1px solid oklch(from var(--color-border) l c h / 0.3);
+    padding-bottom: 0.25em;
+  }
+  :global(h3.md-h) {
+    font-size: 1.1em;
+  }
+  :global(h4.md-h) {
+    font-size: 1.05em;
+  }
 
   :global(.md-p) {
     margin: 0.5em 0;
     line-height: 1.65;
   }
-  :global(.md-p:first-child) { margin-top: 0; }
-  :global(.md-p:last-child) { margin-bottom: 0; }
+  :global(.md-p:first-child) {
+    margin-top: 0;
+  }
+  :global(.md-p:last-child) {
+    margin-bottom: 0;
+  }
 
   :global(.md-ul),
   :global(.md-ol) {
@@ -1076,8 +1214,12 @@
   :global(.md-ol li) {
     margin: 0.15em 0;
   }
-  :global(.md-ul) { list-style: disc; }
-  :global(.md-ol) { list-style: decimal; }
+  :global(.md-ul) {
+    list-style: disc;
+  }
+  :global(.md-ol) {
+    list-style: decimal;
+  }
 
   :global(.md-quote) {
     margin: 0.5em 0;

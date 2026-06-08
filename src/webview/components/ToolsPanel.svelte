@@ -5,21 +5,8 @@
 		name: string;
 		description: string;
 		enabled: boolean;
-		category: 'builtin' | 'extension' | 'skill';
+		category: 'builtin';
 		source?: string;
-	}
-
-	interface ExtensionDef {
-		name: string;
-		description: string;
-		path: string;
-		enabled: boolean;
-	}
-
-	interface SkillDef {
-		name: string;
-		description?: string;
-		enabled: boolean;
 	}
 
 	// Default tools available in PI
@@ -34,41 +21,12 @@
 	];
 
 	let tools = $state<ToolDef[]>([...defaultTools]);
-	let extensions = $state<ExtensionDef[]>([]);
-	let skills = $state<SkillDef[]>([]);
-	let activeTab = $state<'tools' | 'extensions' | 'skills' | 'presets'>('tools');
+	let activeTab = $state<'tools' | 'presets'>('tools');
 	let toolPreset = $state<string>('default');
 	let customToolsInput = $state('');
 	let isSynced = $state(false);
 
-	// Listen for session resources from extension
-	$effect(() => {
-		function handleMessage(event: MessageEvent) {
-			const { type, data } = event.data;
-			if (type === 'session-resources' && data) {
-				// Update extensions from real session resources
-				if (data.extensions) {
-					extensions = data.extensions.map((e: any) => ({
-						name: e.sourceInfo?.name || e.path.split('/').pop() || e.path,
-						description: `Extension at ${e.path}`,
-						path: e.path,
-						enabled: true,
-					}));
-				}
-				// Update skills from real session resources
-				if (data.skills) {
-					skills = data.skills.map((s: any) => ({
-						name: s.name,
-						description: s.description,
-						enabled: true,
-					}));
-				}
-				isSynced = true;
-			}
-		}
-		window.addEventListener('message', handleMessage);
-		return () => window.removeEventListener('message', handleMessage);
-	});
+
 
 	onMount(() => {
 		// Request session resources to sync
@@ -99,16 +57,6 @@
 		tools[index].enabled = !tools[index].enabled;
 		tools = [...tools];
 		notifyToolChange();
-	}
-
-	function toggleExtension(index: number) {
-		extensions[index].enabled = !extensions[index].enabled;
-		extensions = [...extensions];
-	}
-
-	function toggleSkill(index: number) {
-		skills[index].enabled = !skills[index].enabled;
-		skills = [...skills];
 	}
 
 	function notifyToolChange() {
@@ -167,14 +115,7 @@
 	const enabledCount = $derived(tools.filter(t => t.enabled).length);
 	const totalCount = $derived(tools.length);
 
-	function getCategoryLabel(cat: string): string {
-		switch (cat) {
-			case 'builtin': return 'Built-in';
-			case 'extension': return 'Extension';
-			case 'skill': return 'Skill';
-			default: return cat;
-		}
-	}
+
 </script>
 
 <div class="tools-panel">
@@ -194,12 +135,6 @@
 		<button class="tab-btn" class:active={activeTab === 'tools'} onclick={() => (activeTab = 'tools')}>
 			Tools ({enabledCount}/{totalCount})
 		</button>
-		<button class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => (activeTab = 'extensions')}>
-			Extensions ({extensions.length})
-		</button>
-		<button class="tab-btn" class:active={activeTab === 'skills'} onclick={() => (activeTab = 'skills')}>
-			Skills ({skills.length})
-		</button>
 		<button class="tab-btn" class:active={activeTab === 'presets'} onclick={() => (activeTab = 'presets')}>
 			Presets
 		</button>
@@ -216,7 +151,7 @@
 							<div class="tool-info">
 								<span class="tool-name">{tool.name}</span>
 								<span class="tool-description">{tool.description}</span>
-								<span class="tool-category">{getCategoryLabel(tool.category)}</span>
+				
 							</div>
 							<label class="toggle">
 								<input type="checkbox" checked={tool.enabled} onchange={() => toggleTool(index)} />
@@ -266,64 +201,6 @@
 					/>
 					<button class="add-btn" onclick={addCustomTool} disabled={!customToolsInput.trim()}>Add</button>
 				</div>
-			</section>
-
-		{:else if activeTab === 'extensions'}
-			<section class="tools-section">
-				<p class="section-description">PI extensions loaded in the active session</p>
-				{#if extensions.length === 0}
-					<div class="empty-state">
-						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-							<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-						</svg>
-						<span>No extensions loaded in this session</span>
-					</div>
-				{:else}
-					<div class="tools-list">
-						{#each extensions as ext, i}
-							<div class="tool-item">
-								<div class="tool-info">
-									<span class="tool-name">{ext.name}</span>
-									<span class="tool-description">{ext.description}</span>
-								</div>
-								<label class="toggle">
-									<input type="checkbox" checked={ext.enabled} onchange={() => toggleExtension(i)} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</section>
-
-		{:else if activeTab === 'skills'}
-			<section class="tools-section">
-				<p class="section-description">Skills available in the active session</p>
-				{#if skills.length === 0}
-					<div class="empty-state">
-						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-						</svg>
-						<span>No skills loaded in this session</span>
-					</div>
-				{:else}
-					<div class="tools-list">
-						{#each skills as skill, i}
-							<div class="tool-item">
-								<div class="tool-info">
-									<span class="tool-name">{skill.name}</span>
-									{#if skill.description}
-										<span class="tool-description">{skill.description}</span>
-									{/if}
-								</div>
-								<label class="toggle">
-									<input type="checkbox" checked={skill.enabled} onchange={() => toggleSkill(i)} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-						{/each}
-					</div>
-				{/if}
 			</section>
 
 		{:else if activeTab === 'presets'}
@@ -672,4 +549,6 @@
 		opacity: 0.6;
 		font-family: var(--font-mono);
 	}
+
+
 </style>

@@ -111,16 +111,6 @@ export function registerCommands(
 		),
 	);
 
-	// Fork Session command
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.forkSession",
-			async (nodeId?: string) => {
-				await provider.forkSession(nodeId);
-			},
-		),
-	);
-
 	// Navigate To Session command
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
@@ -256,6 +246,33 @@ export function registerCommands(
 			await focusSidebar();
 			provider.notifyWebviewFromCommand("manage-resources", {});
 		}),
+	);
+
+	// Delete Sessions command
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			"pi-agent.deleteSessions",
+			async (sessionIds?: string[]) => {
+				if (!sessionIds || sessionIds.length === 0) {
+					vscode.window.showInformationMessage(
+						"Select sessions to delete from the history panel.",
+					);
+					return;
+				}
+				const selection = await vscode.window.showInformationMessage(
+					`Delete ${sessionIds.length} session${sessionIds.length === 1 ? "" : "s"}? This cannot be undone.`,
+					{ modal: true },
+					"Cancel",
+					"Delete",
+				);
+				const confirmed = selection === "Delete";
+				if (!confirmed) return;
+				await provider.deleteSessions(sessionIds);
+				vscode.window.showInformationMessage(
+					`Deleted ${sessionIds.length} session${sessionIds.length === 1 ? "" : "s"}.`,
+				);
+			},
+		),
 	);
 
 	// Check for Updates command

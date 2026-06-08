@@ -1,75 +1,73 @@
 :root {
-  /* VS Code Derived Tokens */
-  --color-bg: var(--vscode-sideBar-background, #1e1e1e);
-  --color-surface: var(--vscode-editor-background, #252526);
-  --color-surface-2: var(--vscode-input-background, #3c3c3c);
-  --color-text: var(--vscode-foreground, #cccccc);
-  --color-text-muted: var(--vscode-descriptionForeground, #858585);
-  --color-text-inverse: var(--vscode-editor-background, #ffffff);
-  --color-border: var(--vscode-widget-border, #454545);
-  --color-divider: var(--vscode-widget-border, #454545);
-  --color-primary: var(--vscode-activityBarBadge-background, #007acc);
-  --color-primary-hover: var(--vscode-button-hoverBackground, #005a9e);
-  --color-primary-active: var(--vscode-button-background, #004275);
-  --color-error: var(--vscode-errorForeground, #f14c4c);
-  --color-success: var(--vscode-terminal-ansiGreen, #4ec9b0);
-  --color-warning: var(--vscode-terminal-ansiYellow, #cca700);
+  /* Industrial / Utilitarian Aesthetic */
+  --color-bg: #09090b;
+  --color-surface: #18181b;
+  --color-surface-2: #27272a;
+  --color-text: #e4e4e7;
+  --color-text-muted: #a1a1aa;
+  --color-text-inverse: #09090b;
+  --color-border: #3f3f46;
+  --color-divider: #3f3f46;
+  
+  /* Acid Green Accent */
+  --color-primary: #bef264;
+  --color-primary-hover: #d9f99d;
+  --color-primary-active: #a3e635;
+  
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
 
-  /* Enhanced Design Tokens using OKLCH for Sleek Modern Aesthetic */
-  --glass-bg: oklch(from var(--color-surface) l c h / 0.6);
-  --glass-border: oklch(from var(--color-border) l c h / 0.4);
-  --accent-glow: oklch(from var(--color-primary) l c h / 0.12);
-  --surface-tint: color-mix(
-    in oklch,
-    var(--color-primary) 3%,
-    var(--color-surface)
-  );
-  --input-bg: oklch(from var(--color-surface-2) l c h / 0.8);
+  /* Industrial Tokens */
+  --glass-bg: rgba(24, 24, 27, 0.85);
+  --glass-border: rgba(63, 63, 70, 0.8);
+  --accent-glow: rgba(190, 242, 100, 0.15);
+  --surface-tint: rgba(190, 242, 100, 0.05);
+  --input-bg: #09090b;
 
-  /* Refined Spacing Scale */
+  /* Brutalist Spacing */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-10: 40px;
-  --space-12: 48px;
-  --space-16: 64px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+  --space-10: 64px;
+  --space-12: 80px;
+  --space-16: 120px;
 
-  /* Distinctive Typography */
-  --font-body:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
-  --font-mono:
-    "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-  --font-display: var(--font-body);
+  /* Typography: Utilitarian Monospace Dominance */
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+  
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-display: "JetBrains Mono", monospace;
 
-  --text-xs: clamp(11px, 0.75rem, 12px);
-  --text-sm: clamp(12px, 0.85rem, 13px);
-  --text-base: clamp(14px, 0.95rem, 15px);
-  --text-lg: clamp(15px, 1.05rem, 17px);
-  --text-xl: clamp(18px, 1.25rem, 20px);
-  --text-2xl: clamp(22px, 1.5rem, 26px);
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
 
-  /* Softer Radii for Modern Feel */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
+  /* Sharp Geometry */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-full: 0px; /* Overriding for brutalist look, but some elements might need it */
 
-  /* Deep, atmospheric shadows */
-  --shadow-sm: 0 2px 4px oklch(0% 0 0 / 0.05), 0 1px 2px oklch(0% 0 0 / 0.1);
-  --shadow-md: 0 8px 16px oklch(0% 0 0 / 0.1), 0 2px 4px oklch(0% 0 0 / 0.08);
-  --shadow-lg: 0 16px 32px oklch(0% 0 0 / 0.15), 0 4px 8px oklch(0% 0 0 / 0.1);
-  --shadow-glow: 0 0 20px var(--accent-glow);
+  /* Harsh Shadows */
+  --shadow-sm: 4px 4px 0px rgba(0, 0, 0, 1);
+  --shadow-md: 8px 8px 0px rgba(0, 0, 0, 1);
+  --shadow-lg: 12px 12px 0px rgba(0, 0, 0, 1);
+  --shadow-glow: 0 0 15px var(--color-primary);
 
-  /* Polished Transitions */
-  --transition-fast: 0.15s cubic-bezier(0.2, 0, 0, 1);
-  --transition-interactive: 0.25s cubic-bezier(0.2, 0, 0, 1);
-  --transition-bounce: 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Snappy Transitions */
+  --transition-fast: 0.1s linear;
+  --transition-interactive: 0.15s cubic-bezier(0, 0, 0.2, 1);
+  --transition-bounce: 0.2s cubic-bezier(0, 0, 0.2, 1);
 }
 
 * {
@@ -99,21 +97,22 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(
-      120% 120% at 50% -10%,
-      oklch(from var(--color-primary) l c h / 0.08),
-      transparent 60%
-    ),
-    var(--color-bg);
+  background-color: var(--color-bg);
+  background-image: 
+    linear-gradient(rgba(63, 63, 70, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 63, 70, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 button {
-  font-family: inherit;
+  font-family: var(--font-body);
+  text-transform: none;
+  font-weight: 500;
+  letter-spacing: normal;
   cursor: pointer;
-  border: none;
-  background: none;
-  color: inherit;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
   transition: all var(--transition-interactive);
   display: inline-flex;
   align-items: center;
@@ -123,33 +122,40 @@ button {
 }
 
 button:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--color-bg),
-    0 0 0 4px var(--color-primary);
+  box-shadow: 4px 4px 0px var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  transform: translate(-2px, -2px);
 }
 
 button:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: translate(2px, 2px);
+  box-shadow: none;
 }
 
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-  filter: saturate(0.5);
+  filter: grayscale(1);
 }
 
 input,
 textarea,
 select {
-  font-family: inherit;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--color-text);
   background: var(--input-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--color-border);
+  border-radius: 0;
+  padding: var(--space-3) var(--space-4);
   transition: all var(--transition-interactive);
-  box-shadow: inset 0 1px 2px oklch(0% 0 0 / 0.05);
 }
 
 input:focus,
@@ -158,30 +164,25 @@ select:focus {
   outline: none;
   border-color: var(--color-primary);
   background: var(--color-surface);
-  box-shadow:
-    0 0 0 3px var(--accent-glow),
-    inset 0 1px 2px oklch(0% 0 0 / 0.05);
+  box-shadow: 4px 4px 0px var(--color-primary);
+  transform: translate(-2px, -2px);
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 2px;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-border);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: oklch(from var(--color-border) l c h / 0.3);
-  border-radius: var(--radius-full);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: var(--color-border);
+  border: 2px solid var(--color-bg);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(from var(--color-border) l c h / 0.6);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: var(--color-primary);
 }

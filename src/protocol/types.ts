@@ -55,4 +55,5 @@ export interface ProviderApi {
 	sendSessionResources(): Promise<void>;
 	logDebug(msg: string, ...details: unknown[]): void;
 	logError(msg: string, error?: unknown): void;
+	deleteSessions(sessionIds: string[]): Promise<void>;
 }

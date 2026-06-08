@@ -15,30 +15,47 @@
 		}
 	}
 
+	// Listen for export result messages from the extension
+	function handleMessage(event: MessageEvent) {
+		const msg = event.data;
+		if (!msg || msg.type !== 'exportResult') return;
+		if (msg.data?.success) {
+			exportStatus = 'done';
+			statusMessage = 'Export completed successfully!';
+			setTimeout(() => onClose(), 2000);
+		} else if (msg.data?.error) {
+			exportStatus = 'error';
+			statusMessage = `Export failed: ${msg.data.error}`;
+		} else {
+			exportStatus = 'error';
+			statusMessage = 'Export failed: Unknown error';
+		}
+	}
+
+	function startListening() {
+		window.addEventListener('message', handleMessage);
+	}
+
+	function stopListening() {
+		window.removeEventListener('message', handleMessage);
+	}
+
+	$effect(() => {
+		startListening();
+		return () => stopListening();
+	});
+
 	async function handleExport() {
 		exportStatus = 'exporting';
 		statusMessage = `Exporting as ${exportFormat.toUpperCase()}...`;
 
 		try {
-			// Use the /export slash command via prompt
-			const cmd = exportFormat === 'jsonl' ? '/export .jsonl' :
-						exportFormat === 'markdown' ? '/export .md' :
-						'/export .html';
-
-			sendMessage({ type: 'prompt', data: { text: cmd } });
-			statusMessage = 'Export started via PI agent...';
-			exportStatus = 'done';
+			// Use the dedicated exportSession message type for proper response handling
+			sendMessage({ type: 'exportSession', data: { format: exportFormat } });
 		} catch (e) {
 			exportStatus = 'error';
 			statusMessage = `Export failed: ${e instanceof Error ? e.message : String(e)}`;
 		}
-	}
-
-	function copyToClipboard(content: string) {
-		navigator.clipboard.writeText(content).then(() => {
-			statusMessage = 'Copied to clipboard!';
-			setTimeout(() => { statusMessage = ''; }, 2000);
-		});
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

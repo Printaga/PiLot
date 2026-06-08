@@ -10,16 +10,15 @@
 	let wrapperEl = $state<HTMLElement | null>(null);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="help-tooltip-wrapper"
 	role="group"
 	aria-label="Help tooltip"
 	bind:this={wrapperEl}
-	onmouseenter={() => (visible = true)}
-	onmouseleave={() => (visible = false)}
-	onfocusin={() => (visible = true)}
-	onfocusout={() => (visible = false)}
+	 onmouseenter={() => visible = true}
+	 onmouseleave={() => visible = false}
+	 onfocusin={() => visible = true}
+	 onfocusout={() => visible = false}
 >
 	<button class="help-icon-btn" aria-label="Help: {title || text}" tabindex="0">
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">

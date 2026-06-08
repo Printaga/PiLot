@@ -29,6 +29,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Major refactor: extracted binary resolution into dedicated module
 - Extracted shell utilities and message serialization
 - Reorganized session resource management
+- Minor GUI/design improvements
 
 ### Fixed
 

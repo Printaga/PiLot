@@ -56,6 +56,44 @@ export class MessageHandler {
 					}
 					break;
 
+				case "exportSession":
+					try {
+						const format = message.data?.format ?? "html";
+						const cmd =
+							format === "jsonl"
+								? `/export .jsonl`
+								: format === "markdown"
+									? `/export .md`
+									: `/export .html`;
+						await this.provider.prompt(cmd);
+						result = { success: true };
+						// Send result back to webview so the dialog shows proper feedback
+						this.provider.webview?.postMessage({
+							type: "exportResult",
+							data: { success: true },
+						});
+					} catch (error) {
+						result = {
+							success: false,
+							error:
+								error instanceof Error
+									? error.message
+									: String(error),
+						};
+						// Send error back to webview so the dialog shows proper feedback
+						this.provider.webview?.postMessage({
+							type: "exportResult",
+							data: {
+								success: false,
+								error:
+									error instanceof Error
+										? error.message
+										: String(error),
+							},
+						});
+					}
+					break;
+
 				case "switchSession":
 					try {
 						await this.provider.switchSession(message.data.sessionId);
@@ -73,12 +111,7 @@ export class MessageHandler {
 					}
 					break;
 
-				case "forkSession":
-					await this.provider.forkSession(message.data?.fromNode);
-					result = { success: true };
-					break;
-
-				case "navigateTree":
+			case "navigateTree":
 					await this.provider.navigateTree(message.data.nodeId);
 					result = { success: true };
 					break;
@@ -392,24 +425,66 @@ export class MessageHandler {
 					}
 					break;
 
-				case "showRenameSessionDialog":
-					{
-						const newName = await vscode.window.showInputBox({
-							prompt: "Enter a new name for this session",
-							placeHolder: "My session name",
-						});
-						if (newName) {
-							await this.provider.setSessionName(newName);
-							result = { success: true };
-						} else {
-							result = { cancelled: true };
-						}
+			case "showRenameSessionDialog":
+				{
+					const newName = await vscode.window.showInputBox({
+						prompt: "Enter a new name for this session",
+						placeHolder: "My session name",
+					});
+					if (newName) {
+						await this.provider.setSessionName(newName);
+						result = { success: true };
+					} else {
+						result = { cancelled: true };
 					}
-					break;
+				}
+				break;
 
-				default:
-					this.provider.logDebug("Unknown message type:", message.type);
-					result = { error: `Unknown message type: ${message.type}` };
+			case "deleteSessions": {
+				const sessionIds = message.data?.sessionIds ?? [];
+				if (sessionIds.length === 0) {
+					result = { success: true, skipped: true };
+					break;
+				}
+
+				// Confirm with the user via VS Code dialog (webviews cannot use confirm())
+				const count = sessionIds.length;
+				const confirmBtn = count === 1
+					? await vscode.window.showWarningMessage(
+						"Delete this session? This cannot be undone.",
+						{ modal: true },
+						"Delete",
+					)
+					: await vscode.window.showWarningMessage(
+							`Delete ${count} sessions? This cannot be undone.`,
+							{ modal: true },
+							"Delete",
+						);
+
+				if (confirmBtn !== "Delete") {
+					result = { success: true, cancelled: true };
+					break;
+				}
+
+				try {
+					await this.provider.deleteSessions(sessionIds);
+					result = { success: true };
+				} catch (error: any) {
+					this.provider.webview?.postMessage({
+						type: "error",
+						data: {
+							message: error?.message ?? String(error),
+							timestamp: Date.now(),
+						},
+					});
+					throw error;
+				}
+				break;
+			}
+
+			default:
+				this.provider.logDebug("Unknown message type:", message.type);
+				result = { error: `Unknown message type: ${message.type}` };
 			}
 
 			if (message.id) {

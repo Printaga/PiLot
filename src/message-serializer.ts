@@ -42,12 +42,12 @@ export function serializeMessages(messages: any[]): SerializedMessage[] {
 				});
 			}
 		} else if (msg.role === "assistant") {
-			const content = Array.isArray(msg.content)
-				? msg.content
-						.filter((c: any) => c.type === "text")
-						.map((c: any) => c.text)
-						.join("\n")
-				: "";
+		const content = Array.isArray(msg.content)
+			? msg.content
+					.filter((c: any) => c.type === "text")
+					.map((c: any) => c.text)
+					.join("\n")
+			: String(msg.content);
 			const thinking = Array.isArray(msg.content)
 				? msg.content
 						.filter((c: any) => c.type === "thinking")
