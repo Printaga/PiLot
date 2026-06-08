@@ -1,5 +1,6 @@
 <script lang="ts">
   import MessageBubble from "./MessageBubble.svelte";
+import { tick } from "svelte";
   import VoiceCapture from "./VoiceCapture.svelte";
   import ContextIndicator from "./ContextIndicator.svelte";
   import ResourceBadge from "./ResourceBadge.svelte";
@@ -83,6 +84,7 @@
     contextPercent?: number | null;
     contextTokens?: number | null;
     contextWindow?: number;
+    editRequestIndex?: number | null;
     autoCompaction?: boolean;
     onCompact?: () => void;
     onEditMessage?: (index: number, newText: string) => void;
@@ -93,6 +95,7 @@
   }
 
   let {
+    editRequestIndex = null,
     messages,
     isStreaming,
     onSend,
@@ -136,6 +139,16 @@
   // Message editing state (Feature 7)
   let editingMessageIndex = $state<number | null>(null);
   let editText = $state("");
+
+  // Handle edit-last-message request from VS Code command
+  $effect(() => {
+    const idx = editRequestIndex;
+    if (idx !== null && idx !== undefined) {
+      tick().then(() => {
+        startEditFromIndex(idx);
+      });
+    }
+  });
 
   // Internal slash command state
   let showSlashCommands = $state(false);
@@ -419,6 +432,19 @@
   }
 
   // Message editing (Feature 7)
+  function startEditFromIndex(index: number) {
+    const msg = messages[index];
+    if (msg && msg.role === "user") {
+      editingMessageIndex = index;
+      editText = typeof msg.content === "string" ? msg.content : "";
+      // Scroll the message into view
+      tick().then(() => {
+        const el = document.querySelector(`[data-msg-index="${index}"]`);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }
+
   function startEdit(index: number, content: string) {
     // Calculate actual index in full messages array
     const actualIndex = messages.length - visibleMessages.length + index;
@@ -904,7 +930,7 @@
       </div>
     {:else}
       {#each visibleMessages as message, i (i)}
-        <div class="message-wrapper">
+        <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
           <MessageBubble {message} />
           {#if message.role === "user" && !message.isStreaming}
             <button

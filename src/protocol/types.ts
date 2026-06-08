@@ -56,4 +56,5 @@ export interface ProviderApi {
 	logDebug(msg: string, ...details: unknown[]): void;
 	logError(msg: string, error?: unknown): void;
 	deleteSessions(sessionIds: string[]): Promise<void>;
+	editMessage(index: number, text: string): Promise<void>;
 }

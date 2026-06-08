@@ -109,8 +109,10 @@ export class PiAgentProvider
 	/** Interval handle for polling extension statuses from the runner. */
 	private statusPoller: ReturnType<typeof setInterval> | undefined;
 
-	/** Tracks whether auto-naming has been triggered for the current session. Reset on new/switch session. */
+	/** Set to true after the first successful agent turn; triggers the AI naming prompt. Reset on new/switch session. */
 	private _autoNamingTriggered = false;
+	/** Set to true while we are waiting for the model to respond to an auto-naming prompt. */
+	private _expectingNamingResponse = false;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -520,16 +522,90 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	/**
-	 * Auto-generate a descriptive session name from the first user/assistant exchange,
-	 * if the session doesn't already have a name.
+	 * Send a prompt to the AI model asking it to generate a concise title
+	 * for the current conversation. The response is captured in
+	 * {@link processNamingResponse} on the next agent_end event.
 	 */
-	private autoGenerateSessionName(): void {
+	private async requestAiSessionName(): Promise<void> {
 		if (!this.session) return;
 		if (this.session.sessionName) return;
 
 		const messages = this.session.messages;
-		if (messages.length < 2) return;
+		const firstUserMsg = messages.find((m) => m.role === "user");
+		if (!firstUserMsg) return;
 
+		const userText = extractTextFromMessage(firstUserMsg).slice(0, 300);
+
+		// The model sees the full conversation context above this point,
+		// so it knows what the session is about.
+		const namingPrompt =
+			`Generate a short, descriptive title (max 6 words) for this chat session. ` +
+			`Output ONLY the title — no quotes, no punctuation, no markdown, no explanation. ` +
+			`The user's first message was: "${userText}"`;
+
+		this._expectingNamingResponse = true;
+		this.logDebug("[PI] Sending auto-naming prompt to model");
+		try {
+			await this.session.prompt(namingPrompt);
+		} catch (e) {
+			this._expectingNamingResponse = false;
+			this.logError("[PI] Auto-naming prompt failed:", e);
+			// Fall back to heuristic naming if the AI call fails
+			this.tryHeuristicSessionName();
+		}
+	}
+
+	/**
+	 * Extract the session name from the model's response to the naming prompt.
+	 * Called from handleSessionEvent when _expectingNamingResponse is true.
+	 */
+	private processNamingResponse(): void {
+		this._expectingNamingResponse = false;
+		if (!this.session) return;
+		// Don't overwrite a name the user set manually while the AI prompt was in-flight
+		if (this.session.sessionName) return;
+
+		const lastAssistantMsg = [...this.session.messages]
+			.reverse()
+			.find((m) => m.role === "assistant");
+
+		if (!lastAssistantMsg) return;
+
+		let name = extractTextFromMessage(lastAssistantMsg)
+			.trim()
+			.replace(/^["'`]|["'`]$/g, "")   // strip surrounding quotes
+			.replace(/^Title:\s*/i, "")         // strip "Title:" prefix
+			.replace(/[*_~#]/g, "")             // strip markdown
+			.split("\n")[0]                     // first line only
+			.slice(0, 80)                        // safety truncation
+			.trim();
+
+		// Validate: must look like a reasonable title
+		if (!name || name.length < 3 || name.length > 80) {
+			this.tryHeuristicSessionName();
+			return;
+		}
+
+		// If the model ignored instructions and output a full sentence, try
+		// extracting the first key phrase.
+		if (name.includes(" ") && name.includes(".")) {
+			name = name.split(".")[0].trim();
+		}
+
+		this.session.setSessionName(name);
+		this.logDebug("[PI] AI-generated session name:", name);
+		// Immediately refresh so the sidebar picks up the new name
+		this.refreshSessionList();
+
+		// Also notify the webview directly for an instant update
+		this.notifyWebview({ type: "session-name-changed", data: { name } });
+	}
+
+	/** Fallback: use the heuristic approach when the AI prompt fails or responds poorly. */
+	private tryHeuristicSessionName(): void {
+		if (!this.session || this.session.sessionName) return;
+
+		const messages = this.session.messages;
 		const firstUserMsg = messages.find((m) => m.role === "user");
 		const firstAssistantMsg = messages.find((m) => m.role === "assistant");
 
@@ -542,7 +618,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		const name = generateSessionName(userText, assistantText);
 		if (name) {
-			this.logDebug("[PI] Auto-generated session name:", name);
+			this.logDebug("[PI] Heuristic session name (fallback):", name);
 			this.session.setSessionName(name);
 		}
 	}
@@ -671,6 +747,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async newSession() {
 		this._autoNamingTriggered = false;
+		this._expectingNamingResponse = false;
 		// Dispose old session properly before creating a new one
 		this.stopStatusPoller();
 		this.extensionStatuses.clear();
@@ -794,6 +871,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async switchSession(sessionId: string) {
 		this._autoNamingTriggered = false;
+		this._expectingNamingResponse = false;
 		// Find the session info from the list
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -1083,6 +1161,50 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				});
 				throw error;
 			}
+		}
+	}
+
+	async editMessage(index: number, text: string): Promise<void> {
+		if (!this.session) return;
+
+		const messages = this.session.messages;
+		if (index < 0 || index >= messages.length) return;
+
+		const target = messages[index];
+		if (target.role !== "user") return;
+
+		// Create replacement with updated content and new timestamp
+		const replacement = {
+			...target,
+			content: text,
+			timestamp: Date.now(),
+		};
+
+		try {
+			// Mutate the message in-place in agent state (private API)
+			(this.session as any)._replaceMessageInPlace(target, replacement);
+
+			// Rewrite the session file so the edit persists
+			const sm = this.session.sessionManager;
+			if (sm) {
+				(sm as any)._rewriteFile();
+			}
+
+			// Broadcast updated messages to the webview
+			const serialized = serializeMessages(this.session.messages);
+			this.notifyWebview({
+				type: "session-history",
+				data: { sessionId: this.session.sessionId, messages: serialized },
+			});
+		} catch (error) {
+			this.notifyWebview({
+				type: "error",
+				data: {
+					message: error instanceof Error ? error.message : String(error),
+					timestamp: Date.now(),
+				},
+			});
+			throw error;
 		}
 	}
 
@@ -1443,14 +1565,27 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			);
 		}
 
-		// Auto-generate a session name on the first successful assistant response
+		// ── AI auto-naming flow ──────────────────
+		// Phase 2: capture the model's response to the naming prompt
 		if (
 			event.type === "agent_end" &&
 			!event.willRetry &&
-			!this._autoNamingTriggered
+			this._expectingNamingResponse
+		) {
+			this.processNamingResponse();
+		}
+
+		// Phase 1: after the first real user+assistant exchange, send the naming prompt
+		if (
+			event.type === "agent_end" &&
+			!event.willRetry &&
+			!this._autoNamingTriggered &&
+			!this._expectingNamingResponse
 		) {
 			this._autoNamingTriggered = true;
-			this.autoGenerateSessionName();
+			if (!this.session?.sessionName) {
+				this.requestAiSessionName();
+			}
 		}
 
 		// Derive activity statuses from session events

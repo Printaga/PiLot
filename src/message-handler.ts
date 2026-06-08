@@ -482,6 +482,22 @@ export class MessageHandler {
 				break;
 			}
 
+			case "edit-message":
+				try {
+					await this.provider.editMessage(message.data.index, message.data.text);
+					result = { success: true };
+				} catch (error) {
+					this.provider.webview?.postMessage({
+						type: "error",
+						data: {
+							message: error instanceof Error ? error.message : String(error),
+							timestamp: Date.now(),
+						},
+					});
+					throw error;
+				}
+				break;
+
 			default:
 				this.provider.logDebug("Unknown message type:", message.type);
 				result = { error: `Unknown message type: ${message.type}` };

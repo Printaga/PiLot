@@ -301,6 +301,18 @@
         handleNewSession();
         break;
 
+      case "edit-last-message": {
+        // Find the last user message in the messages array
+        const lastUserIdx = messages.reduceRight(
+          (found, msg, i) => (found === -1 && msg.role === "user" ? i : found),
+          -1,
+        );
+        if (lastUserIdx !== -1) {
+          editRequestIndex = lastUserIdx;
+        }
+        break;
+      }
+
       case "error":
         isStreaming = false;
         showToast({
@@ -852,12 +864,20 @@
     sendMessage({ type: "prompt", data: { text, images } });
   }
 
+  let editRequestIndex = $state<number | null>(null);
+
   function handleEditMessage(index: number, newText: string) {
+    // Update local state immediately
     messages = messages.map((msg, i) => {
       if (i === index && msg.role === "user") {
         return { ...msg, content: newText, timestamp: Date.now() };
       }
       return msg;
+    });
+    // Send edit to extension host for persistence
+    (window as any).vscode?.postMessage({
+      type: "edit-message",
+      data: { index, text: newText },
     });
   }
 
@@ -1135,6 +1155,7 @@
           {contextWindow}
           {autoCompaction}
           onCompact={handleCompact}
+          {editRequestIndex}
           onEditMessage={handleEditMessage}
           onShowExport={() => (showExport = true)}
           onShowPromptTemplates={() => (showPromptTemplates = true)}
