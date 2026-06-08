@@ -5,12 +5,33 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ## [Unreleased] - 2026-06-08
 
 ### Added
+
+- New slash commands support
+- Added nteractive branching/forking functionality
+- Added persistent toast notifications for errors and system messages
+- New inline help system and onboarding
+- New message editing feature
+- Quick actions and shortcuts for common tasks
+- Improved session management and history tracking
+- Visual indicator when resources change (new extensions/skills loaded)
+- Enhanced tool controls integration with PI agent's tool configuration
+- Improved keyboard navigation and focus management
+- Better loading states and skeleton UI for models/packages
+- Progress indicators during session creation
+- Better feedback for long-running operations (compact, update)
+- New voice manager for microphone input
 - Auto-detect VS Code executable path for test runner
+- Webview stores for model, session, and UI state
+- HTML export with syntax highlighting.
 
 ### Changed
-- Updated tooling and logging
+
+- Major refactor: extracted binary resolution into dedicated module
+- Extracted shell utilities and message serialization
+- Reorganized session resource management
 
 ### Fixed
+
 - Fixed voice helper path resolution with correct extension ID
 - Fixed `context.autoAttach` setting key to match package.json configuration
 - Added user-friendly error message when voice helper fails due to missing ALSA libraries on Linux
@@ -23,7 +44,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - Full integration of PI CLI resource settings (extensions, skills, prompts, system prompts)
 
-### Updated
+### Changed
 
 - Updated and simplified README.md documentation
 

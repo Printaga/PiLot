@@ -264,6 +264,10 @@ export class MessageHandler {
 					}
 					break;
 
+				case "getSessionResources":
+					await this.provider.sendSessionResources();
+					break;
+
 				case "getAutoCompactionStatus":
 					result = this.provider.getAutoCompactionEnabled();
 					break;

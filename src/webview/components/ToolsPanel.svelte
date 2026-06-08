@@ -1,51 +1,379 @@
 <script lang="ts">
-	interface Tool {
+	import { onMount } from 'svelte';
+
+	interface ToolDef {
 		name: string;
 		description: string;
 		enabled: boolean;
+		category: 'builtin' | 'extension' | 'skill';
+		source?: string;
 	}
 
-	let tools = $state<Tool[]>([
-		{ name: 'read', description: 'Read files from the filesystem', enabled: true },
-		{ name: 'bash', description: 'Execute shell commands', enabled: true },
-		{ name: 'edit', description: 'Edit files with diffs', enabled: true },
-		{ name: 'find', description: 'Find files by pattern', enabled: true },
-		{ name: 'grep', description: 'Search file contents', enabled: true },
-		{ name: 'write', description: 'Create new files', enabled: true },
-		{ name: 'ls', description: 'List directory contents', enabled: true }
-	]);
+	interface ExtensionDef {
+		name: string;
+		description: string;
+		path: string;
+		enabled: boolean;
+	}
+
+	interface SkillDef {
+		name: string;
+		description?: string;
+		enabled: boolean;
+	}
+
+	// Default tools available in PI
+	const defaultTools: ToolDef[] = [
+		{ name: 'read', description: 'Read files from the filesystem', enabled: true, category: 'builtin' },
+		{ name: 'bash', description: 'Execute shell commands', enabled: true, category: 'builtin' },
+		{ name: 'edit', description: 'Edit files with targeted replacements', enabled: true, category: 'builtin' },
+		{ name: 'write', description: 'Create new files', enabled: true, category: 'builtin' },
+		{ name: 'grep', description: 'Search file contents with regex', enabled: true, category: 'builtin' },
+		{ name: 'find', description: 'Find files by glob pattern', enabled: true, category: 'builtin' },
+		{ name: 'ls', description: 'List directory contents', enabled: true, category: 'builtin' },
+	];
+
+	let tools = $state<ToolDef[]>([...defaultTools]);
+	let extensions = $state<ExtensionDef[]>([]);
+	let skills = $state<SkillDef[]>([]);
+	let activeTab = $state<'tools' | 'extensions' | 'skills' | 'presets'>('tools');
+	let toolPreset = $state<string>('default');
+	let customToolsInput = $state('');
+	let isSynced = $state(false);
+
+	// Listen for session resources from extension
+	$effect(() => {
+		function handleMessage(event: MessageEvent) {
+			const { type, data } = event.data;
+			if (type === 'session-resources' && data) {
+				// Update extensions from real session resources
+				if (data.extensions) {
+					extensions = data.extensions.map((e: any) => ({
+						name: e.sourceInfo?.name || e.path.split('/').pop() || e.path,
+						description: `Extension at ${e.path}`,
+						path: e.path,
+						enabled: true,
+					}));
+				}
+				// Update skills from real session resources
+				if (data.skills) {
+					skills = data.skills.map((s: any) => ({
+						name: s.name,
+						description: s.description,
+						enabled: true,
+					}));
+				}
+				isSynced = true;
+			}
+		}
+		window.addEventListener('message', handleMessage);
+		return () => window.removeEventListener('message', handleMessage);
+	});
+
+	onMount(() => {
+		// Request session resources to sync
+		const vscode = (window as any).vscode;
+		if (vscode?.postMessage) {
+			vscode.postMessage({ type: 'getSessionResources' });
+		}
+		// Read current tool preset from VS Code settings
+		fetchToolPreset();
+	});
+
+	function fetchToolPreset() {
+		// Communicate with extension through VS Code API
+		const vscode = (window as any).vscode;
+		if (vscode?.postMessage) {
+			vscode.postMessage({ type: 'getSettings' });
+		}
+	}
+
+	function sendToolUpdate(msg: any) {
+		const vscode = (window as any).vscode;
+		if (vscode?.postMessage) {
+			vscode.postMessage(msg);
+		}
+	}
 
 	function toggleTool(index: number) {
 		tools[index].enabled = !tools[index].enabled;
 		tools = [...tools];
+		notifyToolChange();
+	}
+
+	function toggleExtension(index: number) {
+		extensions[index].enabled = !extensions[index].enabled;
+		extensions = [...extensions];
+	}
+
+	function toggleSkill(index: number) {
+		skills[index].enabled = !skills[index].enabled;
+		skills = [...skills];
+	}
+
+	function notifyToolChange() {
+		const enabledTools = tools.filter(t => t.enabled).map(t => t.name);
+		sendToolUpdate({
+			type: 'setToolConfig',
+			data: { tools: enabledTools }
+		});
+	}
+
+	function applyPreset(preset: string) {
+		toolPreset = preset;
+		switch (preset) {
+			case 'default':
+				tools = defaultTools.map(t => ({ ...t, enabled: true }));
+				break;
+			case 'none':
+				tools = defaultTools.map(t => ({ ...t, enabled: false }));
+				break;
+			case 'review':
+				tools = defaultTools.map(t => ({
+					...t,
+					enabled: ['read', 'grep', 'find', 'ls'].includes(t.name)
+				}));
+				break;
+			case 'custom':
+				// Keep current state
+				break;
+		}
+		tools = [...tools];
+		notifyToolChange();
+	}
+
+	function addCustomTool() {
+		const name = customToolsInput.trim().toLowerCase();
+		if (!name || tools.some(t => t.name === name)) return;
+		tools = [...tools, {
+			name,
+			description: `Custom tool: ${name}`,
+			enabled: true,
+			category: 'builtin'
+		}];
+		customToolsInput = '';
+		notifyToolChange();
+	}
+
+	function removeCustomTool(index: number) {
+		if (tools[index].category === 'builtin') return;
+		tools = tools.filter((_, i) => i !== index);
+		notifyToolChange();
+	}
+
+	const builtinTools = $derived(tools.filter(t => t.category === 'builtin'));
+	const customTools = $derived(tools.filter(t => t.category !== 'builtin'));
+
+	const enabledCount = $derived(tools.filter(t => t.enabled).length);
+	const totalCount = $derived(tools.length);
+
+	function getCategoryLabel(cat: string): string {
+		switch (cat) {
+			case 'builtin': return 'Built-in';
+			case 'extension': return 'Extension';
+			case 'skill': return 'Skill';
+			default: return cat;
+		}
 	}
 </script>
 
 <div class="tools-panel">
 	<div class="header">
-		<h3>Tools & Extensions</h3>
+		<h3>Capabilities</h3>
+		{#if isSynced}
+			<span class="sync-badge" title="Synced with active session">
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+					<polyline points="20 6 9 17 4 12"/>
+				</svg>
+				Synced
+			</span>
+		{/if}
+	</div>
+
+	<div class="tab-nav">
+		<button class="tab-btn" class:active={activeTab === 'tools'} onclick={() => (activeTab = 'tools')}>
+			Tools ({enabledCount}/{totalCount})
+		</button>
+		<button class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => (activeTab = 'extensions')}>
+			Extensions ({extensions.length})
+		</button>
+		<button class="tab-btn" class:active={activeTab === 'skills'} onclick={() => (activeTab = 'skills')}>
+			Skills ({skills.length})
+		</button>
+		<button class="tab-btn" class:active={activeTab === 'presets'} onclick={() => (activeTab = 'presets')}>
+			Presets
+		</button>
 	</div>
 
 	<div class="tools-sections">
-		<section class="tools-section">
-			<h4>Available Tools</h4>
-			<p class="section-description">Tools that PI can use to interact with your project</p>
+		{#if activeTab === 'tools'}
+			<section class="tools-section">
+				<p class="section-description">Control which tools PI can use in the current session</p>
 
-			<div class="tools-list">
-				{#each tools as tool, index}
-					<div class="tool-item">
-						<div class="tool-info">
-							<span class="tool-name">{tool.name}</span>
-							<span class="tool-description">{tool.description}</span>
+				<div class="tools-list">
+					{#each builtinTools as tool, index}
+						<div class="tool-item">
+							<div class="tool-info">
+								<span class="tool-name">{tool.name}</span>
+								<span class="tool-description">{tool.description}</span>
+								<span class="tool-category">{getCategoryLabel(tool.category)}</span>
+							</div>
+							<label class="toggle">
+								<input type="checkbox" checked={tool.enabled} onchange={() => toggleTool(index)} />
+								<span class="toggle-slider"></span>
+							</label>
 						</div>
-						<label class="toggle">
-							<input type="checkbox" checked={tool.enabled} onchange={() => toggleTool(index)} />
-							<span class="toggle-slider"></span>
-						</label>
+					{/each}
+				</div>
+
+				{#if customTools.length > 0}
+					<h4 class="subsection-title">Custom Tools</h4>
+					<div class="tools-list">
+						{#each customTools as tool, i}
+							<div class="tool-item">
+								<div class="tool-info">
+									<span class="tool-name">{tool.name}</span>
+									<span class="tool-description">{tool.description}</span>
+								</div>
+								<div class="tool-actions">
+									<label class="toggle">
+										<input type="checkbox" checked={tool.enabled} onchange={() => {
+											const idx = tools.findIndex(t => t.name === tool.name);
+											if (idx >= 0) toggleTool(idx);
+										}} />
+										<span class="toggle-slider"></span>
+									</label>
+									<button class="remove-btn" onclick={() => {
+										const idx = tools.findIndex(t => t.name === tool.name);
+										if (idx >= 0) removeCustomTool(idx);
+									}} title="Remove custom tool">
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+											<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+										</svg>
+									</button>
+								</div>
+							</div>
+						{/each}
 					</div>
-				{/each}
-			</div>
-		</section>
+				{/if}
+
+				<div class="add-tool-form">
+					<input
+						type="text"
+						placeholder="Add custom tool name..."
+						bind:value={customToolsInput}
+						onkeydown={(e) => e.key === 'Enter' && addCustomTool()}
+					/>
+					<button class="add-btn" onclick={addCustomTool} disabled={!customToolsInput.trim()}>Add</button>
+				</div>
+			</section>
+
+		{:else if activeTab === 'extensions'}
+			<section class="tools-section">
+				<p class="section-description">PI extensions loaded in the active session</p>
+				{#if extensions.length === 0}
+					<div class="empty-state">
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+							<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+						</svg>
+						<span>No extensions loaded in this session</span>
+					</div>
+				{:else}
+					<div class="tools-list">
+						{#each extensions as ext, i}
+							<div class="tool-item">
+								<div class="tool-info">
+									<span class="tool-name">{ext.name}</span>
+									<span class="tool-description">{ext.description}</span>
+								</div>
+								<label class="toggle">
+									<input type="checkbox" checked={ext.enabled} onchange={() => toggleExtension(i)} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+
+		{:else if activeTab === 'skills'}
+			<section class="tools-section">
+				<p class="section-description">Skills available in the active session</p>
+				{#if skills.length === 0}
+					<div class="empty-state">
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+							<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+						</svg>
+						<span>No skills loaded in this session</span>
+					</div>
+				{:else}
+					<div class="tools-list">
+						{#each skills as skill, i}
+							<div class="tool-item">
+								<div class="tool-info">
+									<span class="tool-name">{skill.name}</span>
+									{#if skill.description}
+										<span class="tool-description">{skill.description}</span>
+									{/if}
+								</div>
+								<label class="toggle">
+									<input type="checkbox" checked={skill.enabled} onchange={() => toggleSkill(i)} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+
+		{:else if activeTab === 'presets'}
+			<section class="tools-section">
+				<h4>Tool Presets</h4>
+				<p class="section-description">Choose a preset to quickly configure tools per session</p>
+
+				<div class="presets-list">
+					<button
+						class="preset-card"
+						class:selected={toolPreset === 'default'}
+						onclick={() => applyPreset('default')}
+					>
+						<span class="preset-name">Default</span>
+						<span class="preset-desc">All built-in tools enabled</span>
+						<span class="preset-tools">read, bash, edit, write, grep, find, ls</span>
+					</button>
+
+					<button
+						class="preset-card"
+						class:selected={toolPreset === 'review'}
+						onclick={() => applyPreset('review')}
+					>
+						<span class="preset-name">Review Only</span>
+						<span class="preset-desc">Read-only tools for code review</span>
+						<span class="preset-tools">read, grep, find, ls</span>
+					</button>
+
+					<button
+						class="preset-card"
+						class:selected={toolPreset === 'none'}
+						onclick={() => applyPreset('none')}
+					>
+						<span class="preset-name">None</span>
+						<span class="preset-desc">Disable all tools (chat only)</span>
+						<span class="preset-tools">No tools enabled</span>
+					</button>
+
+					<button
+						class="preset-card"
+						class:selected={toolPreset === 'custom'}
+						onclick={() => applyPreset('custom')}
+					>
+						<span class="preset-name">Custom</span>
+						<span class="preset-desc">Manually configure individual tools</span>
+						<span class="preset-tools">Use the Tools tab above</span>
+					</button>
+				</div>
+			</section>
+		{/if}
 	</div>
 </div>
 
@@ -59,12 +387,59 @@
 	}
 
 	.header {
-		margin-bottom: var(--space-6);
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: var(--space-4);
 	}
 
 	h3 {
 		font-size: var(--text-lg);
 		font-weight: 600;
+	}
+
+	.sync-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 9px;
+		font-weight: 700;
+		color: var(--color-success);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 2px 8px;
+		background: oklch(from var(--color-success) l c h / 0.1);
+		border-radius: var(--radius-full);
+	}
+
+	.tab-nav {
+		display: flex;
+		gap: var(--space-1);
+		margin-bottom: var(--space-4);
+		padding: var(--space-1);
+		background: var(--color-surface-2);
+		border-radius: var(--radius-lg);
+	}
+
+	.tab-btn {
+		flex: 1;
+		padding: var(--space-1) var(--space-2);
+		font-size: 10px;
+		font-weight: 700;
+		color: var(--color-text-muted);
+		border-radius: var(--radius-md);
+		white-space: nowrap;
+		transition: all var(--transition-interactive);
+	}
+
+	.tab-btn:hover {
+		color: var(--color-text);
+		background: var(--surface-tint);
+	}
+
+	.tab-btn.active {
+		background: var(--color-primary);
+		color: var(--color-text-inverse);
 	}
 
 	h4 {
@@ -76,7 +451,7 @@
 	.tools-sections {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-6);
+		gap: var(--space-4);
 	}
 
 	.tools-section {
@@ -88,6 +463,15 @@
 		font-size: var(--text-sm);
 		color: var(--color-text-muted);
 		margin-bottom: var(--space-3);
+	}
+
+	.subsection-title {
+		font-size: var(--text-sm);
+		font-weight: 700;
+		color: var(--color-text-muted);
+		margin: var(--space-3) 0 var(--space-2);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.tools-list {
@@ -104,23 +488,62 @@
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
+		transition: border-color var(--transition-fast);
+	}
+
+	.tool-item:hover {
+		border-color: oklch(from var(--color-primary) l c h / 0.2);
 	}
 
 	.tool-info {
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.tool-name {
 		font-weight: 500;
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: var(--text-sm);
 	}
 
 	.tool-description {
 		font-size: var(--text-xs);
 		color: var(--color-text-muted);
+	}
+
+	.tool-category {
+		font-size: 9px;
+		color: var(--color-text-muted);
+		opacity: 0.5;
+		text-transform: uppercase;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+	}
+
+	.tool-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.remove-btn {
+		width: 24px;
+		height: 24px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: var(--radius-sm);
+		color: var(--color-text-muted);
+		opacity: 0.4;
+	}
+
+	.remove-btn:hover {
+		opacity: 1;
+		color: var(--color-error);
+		background: oklch(from var(--color-error) l c h / 0.1);
 	}
 
 	.toggle {
@@ -167,5 +590,86 @@
 
 	.toggle input:checked + .toggle-slider:before {
 		transform: translateX(20px);
+	}
+
+	.add-tool-form {
+		display: flex;
+		gap: var(--space-2);
+		margin-top: var(--space-3);
+	}
+
+	.add-tool-form input {
+		flex: 1;
+		font-size: var(--text-xs);
+	}
+
+	.add-btn {
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-primary);
+		color: var(--color-text-inverse);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
+		font-weight: 600;
+	}
+
+	.add-btn:hover:not(:disabled) {
+		filter: brightness(1.1);
+	}
+
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-6);
+		color: var(--color-text-muted);
+		font-size: var(--text-sm);
+	}
+
+	/* ── Presets ──────────────────────────────── */
+	.presets-list {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-2);
+	}
+
+	.preset-card {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-3);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		text-align: left;
+		transition: all var(--transition-interactive);
+	}
+
+	.preset-card:hover {
+		border-color: var(--color-primary);
+		background: var(--surface-tint);
+	}
+
+	.preset-card.selected {
+		border-color: var(--color-primary);
+		background: oklch(from var(--color-primary) l c h / 0.08);
+		box-shadow: 0 0 0 1px var(--color-primary);
+	}
+
+	.preset-name {
+		font-weight: 700;
+		font-size: var(--text-sm);
+	}
+
+	.preset-desc {
+		font-size: var(--text-xs);
+		color: var(--color-text-muted);
+	}
+
+	.preset-tools {
+		font-size: 10px;
+		color: var(--color-text-muted);
+		opacity: 0.6;
+		font-family: var(--font-mono);
 	}
 </style>

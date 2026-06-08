@@ -7,6 +7,10 @@
 	import PiPackagesPanel from './components/PiPackagesPanel.svelte';
 	import ProviderSettings from './components/ProviderSettings.svelte';
 	import Header from './components/Header.svelte';
+	import Toast from './components/Toast.svelte';
+	import OnboardingTour from './components/OnboardingTour.svelte';
+	import ExportDialog from './components/ExportDialog.svelte';
+	import PromptTemplates from './components/PromptTemplates.svelte';
 
 	interface ImageContent {
 		type: 'image';
@@ -74,6 +78,18 @@
 	let piUpdateAvailable = $state<string | null>(null);
 	let packageUpdateCount = $state(0);
 
+	// Feature states: onboarding, export, prompt templates
+	let showOnboarding = $state(false);
+	let showExport = $state(false);
+	let showPromptTemplates = $state(false);
+	let previousResourceCount = $state<Record<string, number>>({});
+
+	// Toast helper - uses global from Toast component
+	function showToast(opts: { type: 'info' | 'success' | 'warning' | 'error'; title: string; message?: string; persistent?: boolean; duration?: number }) {
+		const t = (window as any).__toast;
+		if (t?.showToast) t.showToast(opts);
+	}
+
 	// Poll context usage and token stats every 5s once initialized
 	$effect(() => {
 		if (!isInitialized) return;
@@ -111,6 +127,38 @@
 			(window as any).vscode.postMessage({ type: 'getModels' });
 			(window as any).vscode.postMessage({ type: 'getProviderAuth' });
 		}
+	});
+
+	// Global keyboard shortcut handler (Features 5, 3)
+	$effect(() => {
+		function handleKeydown(e: KeyboardEvent) {
+			const target = e.target as HTMLElement;
+			const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.contentEditable === 'true';
+			
+			// Always allow Escape to close dialogs, even from inputs
+			if (e.key === 'Escape') {
+				showExport = false;
+				showPromptTemplates = false;
+				showOnboarding = false;
+				return;
+			}
+
+			// Don't handle other shortcuts when typing in input
+			if (isInput) return;
+
+			switch (e.key) {
+				case '1': activeTab = 'chat'; e.preventDefault(); break;
+				case '2': activeTab = 'sessions'; e.preventDefault(); break;
+				case '3': activeTab = 'models'; e.preventDefault(); break;
+				case '4': activeTab = 'providers'; e.preventDefault(); break;
+				case '5': activeTab = 'tools'; e.preventDefault(); break;
+				case '6': activeTab = 'packages'; e.preventDefault(); break;
+				case '7': activeTab = 'settings'; e.preventDefault(); break;
+			}
+		}
+
+		window.addEventListener('keydown', handleKeydown);
+		return () => window.removeEventListener('keydown', handleKeydown);
 	});
 
 	function handleVSCodeMessage(event: MessageEvent) {
@@ -163,6 +211,16 @@
 				break;
 
 			case 'session-resources':
+				// Track previous resource counts for change detection (Feature 9)
+				if (sessionResources) {
+					previousResourceCount = {
+						files: (sessionResources as any).contextFileCount ?? 0,
+						skills: (sessionResources as any).skillCount ?? 0,
+						extensions: (sessionResources as any).extensionCount ?? 0,
+						prompts: (sessionResources as any).promptCount ?? 0,
+						packages: (sessionResources as any).packageCount ?? 0,
+					};
+				}
 				sessionResources = data;
 				console.log('[PI Webview] session-resources received:', JSON.stringify(data));
 				break;
@@ -191,6 +249,7 @@
 
 			case 'error':
 				isStreaming = false;
+				showToast({ type: 'error', title: 'Error', message: data.message || 'An error occurred', persistent: true });
 				messages = [
 					...messages,
 					{
@@ -205,6 +264,9 @@
 				hasUpdates = true;
 				piUpdateAvailable = data?.piVersion ?? null;
 				packageUpdateCount = data?.packageCount ?? 0;
+				if (data?.piVersion) {
+					showToast({ type: 'info', title: `PI CLI v${data.piVersion} available`, message: 'Click the update button in the header to update.' });
+				}
 				break;
 
 			case 'updates-cleared':
@@ -242,6 +304,14 @@
 		if (data?.currentModel) currentModel = data.currentModel;
 		if (data?.favoriteModels) favoriteModels = data.favoriteModels;
 		if (data?.thinkingLevel) thinkingLevel = data.thinkingLevel;
+
+		// Show onboarding on first launch (Feature 3)
+		try {
+			const hasSeenTour = localStorage.getItem('pilots-seen-tour');
+			if (!hasSeenTour) {
+				showOnboarding = true;
+			}
+		} catch {}
 	}
 
 	function handlePiEvent(event: any) {
@@ -251,13 +321,8 @@
 				break;
 
 			case 'message_start':
-				// A new message is beginning - create a fresh message entry.
-				// This handles multi-message turns (e.g., thinking → text →
-				// tool results → more text) by creating separate bubbles.
 				{
 					const msgRole = event.message?.role || 'assistant';
-					// If the last message is still streaming, finalize it first
-					// (handles edge case where message_end wasn't received).
 					if (messages.length > 0) {
 						const lastMsg = messages[messages.length - 1];
 						if (lastMsg.isStreaming) {
@@ -267,8 +332,6 @@
 							];
 						}
 					}
-					// Create a new streaming message for assistant text,
-					// or a complete non-streaming message for other roles.
 					if (msgRole === 'assistant' || !msgRole || msgRole === 'system') {
 						messages = [
 							...messages,
@@ -284,7 +347,6 @@
 				break;
 
 			case 'message_end':
-				// Finalize the current streaming message.
 				if (messages.length > 0) {
 					const lastMsg = messages[messages.length - 1];
 					if (lastMsg.isStreaming) {
@@ -297,16 +359,12 @@
 				break;
 
 			case 'turn_start':
-				// Show when each turn starts
 				break;
 
 			case 'turn_end':
-				// Show when each turn ends
 				break;
 
 			case 'message_update':
-				// Fallback: if no streaming message exists yet (e.g., message_start
-				// was missed), create one so deltas have somewhere to land.
 				{
 					const hasStreaming = messages.length > 0 && messages[messages.length - 1].isStreaming;
 					if (!hasStreaming && isStreaming) {
@@ -351,7 +409,6 @@
 
 			case 'agent_end':
 				isStreaming = false;
-				// Finalize any remaining streaming message.
 				if (messages.length > 0) {
 					const lastMsg = messages[messages.length - 1];
 					if (lastMsg.isStreaming) {
@@ -367,48 +424,35 @@
 				break;
 
 			case 'compaction_start':
-				messages = [
-					...messages,
-					{
-						role: 'system',
-						content: `🔄 Compacting context (${event.reason || 'auto'})...`,
-						timestamp: Date.now()
-					}
-				];
+				showToast({ type: 'info', title: 'Compacting context...', message: event.reason || 'auto' });
 				break;
 
 			case 'compaction_end':
 				if (event.errorMessage) {
-					messages = [
-						...messages,
-						{
-							role: 'system',
-							content: `⚠ Compaction error: ${event.errorMessage}`,
-							timestamp: Date.now()
-						}
-					];
+					showToast({ type: 'warning', title: 'Compaction error', message: event.errorMessage, persistent: true });
 				} else if (event.result) {
-					messages = [
-						...messages,
-						{
-							role: 'system',
-							content: `✅ Context compacted${event.result.tokensSaved ? ` (saved ${event.result.tokensSaved} tokens)` : ''}`,
-							timestamp: Date.now()
-						}
-					];
+					showToast({ type: 'success', title: 'Context compacted', message: event.result.tokensSaved ? `Saved ${event.result.tokensSaved} tokens` : undefined });
 				}
 				if (typeof (window as any).vscode?.postMessage === 'function') {
 					(window as any).vscode.postMessage({ type: 'getContextUsage' });
 				}
 				break;
 
+			case 'auto_retry_start':
+				showToast({ type: 'warning', title: `Retry ${event.attempt}/${event.maxAttempts}`, message: event.errorMessage });
+				break;
+
+			case 'auto_retry_end':
+				if (!event.success && event.finalError) {
+					showToast({ type: 'error', title: 'All retries exhausted', message: event.finalError, persistent: true });
+				}
+				break;
+
 			case 'tool_execution_start':
-				// Track tool call - args stored, will be combined with end event
 				activeToolCalls.set(event.toolCallId, {
 					toolName: event.toolName,
 					args: event.args || {}
 				});
-				// Show tool start immediately so user knows something is happening
 				messages = [
 					...messages,
 					{
@@ -426,13 +470,10 @@
 				break;
 
 			case 'tool_execution_update':
-				// Update tool execution status to streaming for UI feedback
 				activeToolCalls.set(event.toolCallId, {
 					toolName: event.toolName,
 					args: event.args || {}
 				});
-				
-				// Find the tool call message and update status
 				const updateMsgIdx = messages.findLastIndex((m) => 
 					m.role === 'system' && m.toolCalls?.some(tc => tc.toolCallId === event.toolCallId)
 				);
@@ -442,21 +483,20 @@
 						{
 							...messages[updateMsgIdx],
 							toolCalls: messages[updateMsgIdx].toolCalls!.map(tc =>
-									tc.toolCallId === event.toolCallId
-									? { ...tc, status: 'streaming' }
-									: tc
+								tc.toolCallId === event.toolCallId
+								? { ...tc, status: 'streaming' }
+								: tc
 							)
 						},
 						...messages.slice(updateMsgIdx + 1)
 					];
 				}
 				break;
+
 			case 'tool_execution_end':
 				const toolResult = activeToolCalls.get(event.toolCallId);
-				// Find and update the pending tool call message
 				if (toolResult || messages.length > 0) {
 					activeToolCalls.delete(event.toolCallId);
-					// Find last system message with this tool call
 					const lastSystemIdx = messages.findLastIndex((m) => 
 						m.role === 'system' && m.toolCalls?.some(tc => tc.toolCallId === event.toolCallId)
 					);
@@ -468,12 +508,12 @@
 								toolCalls: messages[lastSystemIdx].toolCalls!.map(tc =>
 									tc.toolCallId === event.toolCallId
 									? { ...tc, status: 'complete', result: {
-											content: event.result?.content?.map((c: any) => c.text || '').join('\n') || '',
-											details: event.result?.details,
-											isError: event.isError
-										}, isError: event.isError }
+										content: event.result?.content?.map((c: any) => c.text || '').join('\n') || '',
+										details: event.result?.details,
+										isError: event.isError
+									}, isError: event.isError }
 									: tc
-							)
+								)
 							},
 							...messages.slice(lastSystemIdx + 1)
 						];
@@ -482,55 +522,14 @@
 				break;
 
 			case 'model_select':
-				messages = [
-					...messages,
-					{
-						role: 'system',
-						content: `🔄 Model changed to: ${event.model?.name || event.model?.id || 'unknown'} (${event.source === 'cycle' ? 'cycled' : 'set'})`,
-						timestamp: Date.now()
-					}
-				];
+				showToast({ type: 'info', title: 'Model changed', message: event.model?.name || event.model?.id || 'unknown' });
 				break;
 
 			case 'thinking_level_select':
-				messages = [
-					...messages,
-					{
-						role: 'system',
-						content: `🧠 Thinking level changed to: ${event.level}`,
-						timestamp: Date.now()
-					}
-				];
-				break;
-
-			case 'auto_retry_start':
-				messages = [
-					...messages,
-					{
-						role: 'system',
-						content: `⚠ Provider error (retry ${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`,
-						timestamp: Date.now()
-					}
-				];
-				break;
-
-			case 'auto_retry_end':
-				if (!event.success && event.finalError) {
-					isStreaming = false;
-					messages = [
-						...messages,
-						{
-							role: 'system',
-							content: `❌ Provider error (all retries exhausted): ${event.finalError}`,
-							timestamp: Date.now()
-						}
-					];
-				}
+				showToast({ type: 'info', title: `Thinking level: ${event.level}` });
 				break;
 
 			case 'queue_update':
-				// Show queued steering/follow-up messages.
-				// Steering messages interrupt current response; follow-ups wait.
 				if (event.steering?.length > 0) {
 					for (const text of event.steering) {
 						messages = [
@@ -558,7 +557,6 @@
 				break;
 
 			case 'session_info_changed':
-				// Session name or metadata changed (no UI action needed here).
 				break;
 
 			case 'session_tree':
@@ -589,6 +587,26 @@
 		};
 		messages = [...messages, newMsg];
 		sendMessage({ type: 'prompt', data: { text, images } });
+	}
+
+	function handleEditMessage(index: number, newText: string) {
+		messages = messages.map((msg, i) => {
+			if (i === index && msg.role === 'user') {
+				return { ...msg, content: newText, timestamp: Date.now() };
+			}
+			return msg;
+		});
+	}
+
+	function handleExportDone() {
+		showToast({ type: 'success', title: 'Export initiated', message: 'Check the messages for export status.' });
+		showExport = false;
+	}
+
+	function handleInsertPromptTemplate(text: string) {
+		draftInputText = text;
+		showPromptTemplates = false;
+		activeTab = 'chat';
 	}
 
 	async function handleNewSession() {
@@ -645,6 +663,21 @@
 	async function handleRenameSession() {
 		sendMessage({ type: 'showRenameSessionDialog' });
 	}
+
+	// Listen for show-tour event from SettingsPanel
+	$effect(() => {
+		function handleShowTour() { showOnboarding = true; }
+		window.addEventListener('show-tour', handleShowTour);
+		return () => window.removeEventListener('show-tour', handleShowTour);
+	});
+
+	function completeOnboarding() {
+		showOnboarding = false;
+		try {
+			localStorage.setItem('pilots-seen-tour', 'true');
+		} catch {}
+		showToast({ type: 'success', title: 'Tour complete!', message: 'Press 1-7 to switch tabs, use / for commands.' });
+	}
 </script>
 
 <div class="app">
@@ -661,6 +694,7 @@
 		onRenameSession={handleRenameSession}
 		onSwitchToModels={() => activeTab = 'models'}
 		onRunUpdate={() => sendMessage({ type: 'checkForUpdates' })}
+		onShowTour={() => (showOnboarding = true)}
 		{hasUpdates}
 		{piUpdateAvailable}
 		{packageUpdateCount}
@@ -669,37 +703,37 @@
 	<div class="main">
 		<nav class="sidebar">
 			<div class="nav-group">
-				<button onclick={() => (activeTab = 'chat')} class:active={activeTab === 'chat'} title="Conversation">
+				<button onclick={() => (activeTab = 'chat')} class:active={activeTab === 'chat'} title="Conversation (1)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
 					</svg>
 				</button>
 
-				<button onclick={() => (activeTab = 'sessions')} class:active={activeTab === 'sessions'} title="History">
+				<button onclick={() => (activeTab = 'sessions')} class:active={activeTab === 'sessions'} title="History (2)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
 					</svg>
 				</button>
 
-				<button onclick={() => (activeTab = 'models')} class:active={activeTab === 'models'} title="Models">
+				<button onclick={() => (activeTab = 'models')} class:active={activeTab === 'models'} title="Models (3)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1m-1.636 6.364l-.707-.707M12 21v-1m-6.364-1.636l.707-.707M3 12h1m1.636-6.364l.707.707M12 8a4 4 0 110 8 4 4 0 010-8z" />
 					</svg>
 				</button>
 
-				<button onclick={() => (activeTab = 'providers')} class:active={activeTab === 'providers'} title="Provider Settings">
+				<button onclick={() => (activeTab = 'providers')} class:active={activeTab === 'providers'} title="Provider Settings (4)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M12 15v3M12 6v3M6 9h12M8 12a4 4 0 108 0 4 4 0 00-8 0z" />
 					</svg>
 				</button>
 
-				<button onclick={() => (activeTab = 'tools')} class:active={activeTab === 'tools'} title="Capabilities">
+				<button onclick={() => (activeTab = 'tools')} class:active={activeTab === 'tools'} title="Capabilities (5)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
 					</svg>
 				</button>
 
-				<button onclick={() => (activeTab = 'packages')} class:active={activeTab === 'packages'} title="Packages">
+				<button onclick={() => (activeTab = 'packages')} class:active={activeTab === 'packages'} title="Packages (6)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M21 16.5c0 .552-.448 1-1 1H4c-.552 0-1-.448-1-1V8.5c0-.552.448-1 1-1h16c.552 0 1 .448 1 1v8zM21 8.5V6c0-.552-.448-1-1-1H4c-.552 0-1 .448-1 1v2.5M4 12h16" />
 					</svg>
@@ -707,7 +741,7 @@
 			</div>
 
 			<div class="nav-footer">
-				<button onclick={() => (activeTab = 'settings')} class:active={activeTab === 'settings'} title="Preferences">
+				<button onclick={() => (activeTab = 'settings')} class:active={activeTab === 'settings'} title="Preferences (7)">
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
 						<circle cx="12" cy="12" r="3" />
@@ -737,6 +771,10 @@
 					{contextWindow}
 					{autoCompaction}
 					onCompact={handleCompact}
+					onEditMessage={handleEditMessage}
+					onShowExport={() => (showExport = true)}
+					onShowPromptTemplates={() => (showPromptTemplates = true)}
+					previousResourceCount={previousResourceCount}
 				/>
 			{:else if activeTab === 'sessions'}
 				<SessionTree />
@@ -759,6 +797,26 @@
 		</main>
 	</div>
 </div>
+
+<Toast />
+
+{#if showOnboarding}
+	<OnboardingTour
+		onComplete={completeOnboarding}
+		onDismiss={completeOnboarding}
+	/>
+{/if}
+
+{#if showExport}
+	<ExportDialog onClose={() => (showExport = false)} />
+{/if}
+
+{#if showPromptTemplates}
+	<PromptTemplates
+		onSelectTemplate={handleInsertPromptTemplate}
+		onClose={() => (showPromptTemplates = false)}
+	/>
+{/if}
 
 <style>
 	.app {

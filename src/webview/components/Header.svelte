@@ -19,6 +19,7 @@
 		onRenameSession?: () => void;
 		onSwitchToModels?: () => void;
 		onRunUpdate?: () => void;
+		onShowTour?: () => void;
 		hasUpdates?: boolean;
 		piUpdateAvailable?: string | null;
 		packageUpdateCount?: number;
@@ -38,6 +39,7 @@
 		onRenameSession = () => {},
 		onSwitchToModels = () => {},
 		onRunUpdate = () => {},
+		onShowTour = () => {},
 		hasUpdates = false,
 		piUpdateAvailable = null,
 		packageUpdateCount = 0
@@ -185,6 +187,13 @@
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
 				<path d="M18.5 8.5a2.121 2.121 0 0 1 3 3L12 20l-4 1 1-4h5.5z" />
+			</svg>
+		</button>
+		<button class="help-btn" onclick={onShowTour} title="Help / Tour">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+				<circle cx="12" cy="12" r="10"/>
+				<path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+				<line x1="12" y1="17" x2="12.01" y2="17"/>
 			</svg>
 		</button>
 		<button
@@ -468,7 +477,7 @@
 		box-shadow: 0 0 14px oklch(from var(--color-primary) l c h / 0.4);
 	}
 
-	.rename-session-btn {
+	.rename-session-btn,.help-btn {
 		width: 28px;
 		height: 28px;
 		display: flex;
@@ -480,7 +489,7 @@
 		color: var(--color-text-muted);
 	}
 
-	.rename-session-btn:hover {
+	.rename-session-btn:hover,.help-btn:hover {
 		border-color: var(--color-primary);
 		background: var(--surface-tint);
 		color: var(--color-primary);
