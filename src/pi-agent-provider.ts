@@ -109,10 +109,8 @@ export class PiAgentProvider
 	/** Interval handle for polling extension statuses from the runner. */
 	private statusPoller: ReturnType<typeof setInterval> | undefined;
 
-	/** Set to true after the first successful agent turn; triggers the AI naming prompt. Reset on new/switch session. */
+	/** Set to true after the first successful auto-name so we only title a session once. */
 	private _autoNamingTriggered = false;
-	/** Set to true while we are waiting for the model to respond to an auto-naming prompt. */
-	private _expectingNamingResponse = false;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -515,112 +513,34 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.session = session;
 		this.session.subscribe(this.handleSessionEvent.bind(this));
 
-		// Bind extension UI context so package setStatus(") calls reach the webview
-		this.bindExtensionUI();
+		// Bind extension UI context so package setStatus() calls reach the webview.
+		// This also emits session_start to initialize extensions (LSP, indexing, etc.)
+		await this.bindExtensionUI();
 
 		return this.session;
 	}
 
-	/**
-	 * Send a prompt to the AI model asking it to generate a concise title
-	 * for the current conversation. The response is captured in
-	 * {@link processNamingResponse} on the next agent_end event.
-	 */
-	private async requestAiSessionName(): Promise<void> {
-		if (!this.session) return;
-		if (this.session.sessionName) return;
-
-		const messages = this.session.messages;
-		const firstUserMsg = messages.find((m) => m.role === "user");
-		if (!firstUserMsg) return;
-
-		const userText = extractTextFromMessage(firstUserMsg).slice(0, 300);
-
-		// The model sees the full conversation context above this point,
-		// so it knows what the session is about.
-		const namingPrompt =
-			`Generate a short, descriptive title (max 6 words) for this chat session. ` +
-			`Output ONLY the title — no quotes, no punctuation, no markdown, no explanation. ` +
-			`The user's first message was: "${userText}"`;
-
-		this._expectingNamingResponse = true;
-		this.logDebug("[PI] Sending auto-naming prompt to model");
-		try {
-			await this.session.prompt(namingPrompt);
-		} catch (e) {
-			this._expectingNamingResponse = false;
-			this.logError("[PI] Auto-naming prompt failed:", e);
-			// Fall back to heuristic naming if the AI call fails
-			this.tryHeuristicSessionName();
-		}
-	}
-
-	/**
-	 * Extract the session name from the model's response to the naming prompt.
-	 * Called from handleSessionEvent when _expectingNamingResponse is true.
-	 */
-	private processNamingResponse(): void {
-		this._expectingNamingResponse = false;
-		if (!this.session) return;
-		// Don't overwrite a name the user set manually while the AI prompt was in-flight
-		if (this.session.sessionName) return;
-
-		const lastAssistantMsg = [...this.session.messages]
-			.reverse()
-			.find((m) => m.role === "assistant");
-
-		if (!lastAssistantMsg) return;
-
-		let name = extractTextFromMessage(lastAssistantMsg)
-			.trim()
-			.replace(/^["'`]|["'`]$/g, "")   // strip surrounding quotes
-			.replace(/^Title:\s*/i, "")         // strip "Title:" prefix
-			.replace(/[*_~#]/g, "")             // strip markdown
-			.split("\n")[0]                     // first line only
-			.slice(0, 80)                        // safety truncation
-			.trim();
-
-		// Validate: must look like a reasonable title
-		if (!name || name.length < 3 || name.length > 80) {
-			this.tryHeuristicSessionName();
-			return;
-		}
-
-		// If the model ignored instructions and output a full sentence, try
-		// extracting the first key phrase.
-		if (name.includes(" ") && name.includes(".")) {
-			name = name.split(".")[0].trim();
-		}
-
-		this.session.setSessionName(name);
-		this.logDebug("[PI] AI-generated session name:", name);
-		// Immediately refresh so the sidebar picks up the new name
-		this.refreshSessionList();
-
-		// Also notify the webview directly for an instant update
-		this.notifyWebview({ type: "session-name-changed", data: { name } });
-	}
-
-	/** Fallback: use the heuristic approach when the AI prompt fails or responds poorly. */
-	private tryHeuristicSessionName(): void {
-		if (!this.session || this.session.sessionName) return;
+	/** Generate and apply a short session title from the first real exchange. */
+	private tryAutoSessionName(): boolean {
+		if (!this.session || this.session.sessionName) return false;
 
 		const messages = this.session.messages;
 		const firstUserMsg = messages.find((m) => m.role === "user");
 		const firstAssistantMsg = messages.find((m) => m.role === "assistant");
 
-		if (!firstUserMsg) return;
+		if (!firstUserMsg || !firstAssistantMsg) return false;
 
 		const userText = extractTextFromMessage(firstUserMsg);
-		const assistantText = firstAssistantMsg
-			? extractTextFromMessage(firstAssistantMsg)
-			: "";
+		const assistantText = extractTextFromMessage(firstAssistantMsg);
 
 		const name = generateSessionName(userText, assistantText);
 		if (name) {
-			this.logDebug("[PI] Heuristic session name (fallback):", name);
+			this.logDebug("[PI] Auto-generated session name:", name);
 			this.session.setSessionName(name);
+			return true;
 		}
+
+		return false;
 	}
 
 	async deleteSessions(sessionIds: string[]) {
@@ -736,6 +656,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Load skills, extensions, prompts, and context files from settings
 		await resourceLoader.reload();
 
+		// DIAGNOSTIC: Log extension count after reload
+		const extResult = resourceLoader.getExtensions();
+		console.log(`[PiLot DIAGNOSTIC] After resourceLoader.reload(): ${extResult.extensions.length} extensions loaded`);
+		if (extResult.extensions.length > 0) {
+			console.log('[PiLot DIAGNOSTIC] First 3 extensions:', extResult.extensions.slice(0, 3).map((e: any) => e.path));
+		}
+		if (extResult.errors.length > 0) {
+			console.log('[PiLot DIAGNOSTIC] Extension loading errors:');
+			extResult.errors.forEach((err: any, i: number) => {
+				console.log(`  [${i}] ${err.path}: ${err.error}`);
+			});
+		}
+
 		return {
 			cwd,
 			agentDir: getAgentDir(),
@@ -747,7 +680,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async newSession() {
 		this._autoNamingTriggered = false;
-		this._expectingNamingResponse = false;
 		// Dispose old session properly before creating a new one
 		this.stopStatusPoller();
 		this.extensionStatuses.clear();
@@ -793,17 +725,21 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			let prompts: any[] = [];
 			try {
 				const rl = (this.session as any).resourceLoader;
+				console.log('[PiLot DIAGNOSTIC] sendSessionResources - resourceLoader exists:', !!rl);
 				if (rl) {
 					const agentsFilesResult = rl.getAgentsFiles?.();
 					contextFiles = agentsFilesResult?.agentsFiles || [];
 					const sr = rl.getSkills();
 					skills = sr.skills || [];
 					const er = rl.getExtensions();
+					console.log('[PiLot DIAGNOSTIC] sendSessionResources - extensions array length:', er.extensions?.length);
+					console.log('[PiLot DIAGNOSTIC] sendSessionResources - first 3 extensions:', er.extensions?.slice(0, 3).map((e: any) => e.path));
 					extensions = er.extensions || [];
 					const pr = rl.getPrompts?.();
 					prompts = pr?.prompts || [];
 				}
-			} catch {
+			} catch (e) {
+				console.error('[PiLot DIAGNOSTIC] sendSessionResources error:', e);
 				contextFiles = [];
 				skills = [];
 				extensions = [];
@@ -871,7 +807,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async switchSession(sessionId: string) {
 		this._autoNamingTriggered = false;
-		this._expectingNamingResponse = false;
 		// Find the session info from the list
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -1560,32 +1495,27 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		if (event.type === "session_info_changed") {
+			this.refreshSessionList().catch((e) =>
+				this.logError("[PI] refreshSessionList in event handler failed:", e),
+			);
+			this.notifyWebview({
+				type: "session-name-changed",
+				data: { name: event.name },
+			});
 			this.sendSessionResources().catch((e) =>
 				this.logError("[PI] sendSessionResources in event handler failed:", e),
 			);
 		}
 
-		// ── AI auto-naming flow ──────────────────
-		// Phase 2: capture the model's response to the naming prompt
-		if (
-			event.type === "agent_end" &&
-			!event.willRetry &&
-			this._expectingNamingResponse
-		) {
-			this.processNamingResponse();
-		}
-
-		// Phase 1: after the first real user+assistant exchange, send the naming prompt
+		// ── Session auto-naming flow ──────────────────
+		// Title the session after the first real user+assistant exchange.
 		if (
 			event.type === "agent_end" &&
 			!event.willRetry &&
 			!this._autoNamingTriggered &&
-			!this._expectingNamingResponse
+			!this.session?.sessionName
 		) {
-			this._autoNamingTriggered = true;
-			if (!this.session?.sessionName) {
-				this.requestAiSessionName();
-			}
+			this._autoNamingTriggered = this.tryAutoSessionName();
 		}
 
 		// Derive activity statuses from session events
@@ -1688,7 +1618,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	 * and also set it on the session's _extensionUIContext field so that reload()
 	 * preserves it.
 	 */
-	private bindExtensionUI(): void {
+	private async bindExtensionUI(): Promise<void> {
 		if (!this.session) return;
 
 		try {
@@ -1705,9 +1635,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				input: async () => undefined,
 				notify: (message: string, type?: string) => {
 					this.logDebug(`[PI] Extension notify: ${type || "info"}: ${message}`);
+					this.notifyWebview({
+						type: "extension-notify",
+						data: { message, type: type || "info" },
+					});
 				},
 				onTerminalInput: () => () => {},
 				setStatus: (key: string, text: string | undefined) => {
+					console.log(`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`);
 					if (text === undefined || text === null) {
 						this.extensionStatuses.delete(key);
 					} else {
@@ -1758,18 +1693,63 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			runner.setUIContext(uiContext);
 
 			// Also set the internal _extensionUIContext field so session.reload() preserves it.
-			// This is accessed via the session's private field, which we set using bracket notation
-			// since AgentSession doesn't expose a public setter for this.
 			(this.session as any)._extensionUIContext = uiContext;
 
-			const extensionCount = runner.getExtensionPaths?.()?.length ?? 0;
+			const extensionPaths = runner.getExtensionPaths?.() ?? [];
+			const extensionCount = extensionPaths.length;
+			console.log(`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`);
+			if (extensionCount > 0) {
+				console.log('[PiLot DIAGNOSTIC] Extension paths:', extensionPaths);
+			}
+
+			// Check if extensions have session_start handlers
+			const extensions = (runner as any).extensions ?? [];
+			console.log(`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`);
+			if (extensions.length > 0) {
+				const handlers = extensions.map((ext: any) => ({
+					path: ext.path,
+					hasSessionStart: ext.handlers?.has('session_start'),
+					handlerCount: ext.handlers?.get('session_start')?.length ?? 0,
+				}));
+				console.log('[PiLot DIAGNOSTIC] Extension handlers:', handlers);
+			}
+
 			this.logDebug(`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`);
 
 			// Re-apply bindings so the new UI context is used by the runner
 			(this.session as any)._applyExtensionBindings?.(runner);
 
+			// CRITICAL: Emit session_start to initialize extensions
+			// Without this, extensions never run their initialization handlers (LSP setup, indexing, etc.)
+			// and never call setStatus() to report their activity.
+			const sessionStartEvent = (this.session as any)._sessionStartEvent ?? {
+				type: "session_start" as const,
+				reason: "startup" as const,
+				cwd: this.session.sessionManager.getCwd(),
+				sessionPath: (this.session as any).sessionFile,
+			};
+
+			// Store it for future reload() calls
+			(this.session as any)._sessionStartEvent = sessionStartEvent;
+
+			console.log('[PiLot DIAGNOSTIC] Emitting session_start event:', sessionStartEvent);
+			this.logDebug("[PI] Emitting session_start to extensions");
+			await runner.emit(sessionStartEvent);
+			console.log('[PiLot DIAGNOSTIC] session_start emitted successfully');
+
+			// Let extensions discover additional resources (skills, prompts, themes)
+			await (this.session as any).extendResourcesFromExtensions?.("startup");
+
+			console.log(`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.extensionStatuses.size}`);
+			if (this.extensionStatuses.size > 0) {
+				console.log('[PiLot DIAGNOSTIC] Statuses:', Object.fromEntries(this.extensionStatuses));
+			}
+
+			this.logDebug("[PI] Extensions initialized");
+
 			// Send any statuses that extensions may have already set during initialization
 			if (this.extensionStatuses.size > 0) {
+				console.log('[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview');
 				this.notifyWebview({
 					type: "extension-statuses-full",
 					data: Object.fromEntries(this.extensionStatuses),

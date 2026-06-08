@@ -4,7 +4,13 @@ import tseslint from "typescript-eslint";
 
 export default [
 	{
-		ignores: ["dist/**", "node_modules/**", "esbuild.config.mjs"],
+		ignores: [
+			"dist/**",
+			"dist-tsc/**",
+			"node_modules/**",
+			"esbuild.config.mjs",
+			"svelte.config.js",
+		],
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,
@@ -19,6 +25,26 @@ export default [
 		rules: {
 			"no-undef": "off",
 			"@typescript-eslint/no-explicit-any": "off",
+		},
+	},
+	{
+		files: ["src/**/*.cjs"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-require-imports": "off",
+			"no-undef": "off",
+			"@typescript-eslint/no-unused-vars": [
+				"error",
+				{
+					argsIgnorePattern: "^_",
+					varsIgnorePattern: "^_",
+					caughtErrors: "none",
+				},
+			],
 		},
 	},
 ];

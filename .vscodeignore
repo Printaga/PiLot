@@ -5,6 +5,7 @@ out/**
 dist-tsc/**
 node_modules/**
 .git**
+.kilo
 .vscodeignore
 graphify-out
 .pi/**

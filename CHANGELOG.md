@@ -2,7 +2,7 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [1.3.0] - 2026-06-08
+## [2.0.0] - 2026-06-09
 
 ### Added
 
@@ -27,6 +27,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Changed
 
 - Refactored codebase structure breaking MessageHandler circular dependencies
+- Removing bundeled PI binary from the extension package, rely on the users' PI binary installation
 - Industrial monospace theme overhaul for the entire UI
 - Extension UI context binding to prevent double initialization
 - Extracted binary resolution into dedicated pi-binary.ts module

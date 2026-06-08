@@ -315,6 +315,15 @@
 
       case "error":
         isStreaming = false;
+        // Clean up any dangling streaming message that never got message_end
+        // (e.g. when agent.prompt() throws before emitting end events)
+        if (messages.length > 0 && messages[messages.length - 1].isStreaming) {
+          const lastMsg = messages[messages.length - 1];
+          messages = [
+            ...messages.slice(0, -1),
+            { ...lastMsg, isStreaming: false },
+          ];
+        }
         showToast({
           type: "error",
           title: "Error",
@@ -448,6 +457,14 @@
         activityStatuses = rest;
         break;
       }
+
+      case "extension-notify": {
+        const { message, type } = data;
+        if (message) {
+          showToast({ message, title: message, type: type || "info" });
+        }
+        break;
+      }
     }
   }
 
@@ -488,7 +505,9 @@
           // Extract initial text content from the message if available
           // (covers non-streaming providers or partial content in start event)
           const startContent = extractTextFromAssistantMessage(event.message);
-          const startThinking = extractThinkingFromAssistantMessage(event.message);
+          const startThinking = extractThinkingFromAssistantMessage(
+            event.message,
+          );
           if (msgRole === "assistant" || !msgRole || msgRole === "system") {
             messages = [
               ...messages,
@@ -508,8 +527,18 @@
         if (messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           // Extract final content from the completed message to ensure nothing is lost
-          const finalContent = extractTextFromAssistantMessage(event.message);
-          const finalThinking = extractThinkingFromAssistantMessage(event.message);
+          let finalContent = extractTextFromAssistantMessage(event.message);
+          const finalThinking = extractThinkingFromAssistantMessage(
+            event.message,
+          );
+          // Surface provider errors (rate limit, out of credits, etc.)
+          // The agent sets stopReason="error" + errorMessage on the assistant message
+          if (
+            event.message?.stopReason === "error" &&
+            event.message?.errorMessage
+          ) {
+            finalContent = `❌ ${event.message.errorMessage}`;
+          }
           if (lastMsg.isStreaming) {
             messages = [
               ...messages.slice(0, -1),
@@ -593,8 +622,12 @@
         ) {
           const lastMsg = messages[messages.length - 1];
           if (lastMsg.isStreaming) {
-            const partialContent = extractTextFromAssistantMessage(event.message);
-            const partialThinking = extractThinkingFromAssistantMessage(event.message);
+            const partialContent = extractTextFromAssistantMessage(
+              event.message,
+            );
+            const partialThinking = extractThinkingFromAssistantMessage(
+              event.message,
+            );
             // Only update if the partial message content is longer than what we've accumulated
             if (
               partialContent &&
@@ -639,6 +672,10 @@
                 if (m.role === "assistant") {
                   agentEndContent = extractTextFromAssistantMessage(m);
                   agentEndThinking = extractThinkingFromAssistantMessage(m);
+                  // Surface provider errors from agent_end payload too
+                  if (m.stopReason === "error" && m.errorMessage) {
+                    agentEndContent = `❌ ${m.errorMessage}`;
+                  }
                   break;
                 }
               }
@@ -972,7 +1009,6 @@
     showToast({
       type: "success",
       title: "Tour complete!",
-      message: "Press 1-7 to switch tabs, use / for commands.",
     });
   }
 </script>

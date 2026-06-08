@@ -39,11 +39,7 @@
 			content: 'Discover and install PI packages (extensions, skills, prompts, themes) from the marketplace in the Packages tab.',
 			icon: 'package'
 		},
-		{
-			title: '⌨️ Keyboard Shortcuts',
-			content: 'Use 1-7 number keys to switch tabs, Ctrl+Shift+A to attach files, Ctrl+Shift+; for voice dictation. Press Escape to close any dialog.',
-			icon: 'keyboard'
-		}
+
 	];
 
 	const isLast = $derived(step === steps.length - 1);
