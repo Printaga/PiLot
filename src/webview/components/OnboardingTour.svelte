@@ -16,7 +16,7 @@
 		},
 		{
 			title: '💬 Chat Panel',
-			content: 'Type messages in the chat box and press Enter to send. Use / for commands like /settings, /model, /export, and /fork.',
+			content: 'Type messages in the chat box and press Enter to send.',
 			icon: 'chat'
 		},
 		{

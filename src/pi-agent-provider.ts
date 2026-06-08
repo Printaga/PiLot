@@ -31,10 +31,6 @@ import {
 	type InstalledPackage,
 } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
-import {
-	tryHandleSlashCommand,
-	type SlashCommandContext,
-} from "./slash-commands.js";
 import { serializeMessages } from "./message-serializer.js";
 
 const THINKING_LEVELS: ReadonlySet<string> = new Set([
@@ -852,145 +848,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				installedPkgs.length,
 			);
 
-			// Collect all slash commands (built-in + extension registered)
-			const BUILTIN_SLASH_CMDS = [
-				{ name: "settings", description: "Open settings menu" },
-				{ name: "model", description: "Select model (opens selector UI)" },
-				{
-					name: "scoped-models",
-					description: "Enable/disable models for Ctrl+P cycling",
-				},
-				{
-					name: "export",
-					description:
-						"Export session (HTML default, or specify path: .html/.jsonl)",
-				},
-				{
-					name: "import",
-					description: "Import and resume a session from a JSONL file",
-				},
-				{ name: "share", description: "Share session as a secret GitHub gist" },
-				{ name: "copy", description: "Copy last agent message to clipboard" },
-				{ name: "name", description: "Set session display name" },
-				{ name: "session", description: "Show session info and stats" },
-				{ name: "changelog", description: "Show changelog entries" },
-				{ name: "hotkeys", description: "Show all keyboard shortcuts" },
-				{
-					name: "fork",
-					description: "Create a new fork from a previous user message",
-				},
-				{
-					name: "clone",
-					description: "Duplicate the current session at the current position",
-				},
-				{
-					name: "tree",
-					description: "Navigate session tree (switch branches)",
-				},
-				{ name: "login", description: "Configure provider authentication" },
-				{ name: "logout", description: "Remove provider authentication" },
-				{ name: "new", description: "Start a new session" },
-				{
-					name: "compact",
-					description: "Manually compact the session context",
-				},
-				{ name: "resume", description: "Resume a different session" },
-				{
-					name: "reload",
-					description:
-						"Reload keybindings, extensions, skills, prompts, and themes",
-				},
-				{ name: "quit", description: "Quit PI" },
-			];
-			let slashCmdList: Array<{
-				name: string;
-				description: string;
-				source: string;
-			}> = [];
-			try {
-				const builtinCmds = BUILTIN_SLASH_CMDS.map((cmd) => ({
-					name: `/${cmd.name}`,
-					description: cmd.description,
-					source: "builtin",
-				}));
-
-				const runner = this.session.extensionRunner;
-				const runnerExists = !!runner;
-				const runnerType = typeof runner;
-				console.log(
-					`[PiLot SLASHCMD] extensionRunner exists: ${runnerExists}, type: ${runnerType}`,
-				);
-				const extCmds = runner
-					? runner.getRegisteredCommands().map((cmd: any) => {
-							console.log(
-								`[PiLot SLASHCMD] ext cmd found: /${cmd.invocationName} - ${cmd.description}`,
-							);
-							return {
-								name: `/${cmd.invocationName}`,
-								description: cmd.description || "",
-								source: "extension",
-							};
-						})
-					: [];
-
-				console.log(`[PiLot SLASHCMD] ext commands found: ${extCmds.length}`);
-				const builtinNames = new Set(builtinCmds.map((c) => c.name));
-				const uniqueExtCmds = extCmds.filter(
-					(c: { name: string }) => !builtinNames.has(c.name),
-				);
-
-				// Collect prompt templates as slash commands (matching PI TUI behavior)
-				const templateCmds = (this.session.promptTemplates || []).map(
-					(t: any) => ({
-						name: `/${t.name}`,
-						description: t.description || "",
-						source: "template",
-					}),
-				);
-
-				// Collect skill commands if enabled in settings (matching PI TUI behavior)
-				const skillCmds: Array<{
-					name: string;
-					description: string;
-					source: string;
-				}> = [];
-				try {
-					const enableSkillCmds =
-						this.session.settingsManager?.getEnableSkillCommands?.() ?? true;
-					if (enableSkillCmds) {
-						for (const skill of skills) {
-							skillCmds.push({
-								name: `/skill:${skill.name}`,
-								description: skill.description || "",
-								source: "skill",
-							});
-						}
-					}
-				} catch {
-					// Skill commands optional; ignore errors
-				}
-
-				const allNames = new Set([
-					...builtinCmds.map((c) => c.name),
-					...uniqueExtCmds.map((c) => c.name),
-				]);
-				const uniqueTemplates = templateCmds.filter(
-					(c: { name: string }) => !allNames.has(c.name),
-				);
-				slashCmdList = [
-					...builtinCmds,
-					...uniqueExtCmds,
-					...uniqueTemplates,
-					...skillCmds,
-				];
-				console.log(
-					`[PiLot SLASHCMD] total slash commands sent: ${slashCmdList.length} (builtin: ${builtinCmds.length}, ext: ${uniqueExtCmds.length}, templates: ${uniqueTemplates.length}, skills: ${skillCmds.length})`,
-				);
-			} catch (e) {
-				this.logError("[PI] Failed to collect slash commands:", e);
-				slashCmdList = [];
-			}
-
 			this.notifyWebview({
 				type: "session-resources",
 				data: {
@@ -1018,8 +875,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 						path: p.path,
 					})),
 					packageCount: installedPkgs.length,
-					slashCommands: slashCmdList,
-					slashCommandCount: slashCmdList.length,
 				},
 			});
 		} catch (e) {
@@ -1065,6 +920,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.sessionManager = sessionManager;
 		this.session = session;
 		this.session.subscribe(this.handleSessionEvent.bind(this));
+
+		// Bind extension UI context so setStatus calls reach the webview.
+		// This also emits session_start to initialize extensions for this session.
+		await this.bindExtensionUI();
+
 		this._onDidChangeTreeData.fire();
 
 		// Send session ID + message history to webview
@@ -1112,17 +972,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.createSession();
 		}
 
-		// Send session resources to webview after creating a session so
-		// slash commands (built-in + extension-registered) appear in autocomplete.
 		if (isNewSession) {
 			await this.sendSessionResources();
-			// Some PI packages register commands asynchronously after session_start.
-			// Defer a second refresh to pick up any late-registered commands.
-			setTimeout(() => {
-				this.sendSessionResources().catch((e) =>
-					this.logError("[PI] Deferred slash command refresh failed:", e),
-				);
-			}, 2000);
 		}
 
 		if (!this.session) {
@@ -1141,57 +992,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			: validImages
 				? { images: validImages }
 				: undefined;
-
-		// Try to handle slash commands locally first (text-only slash commands)
-		if (text.startsWith("/") && !validImages) {
-			const handled = await this.tryHandleCommand(text);
-			if (handled) {
-				return;
-			}
-			// Extension command or unknown slash - execute immediately via prompt
-			// Normalize command name to lowercase for case-insensitive matching
-			// (PI SDK's getCommand is case-sensitive)
-			const spaceIdx = text.indexOf(" ");
-			const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-			const normalizedText =
-				cmdName.length > 0 && /[A-Z]/.test(cmdName)
-					? spaceIdx === -1
-						? `/${cmdName.toLowerCase()}`
-						: `/${cmdName.toLowerCase()}${text.slice(spaceIdx)}`
-					: text;
-			if (normalizedText !== text) {
-				console.log(
-					`[PiLot SLASHCMD] Normalized command: "${text}" -> "${normalizedText}"`,
-				);
-			}
-			// Debug: log registered extension commands
-			try {
-				const runner = this.session.extensionRunner;
-				const registeredCmds = runner?.getRegisteredCommands() ?? [];
-				const cmdLower = cmdName.toLowerCase();
-				const foundCmd = registeredCmds.find(
-					(c: any) => c.invocationName === cmdLower,
-				);
-				console.log(
-					`[PiLot SLASHCMD] Executing "/${cmdName}": ${registeredCmds.length} ext cmds, found="${foundCmd?.invocationName ?? "none"}", templates=${(this.session.promptTemplates ?? []).length}`,
-				);
-			} catch (e) {
-				console.log(`[PiLot SLASHCMD] Debug failed:`, e);
-			}
-			try {
-				await this.session.prompt(normalizedText, promptOpts);
-			} catch (error) {
-				this.notifyWebview({
-					type: "error",
-					data: {
-						message: error instanceof Error ? error.message : String(error),
-						timestamp: Date.now(),
-					},
-				});
-				throw error;
-			}
-			return;
-		}
 
 		// Resolve @file mentions to actual file content
 		const textWithFiles = await this.resolveFileMentions(text);
@@ -1216,52 +1016,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			});
 			throw error;
 		}
-	}
-
-	/** Try to handle slash commands locally. Returns true if handled. */
-	private async tryHandleCommand(text: string): Promise<boolean> {
-		// Handle /logout here — it needs direct access to session.prompt
-		// with streamingBehavior: "steer" which differs from the default prompt path.
-		const spaceIdx = text.indexOf(" ");
-		const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-
-		if (cmd === "logout") {
-			try {
-				if (this.session) {
-					await this.session.prompt(text, { streamingBehavior: "steer" });
-				}
-			} catch (error) {
-				this.notifyWebview({
-					type: "error",
-					data: {
-						message: error instanceof Error ? error.message : String(error),
-						timestamp: Date.now(),
-					},
-				});
-			}
-			return true;
-		}
-
-		const ctx: SlashCommandContext = {
-			notifyWebview: this.notifyWebview.bind(this),
-			logError: this.logError.bind(this),
-			session: this.session
-				? {
-						sessionName: this.session.sessionName,
-						sessionId: this.session.sessionId,
-						setSessionName: (n) => this.session!.setSessionName(n),
-						compact: (t) => this.session!.compact(t),
-						getSessionStats: () => this.session!.getSessionStats(),
-						exportToJsonl: (p) => this.session!.exportToJsonl(p),
-						exportToHtml: (p) => this.session!.exportToHtml(p),
-						getLastAssistantText: () => this.session!.getLastAssistantText(),
-						messages: this.session!.messages,
-					}
-				: undefined,
-			forkSession: this.forkSession.bind(this),
-			sendSessionResources: this.sendSessionResources.bind(this),
-		};
-		return tryHandleSlashCommand(text, ctx);
 	}
 
 	async steer(text: string, images?: any[]) {
@@ -1993,9 +1747,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					) => any,
 					options?: { overlay?: boolean },
 				): Promise<T> => {
-					// TUI-based commands like /rtk require interactive terminal mode
-					// Show a notification so user knows the command was received
-					// Try to extract a useful identifier from the factory
 					const factoryName = factory.name || "";
 					const callerLine =
 						new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
@@ -2008,13 +1759,28 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 						`[PI] Extension tried to show custom UI: factory=${factoryName}, caller=${callerLine}`,
 					);
 					void options;
-					this.notifyWebview({
-						type: "extension-notify",
-						data: {
-							message: `${actionTag} requires interactive TUI mode. Use the PI terminal for full functionality.`,
-							type: "info",
-						},
-					});
+
+					// Offer to open the PI TUI so the user can run this command interactively
+					const openTerminal = "Open in PI Terminal";
+					const choice = await vscode.window.showInformationMessage(
+						`${actionTag} needs interactive TUI. Open the PI terminal to run it.`,
+						openTerminal,
+					);
+
+					if (choice === openTerminal) {
+						const binaryPath = findPiBinary();
+						const sessionFile = (this.session as any)?.sessionFile;
+						const cwd =
+							this.session?.sessionManager?.getCwd?.() ?? process.cwd();
+						const terminalArgs = sessionFile ? ["--continue"] : [];
+						const term = vscode.window.createTerminal({
+							name: "PI Terminal",
+							cwd,
+						});
+						term.sendText(`${binaryPath} ${terminalArgs.join(" ")}`.trim());
+						term.show();
+					}
+
 					return undefined as unknown as T;
 				},
 				pasteToEditor: () => {},
@@ -2102,6 +1868,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				);
 			}
 
+			// ── Forward extension loading errors (from createAgentSession) ──────────
+			// Extensions that FAILED to load during createAgentSession never got to call
+			// setStatus() because the noOpUIContext was active. Their errors are stored in
+			// the resource loader's extensionsResult.errors array. Forward them now.
+			this.forwardExtensionLoadingErrors();
+
 			this.logDebug("[PI] Extensions initialized");
 
 			// Send any statuses that extensions may have already set during initialization
@@ -2160,8 +1932,57 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					data: Object.fromEntries(this.extensionStatuses),
 				});
 			}
+
+			// Also re-check the resource loader for extension loading errors.
+			// These are set once during session creation but may change on reload.
+			this.forwardExtensionLoadingErrors();
 		} catch {
 			// Silently ignore — session may be disposed
+		}
+	}
+
+	/**
+	 * Forward extension loading errors from the resource loader as extension statuses.
+	 *
+	 * During createAgentSession(), extensions that FAIL to load (e.g., native module ABI
+	 * mismatch) are caught by loadExtension() and stored in the resource loader's
+	 * extensionsResult.errors array. These errors never reach setStatus() because the
+	 * no-op UI context is active at that point.
+	 *
+	 * This method reads those errors and creates status entries so they appear in the
+	 * ActivityBar alongside normal extension statuses.
+	 */
+	private forwardExtensionLoadingErrors(): void {
+		if (!this.session) return;
+
+		try {
+			const rl = (this.session as any).resourceLoader;
+			if (!rl) return;
+
+			const er = rl.getExtensions();
+			if (!er.errors || er.errors.length === 0) return;
+
+			for (const err of er.errors) {
+				if (!err.path || !err.error) continue;
+				const errKey = `ext:error:${err.path}`;
+				if (this.extensionStatuses.has(errKey)) continue;
+
+				const errorText =
+					typeof err.error === "string"
+						? err.error
+						: err.error?.message || String(err.error);
+				// Truncate long load errors to first 200 chars
+				const displayText =
+					errorText.length > 200 ? errorText.slice(0, 200) + "…" : errorText;
+
+				this.extensionStatuses.set(errKey, displayText);
+				this.notifyWebview({
+					type: "extension-status",
+					data: { key: errKey, text: displayText },
+				});
+			}
+		} catch (e) {
+			this.logDebug("[PI] Failed to forward extension loading errors:", e);
 		}
 	}
 

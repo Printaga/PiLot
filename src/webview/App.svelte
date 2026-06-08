@@ -262,7 +262,6 @@
         break;
 
       case "session-resources":
-        console.log("[PiLot SLASHCMD] session-resources slashCommands:", data?.slashCommands?.length, data?.slashCommands?.map((c: any) => c.name));
         // Track previous resource counts for change detection (Feature 9)
         if (sessionResources) {
           previousResourceCount = {

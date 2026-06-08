@@ -423,8 +423,7 @@ Scope:
 
     <div class="dialog-footer">
       <span class="footer-hint"
-        >Templates insert editable starter text. Type <kbd>/</kbd> in chat for slash
-        commands.</span
+        >Templates insert editable starter text.</span
       >
     </div>
   </div>
@@ -682,15 +681,5 @@ Scope:
     color: var(--color-text-muted);
   }
 
-  .footer-hint kbd {
-    display: inline-block;
-    padding: 0 4px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 700;
-    background: oklch(from var(--color-surface-2) l c h / 0.5);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.3);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-  }
+
 </style>

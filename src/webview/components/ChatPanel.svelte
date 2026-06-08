@@ -36,12 +36,6 @@ import { tick } from "svelte";
     name: string;
     description?: string;
   }
-  interface SlashCommand {
-    name: string;
-    description: string;
-    source: string;
-  }
-
   interface SessionResources {
     contextFiles: ContextFile[];
     contextFileCount: number;
@@ -55,8 +49,6 @@ import { tick } from "svelte";
     promptCount: number;
     packages: Package[];
     packageCount: number;
-    slashCommands: SlashCommand[];
-    slashCommandCount: number;
   }
 
   const emptySessionResources: SessionResources = {
@@ -72,8 +64,6 @@ import { tick } from "svelte";
     promptCount: 0,
     packages: [],
     packageCount: 0,
-    slashCommands: [],
-    slashCommandCount: 0,
   };
 
   interface Props {
@@ -159,27 +149,7 @@ import { tick } from "svelte";
     }
   });
 
-  // Internal slash command state
-  let showSlashCommands = $state(false);
-  let slashQuery = $state("");
-  let selectedSlashIndex = $state(0);
 
-  // Fallback slash commands when session resources haven't loaded yet
-  const fallbackSlashCommands: SlashCommand[] = [
-    { name: "/settings", description: "Open settings menu", source: "builtin" },
-    { name: "/model", description: "Select model (opens selector UI)", source: "builtin" },
-    { name: "/new", description: "Start a new session", source: "builtin" },
-    { name: "/export", description: "Export session (HTML default, or specify path: .html/.jsonl)", source: "builtin" },
-    { name: "/compact", description: "Manually compact the session context", source: "builtin" },
-    { name: "/login", description: "Configure provider authentication", source: "builtin" },
-  ];
-
-  // Use dynamic slash commands from session resources, fall back to hardcoded list
-  const slashCommands = $derived(
-    (sessionResources?.slashCommands?.length ?? 0) > 0
-      ? sessionResources!.slashCommands
-      : fallbackSlashCommands
-  );
 
   const resources = $derived(sessionResources ?? emptySessionResources);
   const hasSessionResources = $derived(
@@ -250,13 +220,7 @@ import { tick } from "svelte";
       .filter((f) => f.toLowerCase().includes(autocompleteQuery.toLowerCase()))
       .slice(0, 20),
   );
-  const filteredSlashCommands = $derived(
-    slashCommands
-      .filter((cmd) =>
-        cmd.name.toLowerCase().includes(slashQuery.toLowerCase()),
-      )
-      .slice(0, 50),
-  );
+
 
   // Auto-scroll logic
   $effect(() => {
@@ -319,7 +283,6 @@ import { tick } from "svelte";
       inputText =
         inputText.slice(0, cursorPos) + text + inputText.slice(cursorPos);
       closeAutocomplete();
-      closeSlashCommands();
     }
     window.addEventListener(
       "voice-transcription",
@@ -341,12 +304,6 @@ import { tick } from "svelte";
     const text = inputText.trim();
     const hasImages = images.length > 0;
     if (!text && !hasImages) return;
-
-    if (text.startsWith("/") && !hasImages) {
-      handleSlashCommand(text);
-      inputText = "";
-      return;
-    }
 
     const imagesToSend = hasImages ? [...images] : undefined;
     images = [];
@@ -399,45 +356,7 @@ import { tick } from "svelte";
     }
   }
 
-  function handleSlashCommand(text: string) {
-    onSend(text);
-  }
-
   function handleKeydown(e: KeyboardEvent) {
-    if (showSlashCommands) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        selectedSlashIndex = Math.min(
-          selectedSlashIndex + 1,
-          filteredSlashCommands.length - 1,
-        );
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        selectedSlashIndex = Math.max(selectedSlashIndex - 1, 0);
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (filteredSlashCommands.length > 0) {
-          const cmd = filteredSlashCommands[selectedSlashIndex];
-          if (cmd) {
-            inputText = cmd.name + " ";
-            showSlashCommands = false;
-            slashQuery = "";
-            handleSubmit();
-          }
-        }
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeSlashCommands();
-        return;
-      }
-    }
-
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (showAutocomplete && filteredFiles.length > 0) {
@@ -466,24 +385,15 @@ import { tick } from "svelte";
     const cursorPos = textareaEl?.selectionStart || 0;
     const textBeforeCursor = inputText.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@\S*$/);
-    const slashMatch = textBeforeCursor.match(/\/\S*$/);
 
-    if (slashMatch && !atMatch && inputText.startsWith("/")) {
-      slashQuery = slashMatch[0].slice(1) || "";
-      showSlashCommands = true;
-      selectedSlashIndex = 0;
-      closeAutocomplete();
-      return;
-    } else if (atMatch) {
+    if (atMatch) {
       autocompleteQuery = atMatch[1] || "";
       showAutocomplete = true;
       selectedIndex = 0;
       if (files.length === 0) requestWorkspaceFiles();
-      closeSlashCommands();
       return;
     }
     closeAutocomplete();
-    closeSlashCommands();
   }
 
   function requestWorkspaceFiles() {
@@ -495,10 +405,6 @@ import { tick } from "svelte";
   function closeAutocomplete() {
     showAutocomplete = false;
     autocompleteQuery = "";
-  }
-  function closeSlashCommands() {
-    showSlashCommands = false;
-    slashQuery = "";
   }
 
   function handleAttachFile() {
@@ -731,7 +637,7 @@ import { tick } from "svelte";
           An unofficial GUI for the
           <a href="https://pi.dev/" target="_blank" rel="noopener noreferrer"
             >PI coding agent</a
-          >. Type a message below or use <kbd>/</kbd> for commands.
+          >. Type a message below to start.
         </p>
         <p class="subtitle hint">
           Press <kbd>1</kbd>-<kbd>7</kbd> for tabs · <kbd>Ctrl+Shift+A</kbd> attach
@@ -1101,7 +1007,7 @@ import { tick } from "svelte";
           }
           handleInput();
         }}
-        placeholder="Type a message... / for commands, @ to mention files"
+        placeholder="Type a message... @ to mention files"
         rows="4"
       ></textarea>
       {#if isStreaming}
@@ -1164,25 +1070,6 @@ import { tick } from "svelte";
       </div>
     {/if}
 
-    {#if showSlashCommands && filteredSlashCommands.length > 0}
-      <div class="autocomplete-dropdown slash-commands-dropdown">
-        {#each filteredSlashCommands as cmd, i}
-          <button
-            class="autocomplete-item slash-command-item"
-            class:selected={i === selectedSlashIndex}
-            onclick={() => {
-              inputText = cmd.name + " ";
-              showSlashCommands = false;
-              handleSubmit();
-            }}
-            onmouseenter={() => (selectedSlashIndex = i)}
-          >
-            <span class="slash-cmd-name">{cmd.name}</span>
-            <span class="slash-cmd-desc">{cmd.description}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
   </div>
 
   <div class="status-bar">
@@ -2031,35 +1918,7 @@ import { tick } from "svelte";
     opacity: 0.5;
     flex-shrink: 0;
   }
-  .slash-commands-dropdown {
-    max-height: 280px;
-  }
-  .slash-command-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-    padding: var(--space-2) var(--space-4);
-  }
-  .slash-cmd-name {
-    font-weight: 700;
-    color: var(--color-primary);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-  .autocomplete-item:hover .slash-cmd-name,
-  .autocomplete-item.selected .slash-cmd-name {
-    color: var(--color-text-inverse);
-  }
-  .slash-cmd-desc {
-    font-family: var(--font-display);
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-  .autocomplete-item:hover .slash-cmd-desc,
-  .autocomplete-item.selected .slash-cmd-desc {
-    color: var(--color-text-inverse);
-    opacity: 0.8;
-  }
+
   .file-path {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
