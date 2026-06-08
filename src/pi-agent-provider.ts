@@ -19,17 +19,23 @@ import { MessageHandler } from "./message-handler.js";
 import { VoiceManager } from "./voice-manager.js";
 import { type ThinkingLevel } from "./webview/types/index.js";
 import { getShellCommand, execFileAsync } from "./utils/shell.js";
+import {
+	checkBetterSqlite3,
+	describeABIStatus,
+} from "./utils/native-addons.js";
 
-import { findPiBinary, resolvePiBinary, parseInstalledPackages, type InstalledPackage } from "./pi-binary.js";
-import { SessionResources, isBinaryExtension, areImagesValid } from "./session-resources.js";
-import { tryHandleSlashCommand, type SlashCommandContext } from "./slash-commands.js";
+import {
+	findPiBinary,
+	resolvePiBinary,
+	parseInstalledPackages,
+	type InstalledPackage,
+} from "./pi-binary.js";
+import { SessionResources, areImagesValid } from "./session-resources.js";
+import {
+	tryHandleSlashCommand,
+	type SlashCommandContext,
+} from "./slash-commands.js";
 import { serializeMessages } from "./message-serializer.js";
-
-
-
-
-
-
 
 const THINKING_LEVELS: ReadonlySet<string> = new Set([
 	"off",
@@ -81,7 +87,10 @@ export class PiAgentProvider
 	private view?: vscode.WebviewView;
 	private session?: AgentSession;
 	// Cached update info for re-sending to webview on visibility change
-	private lastUpdateInfo: { piVersion: string | null; packageCount: number } = { piVersion: null, packageCount: 0 };
+	private lastUpdateInfo: { piVersion: string | null; packageCount: number } = {
+		piVersion: null,
+		packageCount: 0,
+	};
 	private config: PiAgentConfig;
 	private messageHandler: MessageHandler;
 	private isInitialized = false;
@@ -209,9 +218,12 @@ export class PiAgentProvider
 			const models = await this.getMergedModels();
 			this.availableModels = this.buildModelList(models);
 
-			const savedFavorites = this.context.globalState.get<string[]>("favoriteModels", []);
-			this.favoriteModels = savedFavorites.filter(pattern =>
-				this.availableModels.some(m => m.id === pattern)
+			const savedFavorites = this.context.globalState.get<string[]>(
+				"favoriteModels",
+				[],
+			);
+			this.favoriteModels = savedFavorites.filter((pattern) =>
+				this.availableModels.some((m) => m.id === pattern),
 			);
 
 			// Merge with PI CLI scoped models (bidirectional sync)
@@ -231,18 +243,22 @@ export class PiAgentProvider
 
 			this.isInitialized = true;
 
-		// Update SessionResources with the now-initialized settingsManager
-		if (this.settingsManager) {
-			this.sessionResources.setSettingsManager(this.settingsManager);
-		}
+			// Update SessionResources with the now-initialized settingsManager
+			if (this.settingsManager) {
+				this.sessionResources.setSettingsManager(this.settingsManager);
+			}
 
+			// Check native addon ABI compatibility (non-blocking, logs only)
+			this.checkNativeAddons();
 		} catch (error) {
 			// Restore PATH on failure
 			if (originalPath !== undefined && this.resolvedBinaryPath) {
 				process.env.PATH = originalPath;
 			}
 			this.logError("Failed to initialize PiLot Studio:", error);
-			vscode.window.showErrorMessage(`Failed to initialize PiLot Studio: ${error}`);
+			vscode.window.showErrorMessage(
+				`Failed to initialize PiLot Studio: ${error}`,
+			);
 		}
 	}
 
@@ -297,7 +313,7 @@ export class PiAgentProvider
 		try {
 			// Call reload on the session's resource loader to pick up setting changes
 			const rl = (this.session as any).resourceLoader;
-			if (rl && typeof rl.reload === 'function') {
+			if (rl && typeof rl.reload === "function") {
 				await rl.reload();
 				this.logDebug("[PI] Resource loader reloaded");
 			}
@@ -374,10 +390,6 @@ export class PiAgentProvider
 		});
 	}
 
-	private getWorkspacePath(): string {
-		return this.sessionResources.getWorkspacePath();
-	}
-
 	private getConfiguredPackages(): InstalledPackage[] {
 		return this.sessionResources.getConfiguredPackages();
 	}
@@ -386,7 +398,10 @@ export class PiAgentProvider
 		const binaryPath = this.resolvedBinaryPath || findPiBinary();
 		const direct = await execFileAsync(binaryPath, ["list"]);
 		let packages = parseInstalledPackages(direct.stdout);
-		this.logDebug("[PI] listPackagesFromCli: direct parsed packages:", packages);
+		this.logDebug(
+			"[PI] listPackagesFromCli: direct parsed packages:",
+			packages,
+		);
 
 		if (packages.length > 0) {
 			return packages;
@@ -416,6 +431,38 @@ export class PiAgentProvider
 		return packages;
 	}
 
+	/**
+	 * Check native addon (better-sqlite3) ABI compatibility.
+	 * Logs warnings when the compiled module doesn't match the current runtime.
+	 * Non-blocking — runs during initialization for diagnostic purposes.
+	 */
+	private checkNativeAddons(): void {
+		try {
+			const status = checkBetterSqlite3();
+			if (!status.ok) {
+				const abiInfo = describeABIStatus(status.runtimeABI, status.moduleABI);
+				const runtime = status.electronVersion
+					? `Electron ${status.electronVersion} `
+					: "";
+				this.log(`[PI] Native addon ABI mismatch: ${runtime}${abiInfo}`);
+				this.log(
+					"[PI] Code intelligence won't work until better-sqlite3 is rebuilt.",
+				);
+				if (status.modulePath) {
+					this.log(`[PI] Module path: ${status.modulePath}`);
+				}
+			} else {
+				this.logDebug("[PI] Native addon ABI check: OK");
+			}
+		} catch (error) {
+			// Don't let this block anything
+			this.logDebug(
+				"[PI] Native addon check failed:",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
 	private async refreshInstalledPackagesInWebview() {
 		if (!this.view) return;
 
@@ -435,7 +482,10 @@ export class PiAgentProvider
 		this.logDebug("[PiLot Studio] Reading HTML from:", builtHtmlUri.fsPath);
 		const builtHtmlBytes = await vscode.workspace.fs.readFile(builtHtmlUri);
 		const builtHtml = builtHtmlBytes.toString();
-		this.logDebug("[PiLot Studio] HTML content loaded, length:", builtHtml.length);
+		this.logDebug(
+			"[PiLot Studio] HTML content loaded, length:",
+			builtHtml.length,
+		);
 
 		// Replace relative asset paths (e.g. ./assets/index-xxx.js) with webview URIs
 		// NOTE: Vite's base: './' produces paths like src="./assets/index-xxx.js"
@@ -561,19 +611,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 							await fs.unlink(targetSessionInfo.path);
 						}
 					} catch (error) {
-						this.logError(
-							`[PI] Failed to delete session ${sessionId}:`,
-							error,
-						);
+						this.logError(`[PI] Failed to delete session ${sessionId}:`, error);
 						throw error;
 					}
 				}),
 			);
 
-			if (
-				this.session &&
-				sessionIds.includes(this.session.sessionId)
-			) {
+			if (this.session && sessionIds.includes(this.session.sessionId)) {
 				this.session.dispose();
 				this.session = undefined;
 				await this.newSession();
@@ -602,13 +646,25 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Read extra resource paths
 		const extraExtensions = config.get<string[]>("extraExtensions", []);
 		const extraSkills = config.get<string[]>("extraSkills", []);
-		const extraPromptTemplates = config.get<string[]>("extraPromptTemplates", []);
+		const extraPromptTemplates = config.get<string[]>(
+			"extraPromptTemplates",
+			[],
+		);
 
 		// Read discovery flags
-		const disableExtensions = config.get<boolean>("disableExtensionDiscovery", false);
+		const disableExtensions = config.get<boolean>(
+			"disableExtensionDiscovery",
+			false,
+		);
 		const disableSkills = config.get<boolean>("disableSkillDiscovery", false);
-		const disablePromptTemplates = config.get<boolean>("disablePromptTemplateDiscovery", false);
-		const disableContextFiles = config.get<boolean>("disableContextFiles", false);
+		const disablePromptTemplates = config.get<boolean>(
+			"disablePromptTemplateDiscovery",
+			false,
+		);
+		const disableContextFiles = config.get<boolean>(
+			"disableContextFiles",
+			false,
+		);
 
 		// Read system prompt settings
 		const systemPrompt = config.get<string | null>("systemPrompt", null);
@@ -642,15 +698,18 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			cwd,
 			agentDir: getAgentDir(),
 			settingsManager: this.settingsManager,
-			additionalExtensionPaths: extraExtensions.length > 0 ? extraExtensions : undefined,
+			additionalExtensionPaths:
+				extraExtensions.length > 0 ? extraExtensions : undefined,
 			additionalSkillPaths: extraSkills.length > 0 ? extraSkills : undefined,
-			additionalPromptTemplatePaths: extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
+			additionalPromptTemplatePaths:
+				extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
 			noExtensions: disableExtensions,
 			noSkills: disableSkills,
 			noPromptTemplates: disablePromptTemplates,
 			noContextFiles: disableContextFiles,
 			systemPrompt: systemPrompt || undefined,
-			appendSystemPrompt: appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
+			appendSystemPrompt:
+				appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
 		});
 
 		// Load skills, extensions, prompts, and context files from settings
@@ -658,12 +717,17 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// DIAGNOSTIC: Log extension count after reload
 		const extResult = resourceLoader.getExtensions();
-		console.log(`[PiLot DIAGNOSTIC] After resourceLoader.reload(): ${extResult.extensions.length} extensions loaded`);
+		console.log(
+			`[PiLot DIAGNOSTIC] After resourceLoader.reload(): ${extResult.extensions.length} extensions loaded`,
+		);
 		if (extResult.extensions.length > 0) {
-			console.log('[PiLot DIAGNOSTIC] First 3 extensions:', extResult.extensions.slice(0, 3).map((e: any) => e.path));
+			console.log(
+				"[PiLot DIAGNOSTIC] First 3 extensions:",
+				extResult.extensions.slice(0, 3).map((e: any) => e.path),
+			);
 		}
 		if (extResult.errors.length > 0) {
-			console.log('[PiLot DIAGNOSTIC] Extension loading errors:');
+			console.log("[PiLot DIAGNOSTIC] Extension loading errors:");
 			extResult.errors.forEach((err: any, i: number) => {
 				console.log(`  [${i}] ${err.path}: ${err.error}`);
 			});
@@ -725,21 +789,30 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			let prompts: any[] = [];
 			try {
 				const rl = (this.session as any).resourceLoader;
-				console.log('[PiLot DIAGNOSTIC] sendSessionResources - resourceLoader exists:', !!rl);
+				console.log(
+					"[PiLot DIAGNOSTIC] sendSessionResources - resourceLoader exists:",
+					!!rl,
+				);
 				if (rl) {
 					const agentsFilesResult = rl.getAgentsFiles?.();
 					contextFiles = agentsFilesResult?.agentsFiles || [];
 					const sr = rl.getSkills();
 					skills = sr.skills || [];
 					const er = rl.getExtensions();
-					console.log('[PiLot DIAGNOSTIC] sendSessionResources - extensions array length:', er.extensions?.length);
-					console.log('[PiLot DIAGNOSTIC] sendSessionResources - first 3 extensions:', er.extensions?.slice(0, 3).map((e: any) => e.path));
+					console.log(
+						"[PiLot DIAGNOSTIC] sendSessionResources - extensions array length:",
+						er.extensions?.length,
+					);
+					console.log(
+						"[PiLot DIAGNOSTIC] sendSessionResources - first 3 extensions:",
+						er.extensions?.slice(0, 3).map((e: any) => e.path),
+					);
 					extensions = er.extensions || [];
 					const pr = rl.getPrompts?.();
 					prompts = pr?.prompts || [];
 				}
 			} catch (e) {
-				console.error('[PiLot DIAGNOSTIC] sendSessionResources error:', e);
+				console.error("[PiLot DIAGNOSTIC] sendSessionResources error:", e);
 				contextFiles = [];
 				skills = [];
 				extensions = [];
@@ -758,7 +831,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			// Collect currently installed PI packages
 			const installedPkgs = await this.listPackages();
 
-			this.logDebug("[PI] sendSessionResources cwd:", cwd, "agentDir:", agentDir);
+			this.logDebug(
+				"[PI] sendSessionResources cwd:",
+				cwd,
+				"agentDir:",
+				agentDir,
+			);
 			this.logDebug(
 				"[PI] contextFiles:",
 				JSON.stringify(contextFiles.map((f: any) => f.path)),
@@ -773,6 +851,145 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				"packages:",
 				installedPkgs.length,
 			);
+
+			// Collect all slash commands (built-in + extension registered)
+			const BUILTIN_SLASH_CMDS = [
+				{ name: "settings", description: "Open settings menu" },
+				{ name: "model", description: "Select model (opens selector UI)" },
+				{
+					name: "scoped-models",
+					description: "Enable/disable models for Ctrl+P cycling",
+				},
+				{
+					name: "export",
+					description:
+						"Export session (HTML default, or specify path: .html/.jsonl)",
+				},
+				{
+					name: "import",
+					description: "Import and resume a session from a JSONL file",
+				},
+				{ name: "share", description: "Share session as a secret GitHub gist" },
+				{ name: "copy", description: "Copy last agent message to clipboard" },
+				{ name: "name", description: "Set session display name" },
+				{ name: "session", description: "Show session info and stats" },
+				{ name: "changelog", description: "Show changelog entries" },
+				{ name: "hotkeys", description: "Show all keyboard shortcuts" },
+				{
+					name: "fork",
+					description: "Create a new fork from a previous user message",
+				},
+				{
+					name: "clone",
+					description: "Duplicate the current session at the current position",
+				},
+				{
+					name: "tree",
+					description: "Navigate session tree (switch branches)",
+				},
+				{ name: "login", description: "Configure provider authentication" },
+				{ name: "logout", description: "Remove provider authentication" },
+				{ name: "new", description: "Start a new session" },
+				{
+					name: "compact",
+					description: "Manually compact the session context",
+				},
+				{ name: "resume", description: "Resume a different session" },
+				{
+					name: "reload",
+					description:
+						"Reload keybindings, extensions, skills, prompts, and themes",
+				},
+				{ name: "quit", description: "Quit PI" },
+			];
+			let slashCmdList: Array<{
+				name: string;
+				description: string;
+				source: string;
+			}> = [];
+			try {
+				const builtinCmds = BUILTIN_SLASH_CMDS.map((cmd) => ({
+					name: `/${cmd.name}`,
+					description: cmd.description,
+					source: "builtin",
+				}));
+
+				const runner = this.session.extensionRunner;
+				const runnerExists = !!runner;
+				const runnerType = typeof runner;
+				console.log(
+					`[PiLot SLASHCMD] extensionRunner exists: ${runnerExists}, type: ${runnerType}`,
+				);
+				const extCmds = runner
+					? runner.getRegisteredCommands().map((cmd: any) => {
+							console.log(
+								`[PiLot SLASHCMD] ext cmd found: /${cmd.invocationName} - ${cmd.description}`,
+							);
+							return {
+								name: `/${cmd.invocationName}`,
+								description: cmd.description || "",
+								source: "extension",
+							};
+						})
+					: [];
+
+				console.log(`[PiLot SLASHCMD] ext commands found: ${extCmds.length}`);
+				const builtinNames = new Set(builtinCmds.map((c) => c.name));
+				const uniqueExtCmds = extCmds.filter(
+					(c: { name: string }) => !builtinNames.has(c.name),
+				);
+
+				// Collect prompt templates as slash commands (matching PI TUI behavior)
+				const templateCmds = (this.session.promptTemplates || []).map(
+					(t: any) => ({
+						name: `/${t.name}`,
+						description: t.description || "",
+						source: "template",
+					}),
+				);
+
+				// Collect skill commands if enabled in settings (matching PI TUI behavior)
+				const skillCmds: Array<{
+					name: string;
+					description: string;
+					source: string;
+				}> = [];
+				try {
+					const enableSkillCmds =
+						this.session.settingsManager?.getEnableSkillCommands?.() ?? true;
+					if (enableSkillCmds) {
+						for (const skill of skills) {
+							skillCmds.push({
+								name: `/skill:${skill.name}`,
+								description: skill.description || "",
+								source: "skill",
+							});
+						}
+					}
+				} catch {
+					// Skill commands optional; ignore errors
+				}
+
+				const allNames = new Set([
+					...builtinCmds.map((c) => c.name),
+					...uniqueExtCmds.map((c) => c.name),
+				]);
+				const uniqueTemplates = templateCmds.filter(
+					(c: { name: string }) => !allNames.has(c.name),
+				);
+				slashCmdList = [
+					...builtinCmds,
+					...uniqueExtCmds,
+					...uniqueTemplates,
+					...skillCmds,
+				];
+				console.log(
+					`[PiLot SLASHCMD] total slash commands sent: ${slashCmdList.length} (builtin: ${builtinCmds.length}, ext: ${uniqueExtCmds.length}, templates: ${uniqueTemplates.length}, skills: ${skillCmds.length})`,
+				);
+			} catch (e) {
+				this.logError("[PI] Failed to collect slash commands:", e);
+				slashCmdList = [];
+			}
 
 			this.notifyWebview({
 				type: "session-resources",
@@ -796,8 +1013,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					vscodeExtensionCount: vscodeExtensions.length,
 					contextFiles: contextFiles.map((f: any) => ({ path: f.path })),
 					contextFileCount: contextFiles.length,
-					packages: installedPkgs.map((p) => ({ source: p.source, path: p.path })),
+					packages: installedPkgs.map((p) => ({
+						source: p.source,
+						path: p.path,
+					})),
 					packageCount: installedPkgs.length,
+					slashCommands: slashCmdList,
+					slashCommandCount: slashCmdList.length,
 				},
 			});
 		} catch (e) {
@@ -874,21 +1096,33 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
-	private isBinaryExtension(filePath: string): boolean {
-		return isBinaryExtension(filePath);
-	}
-
 	private async resolveFileMentions(text: string): Promise<string> {
 		return this.sessionResources.resolveFileMentions(text);
 	}
 
-	private areImagesValid(images: unknown[]): images is Array<{ type: "image"; data: string; mimeType: string }> {
+	private areImagesValid(
+		images: unknown[],
+	): images is Array<{ type: "image"; data: string; mimeType: string }> {
 		return areImagesValid(images);
 	}
 
 	async prompt(text: string, images?: any[]) {
+		const isNewSession = !this.session;
 		if (!this.session) {
 			await this.createSession();
+		}
+
+		// Send session resources to webview after creating a session so
+		// slash commands (built-in + extension-registered) appear in autocomplete.
+		if (isNewSession) {
+			await this.sendSessionResources();
+			// Some PI packages register commands asynchronously after session_start.
+			// Defer a second refresh to pick up any late-registered commands.
+			setTimeout(() => {
+				this.sendSessionResources().catch((e) =>
+					this.logError("[PI] Deferred slash command refresh failed:", e),
+				);
+			}, 2000);
 		}
 
 		if (!this.session) {
@@ -896,9 +1130,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		// Validate and convert images to ImageContent[]
-		const validImages = images && this.areImagesValid(images)
-			? images as Array<{ type: "image"; data: string; mimeType: string }>
-			: undefined;
+		const validImages =
+			images && this.areImagesValid(images)
+				? (images as Array<{ type: "image"; data: string; mimeType: string }>)
+				: undefined;
 
 		// Build prompt options: include images when provided, handle streaming
 		const promptOpts = this.session.isStreaming
@@ -914,8 +1149,37 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				return;
 			}
 			// Extension command or unknown slash - execute immediately via prompt
+			// Normalize command name to lowercase for case-insensitive matching
+			// (PI SDK's getCommand is case-sensitive)
+			const spaceIdx = text.indexOf(" ");
+			const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+			const normalizedText =
+				cmdName.length > 0 && /[A-Z]/.test(cmdName)
+					? spaceIdx === -1
+						? `/${cmdName.toLowerCase()}`
+						: `/${cmdName.toLowerCase()}${text.slice(spaceIdx)}`
+					: text;
+			if (normalizedText !== text) {
+				console.log(
+					`[PiLot SLASHCMD] Normalized command: "${text}" -> "${normalizedText}"`,
+				);
+			}
+			// Debug: log registered extension commands
 			try {
-				await this.session.prompt(text, promptOpts);
+				const runner = this.session.extensionRunner;
+				const registeredCmds = runner?.getRegisteredCommands() ?? [];
+				const cmdLower = cmdName.toLowerCase();
+				const foundCmd = registeredCmds.find(
+					(c: any) => c.invocationName === cmdLower,
+				);
+				console.log(
+					`[PiLot SLASHCMD] Executing "/${cmdName}": ${registeredCmds.length} ext cmds, found="${foundCmd?.invocationName ?? "none"}", templates=${(this.session.promptTemplates ?? []).length}`,
+				);
+			} catch (e) {
+				console.log(`[PiLot SLASHCMD] Debug failed:`, e);
+			}
+			try {
+				await this.session.prompt(normalizedText, promptOpts);
 			} catch (error) {
 				this.notifyWebview({
 					type: "error",
@@ -981,17 +1245,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const ctx: SlashCommandContext = {
 			notifyWebview: this.notifyWebview.bind(this),
 			logError: this.logError.bind(this),
-			session: this.session ? {
-				sessionName: this.session.sessionName,
-				sessionId: this.session.sessionId,
-				setSessionName: (n) => this.session!.setSessionName(n),
-				compact: (t) => this.session!.compact(t),
-				getSessionStats: () => this.session!.getSessionStats(),
-				exportToJsonl: (p) => this.session!.exportToJsonl(p),
-				exportToHtml: (p) => this.session!.exportToHtml(p),
-				getLastAssistantText: () => this.session!.getLastAssistantText(),
-				messages: this.session!.messages,
-			} : undefined,
+			session: this.session
+				? {
+						sessionName: this.session.sessionName,
+						sessionId: this.session.sessionId,
+						setSessionName: (n) => this.session!.setSessionName(n),
+						compact: (t) => this.session!.compact(t),
+						getSessionStats: () => this.session!.getSessionStats(),
+						exportToJsonl: (p) => this.session!.exportToJsonl(p),
+						exportToHtml: (p) => this.session!.exportToHtml(p),
+						getLastAssistantText: () => this.session!.getLastAssistantText(),
+						messages: this.session!.messages,
+					}
+				: undefined,
 			forkSession: this.forkSession.bind(this),
 			sendSessionResources: this.sendSessionResources.bind(this),
 		};
@@ -1001,9 +1267,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	async steer(text: string, images?: any[]) {
 		if (this.session) {
 			try {
-				const validImages = images && this.areImagesValid(images)
-					? images as Array<{ type: "image"; data: string; mimeType: string }>
-					: undefined;
+				const validImages =
+					images && this.areImagesValid(images)
+						? (images as Array<{
+								type: "image";
+								data: string;
+								mimeType: string;
+							}>)
+						: undefined;
 				await this.session.steer(text, validImages);
 			} catch (error) {
 				// Send error to webview
@@ -1022,9 +1293,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	async followUp(text: string, images?: any[]) {
 		if (this.session) {
 			try {
-				const validImages = images && this.areImagesValid(images)
-					? images as Array<{ type: "image"; data: string; mimeType: string }>
-					: undefined;
+				const validImages =
+					images && this.areImagesValid(images)
+						? (images as Array<{
+								type: "image";
+								data: string;
+								mimeType: string;
+							}>)
+						: undefined;
 				await this.session.followUp(text, validImages);
 			} catch (error) {
 				// Send error to webview
@@ -1209,10 +1485,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	 * Send update availability info (or clear signal) to the webview.
 	 * Called by the update checker when new updates are discovered or cleared.
 	 */
-	sendUpdatesToWebview(
-		piVersion: string | null,
-		packageCount: number,
-	): void {
+	sendUpdatesToWebview(piVersion: string | null, packageCount: number): void {
 		// Cache so we can re-send when the panel becomes visible
 		this.lastUpdateInfo = { piVersion, packageCount };
 
@@ -1251,7 +1524,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (this.cliModelIdsCache) return this.cliModelIdsCache;
 		if (!this.cliModelIdsPromise) {
 			this.cliModelIdsPromise = this._resolveCliModelIds()
-				.then(ids => {
+				.then((ids) => {
 					this.cliModelIdsCache = ids;
 					return ids;
 				})
@@ -1265,23 +1538,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	private _resolveCliModelIds(): Promise<Set<string>> {
 		const binaryPath = this.resolvedBinaryPath || findPiBinary();
-		return execFileAsync(binaryPath, ["--list-models"]).then(({ stdout, stderr }) => {
-			const output = (stderr || '') + '\n' + (stdout || '');
-			const models = new Set<string>();
+		return execFileAsync(binaryPath, ["--list-models"])
+			.then(({ stdout, stderr }) => {
+				const output = (stderr || "") + "\n" + (stdout || "");
+				const models = new Set<string>();
 
-			for (const line of output.split('\n')) {
-				// Match: "provider  modelId  context  max-out  thinking  images"
-				const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
-				if (match && match[1] !== 'provider' && !match[0].startsWith('Warning')) {
-					models.add(`${match[1]}/${match[2]}`);
+				for (const line of output.split("\n")) {
+					// Match: "provider  modelId  context  max-out  thinking  images"
+					const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
+					if (
+						match &&
+						match[1] !== "provider" &&
+						!match[0].startsWith("Warning")
+					) {
+						models.add(`${match[1]}/${match[2]}`);
+					}
 				}
-			}
 
-			return models;
-		}).catch(() => {
-			this.logError("[PI] Failed to list CLI models - is 'pi' installed and on PATH?");
-			return new Set<string>();
-		});
+				return models;
+			})
+			.catch(() => {
+				this.logError(
+					"[PI] Failed to list CLI models - is 'pi' installed and on PATH?",
+				);
+				return new Set<string>();
+			});
 	}
 
 	/**
@@ -1298,8 +1579,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (cliModels.size === 0) return;
 
 		// Only write patterns that the CLI actually knows about
-		const validPatterns = this.favoriteModels.filter(pattern =>
-			cliModels.has(pattern)
+		const validPatterns = this.favoriteModels.filter((pattern) =>
+			cliModels.has(pattern),
 		);
 
 		this.settingsManager.setEnabledModels(validPatterns);
@@ -1318,15 +1599,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (settingsModels.length === 0) return;
 
 		// Add CLI models that the extension also knows about
-		const newModels = settingsModels.filter(pattern =>
-			cliModels.has(pattern) &&
-			this.availableModels.some(m => m.id === pattern) &&
-			!this.favoriteModels.includes(pattern)
+		const newModels = settingsModels.filter(
+			(pattern) =>
+				cliModels.has(pattern) &&
+				this.availableModels.some((m) => m.id === pattern) &&
+				!this.favoriteModels.includes(pattern),
 		);
 
 		if (newModels.length > 0) {
 			this.favoriteModels = [...this.favoriteModels, ...newModels];
-			await this.context.globalState.update("favoriteModels", this.favoriteModels);
+			await this.context.globalState.update(
+				"favoriteModels",
+				this.favoriteModels,
+			);
 			this.notifyWebview({
 				type: "favorites-updated",
 				data: { favorites: this.favoriteModels },
@@ -1340,7 +1625,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	): Promise<string[]> {
 		if (isFavorite && !this.favoriteModels.includes(modelId)) {
 			// Guard: only add models that exist in the current registry
-			if (!this.availableModels.some(m => m.id === modelId)) {
+			if (!this.availableModels.some((m) => m.id === modelId)) {
 				return this.favoriteModels;
 			}
 			this.favoriteModels = [...this.favoriteModels, modelId];
@@ -1537,7 +1822,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			}
 			this.notifyWebview({
 				type: "activity-start",
-				data: { key: `tool:${event.toolCallId}`, text: description, activityType: "tool" },
+				data: {
+					key: `tool:${event.toolCallId}`,
+					text: description,
+					activityType: "tool",
+				},
 			});
 		} else if (event.type === "tool_execution_end") {
 			this.notifyWebview({
@@ -1562,27 +1851,46 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			if (event.errorMessage) {
 				this.notifyWebview({
 					type: "activity-start",
-					data: { key: "compaction", text: `Compaction error: ${event.errorMessage}`, activityType: "system" },
+					data: {
+						key: "compaction",
+						text: `Compaction error: ${event.errorMessage}`,
+						activityType: "system",
+					},
 				});
 			} else if (event.aborted) {
 				this.notifyWebview({
 					type: "activity-start",
-					data: { key: "compaction", text: "Compaction aborted", activityType: "system" },
+					data: {
+						key: "compaction",
+						text: "Compaction aborted",
+						activityType: "system",
+					},
 				});
 			} else {
 				this.notifyWebview({
 					type: "activity-start",
-					data: { key: "compaction", text: "Context compacted ✓", activityType: "system" },
+					data: {
+						key: "compaction",
+						text: "Context compacted ✓",
+						activityType: "system",
+					},
 				});
 			}
 			setTimeout(() => {
-				this.notifyWebview({ type: "activity-end", data: { key: "compaction" } });
+				this.notifyWebview({
+					type: "activity-end",
+					data: { key: "compaction" },
+				});
 			}, 3000);
 		} else if (event.type === "auto_retry_start") {
 			const attempt = event.attempt || 1;
 			this.notifyWebview({
 				type: "activity-start",
-				data: { key: "retry", text: `Retry ${attempt}/${event.maxAttempts || "?"}`, activityType: "system" },
+				data: {
+					key: "retry",
+					text: `Retry ${attempt}/${event.maxAttempts || "?"}`,
+					activityType: "system",
+				},
 			});
 		} else if (event.type === "auto_retry_end") {
 			this.notifyWebview({
@@ -1624,7 +1932,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		try {
 			const runner = this.session.extensionRunner;
 			if (!runner) {
-				this.logDebug("[PI] No extension runner found, skipping UI context binding");
+				this.logDebug(
+					"[PI] No extension runner found, skipping UI context binding",
+				);
 				return;
 			}
 
@@ -1661,7 +1971,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 							data: { key: "_working", text: message, activityType: "system" },
 						});
 					} else {
-						this.notifyWebview({ type: "activity-end", data: { key: "_working" } });
+						this.notifyWebview({
+							type: "activity-end",
+							data: { key: "_working" },
+						});
 					}
 				},
 				setWorkingVisible: () => {},
@@ -1671,7 +1984,39 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				setFooter: () => {},
 				setHeader: () => {},
 				setTitle: () => {},
-				custom: async <T>() => undefined as unknown as T,
+				custom: async <T>(
+					factory: (
+						tui: any,
+						theme: any,
+						keybindings: any,
+						done: (result: T) => void,
+					) => any,
+					options?: { overlay?: boolean },
+				): Promise<T> => {
+					// TUI-based commands like /rtk require interactive terminal mode
+					// Show a notification so user knows the command was received
+					// Try to extract a useful identifier from the factory
+					const factoryName = factory.name || "";
+					const callerLine =
+						new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
+					const actionTag = factoryName
+						? `'${factoryName}'`
+						: callerLine
+							? `(${callerLine})`
+							: "this command";
+					this.logDebug(
+						`[PI] Extension tried to show custom UI: factory=${factoryName}, caller=${callerLine}`,
+					);
+					void options;
+					this.notifyWebview({
+						type: "extension-notify",
+						data: {
+							message: `${actionTag} requires interactive TUI mode. Use the PI terminal for full functionality.`,
+							type: "info",
+						},
+					});
+					return undefined as unknown as T;
+				},
 				pasteToEditor: () => {},
 				setEditorText: () => {},
 				getEditorText: () => "",
@@ -1697,9 +2042,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			const extensionPaths = runner.getExtensionPaths?.() ?? [];
 			const extensionCount = extensionPaths.length;
-			console.log(`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`);
+			console.log(
+				`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`,
+			);
 			if (extensionCount > 0) {
-				console.log('[PiLot DIAGNOSTIC] Extension paths:', extensionPaths);
+				console.log("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
 			}
 
 			// Check if extensions have session_start handlers
@@ -1708,13 +2055,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			if (extensions.length > 0) {
 				const handlers = extensions.map((ext: any) => ({
 					path: ext.path,
-					hasSessionStart: ext.handlers?.has('session_start'),
-					handlerCount: ext.handlers?.get('session_start')?.length ?? 0,
+					hasSessionStart: ext.handlers?.has("session_start"),
+					handlerCount: ext.handlers?.get("session_start")?.length ?? 0,
 				}));
-				console.log('[PiLot DIAGNOSTIC] Extension handlers:', handlers);
+				console.log("[PiLot DIAGNOSTIC] Extension handlers:", handlers);
 			}
 
-			this.logDebug(`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`);
+			this.logDebug(
+				`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`,
+			);
 
 			// Re-apply bindings so the new UI context is used by the runner
 			(this.session as any)._applyExtensionBindings?.(runner);
@@ -1732,24 +2081,34 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			// Store it for future reload() calls
 			(this.session as any)._sessionStartEvent = sessionStartEvent;
 
-			console.log('[PiLot DIAGNOSTIC] Emitting session_start event:', sessionStartEvent);
+			console.log(
+				"[PiLot DIAGNOSTIC] Emitting session_start event:",
+				sessionStartEvent,
+			);
 			this.logDebug("[PI] Emitting session_start to extensions");
 			await runner.emit(sessionStartEvent);
-			console.log('[PiLot DIAGNOSTIC] session_start emitted successfully');
+			console.log("[PiLot DIAGNOSTIC] session_start emitted successfully");
 
 			// Let extensions discover additional resources (skills, prompts, themes)
 			await (this.session as any).extendResourcesFromExtensions?.("startup");
 
-			console.log(`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.extensionStatuses.size}`);
+			console.log(
+				`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.extensionStatuses.size}`,
+			);
 			if (this.extensionStatuses.size > 0) {
-				console.log('[PiLot DIAGNOSTIC] Statuses:', Object.fromEntries(this.extensionStatuses));
+				console.log(
+					"[PiLot DIAGNOSTIC] Statuses:",
+					Object.fromEntries(this.extensionStatuses),
+				);
 			}
 
 			this.logDebug("[PI] Extensions initialized");
 
 			// Send any statuses that extensions may have already set during initialization
 			if (this.extensionStatuses.size > 0) {
-				console.log('[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview');
+				console.log(
+					"[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview",
+				);
 				this.notifyWebview({
 					type: "extension-statuses-full",
 					data: Object.fromEntries(this.extensionStatuses),
@@ -2032,7 +2391,10 @@ export function extractTextFromMessage(msg: {
 	if (!msg.content) return "";
 	if (typeof msg.content === "string") return msg.content;
 	return msg.content
-		.filter((c): c is { type: string; text: string } => c.type === "text" && typeof c.text === "string")
+		.filter(
+			(c): c is { type: string; text: string } =>
+				c.type === "text" && typeof c.text === "string",
+		)
 		.map((c) => c.text)
 		.join(" ");
 }
@@ -2044,7 +2406,10 @@ export function extractTextFromMessage(msg: {
  * Prioritises the assistant's first substantive line because it tends to
  * summarise the task more naturally. Falls back to the first user message.
  */
-export function generateSessionName(userText: string, assistantText: string): string {
+export function generateSessionName(
+	userText: string,
+	assistantText: string,
+): string {
 	const clean = (text: string): string =>
 		text
 			.replace(/```[\s\S]*?```/g, "")
@@ -2076,10 +2441,12 @@ export function generateSessionName(userText: string, assistantText: string): st
 
 		if (lines.length > 0) {
 			// Remove polite conversational prefixes
-			const stripped = lines[0].replace(
-				/^(I'?ll\s|Let me\s|I can\s|I will\s|I'm going to\s|Here's\s|Here is\s)/i,
-				"",
-			).trim();
+			const stripped = lines[0]
+				.replace(
+					/^(I'?ll\s|Let me\s|I can\s|I will\s|I'm going to\s|Here's\s|Here is\s)/i,
+					"",
+				)
+				.trim();
 			const sentence = stripped.split(/[.!?\n]/)[0]?.trim() || stripped;
 			if (sentence.length > 3 && sentence.length < 60) {
 				return capitalize(sentence);

@@ -262,6 +262,7 @@
         break;
 
       case "session-resources":
+        console.log("[PiLot SLASHCMD] session-resources slashCommands:", data?.slashCommands?.length, data?.slashCommands?.map((c: any) => c.name));
         // Track previous resource counts for change detection (Feature 9)
         if (sessionResources) {
           previousResourceCount = {
@@ -461,7 +462,16 @@
       case "extension-notify": {
         const { message, type } = data;
         if (message) {
-          showToast({ message, title: message, type: type || "info" });
+          // Show package notifications as system messages in chat instead of popup toasts
+          messages = [
+            ...messages,
+            {
+              role: "system",
+              content: message,
+              timestamp: Date.now(),
+              isStreaming: false,
+            },
+          ];
         }
         break;
       }

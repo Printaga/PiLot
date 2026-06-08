@@ -36,6 +36,11 @@ import { tick } from "svelte";
     name: string;
     description?: string;
   }
+  interface SlashCommand {
+    name: string;
+    description: string;
+    source: string;
+  }
 
   interface SessionResources {
     contextFiles: ContextFile[];
@@ -50,6 +55,8 @@ import { tick } from "svelte";
     promptCount: number;
     packages: Package[];
     packageCount: number;
+    slashCommands: SlashCommand[];
+    slashCommandCount: number;
   }
 
   const emptySessionResources: SessionResources = {
@@ -65,6 +72,8 @@ import { tick } from "svelte";
     promptCount: 0,
     packages: [],
     packageCount: 0,
+    slashCommands: [],
+    slashCommandCount: 0,
   };
 
   interface Props {
@@ -155,107 +164,22 @@ import { tick } from "svelte";
   let slashQuery = $state("");
   let selectedSlashIndex = $state(0);
 
-  const slashCommands = [
-    {
-      name: "/settings",
-      description: "Open settings menu",
-      action: "showSettings",
-    },
-    {
-      name: "/model",
-      description: "Select model (opens selector UI)",
-      action: "switchModel",
-    },
-    {
-      name: "/scoped-models",
-      description: "Enable/disable models for Ctrl+P cycling",
-      action: "scopedModels",
-    },
-    {
-      name: "/export",
-      description:
-        "Export session (HTML default, or specify path: .html/.jsonl)",
-      action: "export",
-    },
-    {
-      name: "/import",
-      description: "Import and resume a session from a JSONL file",
-      action: "import",
-    },
-    {
-      name: "/share",
-      description: "Share session as a secret GitHub gist",
-      action: "share",
-    },
-    {
-      name: "/copy",
-      description: "Copy last agent message to clipboard",
-      action: "copy",
-    },
-    {
-      name: "/name",
-      description: "Set session display name",
-      action: "setName",
-    },
-    {
-      name: "/session",
-      description: "Show session info and stats",
-      action: "sessionInfo",
-    },
-    {
-      name: "/changelog",
-      description: "Show changelog entries",
-      action: "changelog",
-    },
-    {
-      name: "/hotkeys",
-      description: "Show all keyboard shortcuts",
-      action: "hotkeys",
-    },
-    {
-      name: "/fork",
-      description: "Create a new fork from a previous user message",
-      action: "fork",
-    },
-    {
-      name: "/clone",
-      description: "Duplicate the current session at the current position",
-      action: "clone",
-    },
-    {
-      name: "/tree",
-      description: "Navigate session tree (switch branches)",
-      action: "tree",
-    },
-    {
-      name: "/login",
-      description: "Configure provider authentication",
-      action: "login",
-    },
-    {
-      name: "/logout",
-      description: "Remove provider authentication",
-      action: "logout",
-    },
-    { name: "/new", description: "Start a new session", action: "newSession" },
-    {
-      name: "/compact",
-      description: "Manually compact the session context",
-      action: "compact",
-    },
-    {
-      name: "/resume",
-      description: "Resume a different session",
-      action: "resume",
-    },
-    {
-      name: "/reload",
-      description:
-        "Reload keybindings, extensions, skills, prompts, and themes",
-      action: "reload",
-    },
-    { name: "/quit", description: "Quit PI", action: "quit" },
+  // Fallback slash commands when session resources haven't loaded yet
+  const fallbackSlashCommands: SlashCommand[] = [
+    { name: "/settings", description: "Open settings menu", source: "builtin" },
+    { name: "/model", description: "Select model (opens selector UI)", source: "builtin" },
+    { name: "/new", description: "Start a new session", source: "builtin" },
+    { name: "/export", description: "Export session (HTML default, or specify path: .html/.jsonl)", source: "builtin" },
+    { name: "/compact", description: "Manually compact the session context", source: "builtin" },
+    { name: "/login", description: "Configure provider authentication", source: "builtin" },
   ];
+
+  // Use dynamic slash commands from session resources, fall back to hardcoded list
+  const slashCommands = $derived(
+    (sessionResources?.slashCommands?.length ?? 0) > 0
+      ? sessionResources!.slashCommands
+      : fallbackSlashCommands
+  );
 
   const resources = $derived(sessionResources ?? emptySessionResources);
   const hasSessionResources = $derived(
@@ -331,7 +255,7 @@ import { tick } from "svelte";
       .filter((cmd) =>
         cmd.name.toLowerCase().includes(slashQuery.toLowerCase()),
       )
-      .slice(0, 10),
+      .slice(0, 50),
   );
 
   // Auto-scroll logic
