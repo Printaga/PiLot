@@ -1,13 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import * as fs from "node:fs";
 
-import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
 	createAgentSession,
 	SessionManager,
 	AuthStorage,
-	DefaultPackageManager,
 	ModelRegistry,
 	SettingsManager,
 	getAgentDir,
@@ -17,508 +15,20 @@ import {
 	type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
+import { VoiceManager } from "./voice-manager.js";
+import { type ThinkingLevel } from "./webview/types/index.js";
+import { getShellCommand, execFileAsync } from "./utils/shell.js";
 
-type InstalledPackage = { source: string; path: string };
-type CommandResult = { code: number | null; stdout: string; stderr: string };
-type PackageSettingEntry = string | { source?: string };
+import { findPiBinary, resolvePiBinary, parseInstalledPackages, type InstalledPackage } from "./pi-binary.js";
+import { SessionResources, isBinaryExtension, areImagesValid } from "./session-resources.js";
+import { tryHandleSlashCommand, type SlashCommandContext } from "./slash-commands.js";
+import { serializeMessages } from "./message-serializer.js";
 
-function stripAnsi(text: string): string {
-	let result = "";
 
-	for (let index = 0; index < text.length; index++) {
-		const char = text[index];
-		if (char === "\u001b" && text[index + 1] === "[") {
-			index += 2;
-			while (index < text.length && !/[A-Za-z]/.test(text[index]!)) {
-				index++;
-			}
-			continue;
-		}
 
-		result += char;
-	}
 
-	return result;
-}
 
-// Find pi binary - check VS Code setting first, then workspace, then global paths
-function resolvePiBinaryFromSetting(rawPath: string): string | null {
-	const trimmed = rawPath.trim();
-	if (!trimmed || trimmed === "pi") {
-		return null; // Use default resolution
-	}
 
-	// If it's an absolute path, verify and return it
-	if (path.isAbsolute(trimmed)) {
-		try {
-			fs.accessSync(
-				trimmed,
-				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-			);
-			return trimmed;
-		} catch {
-			return null;
-		}
-	}
-
-	// If it looks like a relative path (contains separators), resolve from workspace root
-	const hasPathSep = trimmed.includes("/") || (process.platform === "win32" && trimmed.includes("\\"));
-	if (hasPathSep) {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		const basePath = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const resolvedPath = path.join(basePath, trimmed);
-		try {
-			fs.accessSync(
-				resolvedPath,
-				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-			);
-			return resolvedPath;
-		} catch {
-			return null;
-		}
-	}
-
-	// Treat as simple command name (like "my-pi-custom" or "pi-nightly")
-	return trimmed;
-}
-
-function findPiBinary(): string {
-	// Check VS Code setting first
-	const settingPath = vscode.workspace
-		.getConfiguration("pi-agent")
-		.get<string>("binaryPath", "pi");
-	const settingResult = resolvePiBinaryFromSetting(settingPath);
-	if (settingResult) {
-		return settingResult;
-	}
-
-	const workspaceFolders = vscode.workspace.workspaceFolders;
-	const home = process.env.HOME || process.env.USERPROFILE || "";
-
-	// Check workspace-local node_modules/.bin first
-	if (workspaceFolders) {
-		for (const folder of workspaceFolders) {
-			const workspacePath = path.join(
-				folder.uri.fsPath,
-				"node_modules",
-				".bin",
-				process.platform === "win32" ? "pi.cmd" : "pi",
-			);
-			try {
-				fs.accessSync(
-					workspacePath,
-					process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-				);
-				return workspacePath;
-			} catch {
-				continue;
-			}
-		}
-	}
-
-	// Check well-known global paths
-	const candidates =
-		process.platform === "win32"
-			? [
-					path.join(process.env.APPDATA || "", "npm", "pi"),
-					path.join(home, ".npm-global", "pi"),
-				]
-			: [
-					path.join(home, ".bun/bin/pi"),
-					path.join(home, ".local/bin/pi"),
-					path.join(home, ".npm-global/bin/pi"),
-					"pi",
-				];
-
-	for (const c of candidates) {
-		try {
-			fs.accessSync(
-				c,
-				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-			);
-			return c;
-		} catch {
-			continue;
-		}
-	}
-
-	return "pi";
-}
-
-/** Resolve pi binary to absolute path, returning null if not found. */
-function resolvePiBinary(): string | null {
-	const binary = findPiBinary();
-	// If it's an absolute path, verify execute permissions (on Windows, just check existence)
-	if (path.isAbsolute(binary)) {
-		try {
-			fs.accessSync(
-				binary,
-				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-			);
-			return binary;
-		} catch {
-			return null;
-		}
-	}
-	// For command names (like "pi" or custom binary names), check if they exist on PATH
-	// Use shell with proper quoting to handle spaces and special characters
-	try {
-		if (process.platform === "win32") {
-			// Windows: 'where' command checks for binary existence
-			const result = spawnSync("where", [binary], { shell: true, timeout: 1000 });
-			if (result.status === 0 && result.stdout) {
-				const resolved = result.stdout.toString().split(/\r?\n/)[0]?.trim();
-				return resolved || null;
-			}
-			return null;
-		} else {
-			// Unix: use shell with command -v to check PATH
-			// shell: true makes the shell command discoverable via PATH
-			const result = spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, { shell: true, timeout: 1000 });
-			if (result.status === 0 && result.stdout) {
-				const resolved = result.stdout.toString().trim();
-				return resolved || null;
-			}
-			return null;
-		}
-	} catch {
-		return null;
-	}
-}
-
-function parseInstalledPackages(output: string): InstalledPackage[] {
-	const packages: InstalledPackage[] = [];
-	const lines = stripAnsi(output).split("\n");
-
-	let pendingSource: string | null = null;
-
-	for (const rawLine of lines) {
-		const line = rawLine.replace(/\r/g, "");
-		const trimmed = line.trim();
-
-		if (
-			!trimmed ||
-			trimmed === "No packages installed." ||
-			/packages:\s*$/i.test(trimmed)
-		) {
-			continue;
-		}
-
-		if (/^\s{4,}\S/.test(line) && pendingSource) {
-			packages.push({ source: pendingSource, path: trimmed });
-			pendingSource = null;
-			continue;
-		}
-
-		if (/^\s{2,}\S/.test(line)) {
-			if (pendingSource) {
-				packages.push({ source: pendingSource, path: "" });
-			}
-			pendingSource = trimmed.replace(/\s+\(filtered\)$/, "");
-		}
-	}
-
-	if (pendingSource) {
-		packages.push({ source: pendingSource, path: "" });
-	}
-
-	return packages;
-}
-
-function readPackageSourcesFromSettingsFile(filePath: string): string[] {
-	try {
-		if (!fs.existsSync(filePath)) {
-			return [];
-		}
-
-		const content = fs.readFileSync(filePath, "utf-8");
-		const parsed = JSON.parse(content) as { packages?: PackageSettingEntry[] };
-		if (!Array.isArray(parsed.packages)) {
-			return [];
-		}
-
-		return parsed.packages
-			.map((entry) => (typeof entry === "string" ? entry : entry.source))
-			.filter(
-				(entry): entry is string =>
-					typeof entry === "string" && entry.length > 0,
-			);
-	} catch (error) {
-		console.error(
-			"[PI] Failed to read package sources from settings file:",
-			filePath,
-			error,
-		);
-		return [];
-	}
-}
-
-function shellQuote(arg: string): string {
-	return `'${arg.replace(/'/g, `'\\''`)}'`;
-}
-
-/** Build a shell command object for spawning pi via shell (Unix only). */
-function getShellCommand(binaryPath: string, args: string[]): { command: string; args: string[] } | null {
-	if (process.platform === "win32") {
-		return null;
-	}
-
-	const shell = process.env.SHELL || "/bin/bash";
-	const quotedBinary = shellQuote(binaryPath);
-	const quotedArgs = args.map(shellQuote).join(" ");
-	const command = `${quotedBinary} ${quotedArgs}`;
-	return { command: shell, args: ["-lc", command] };
-}
-
-function execFileAsync(
-	command: string,
-	args: string[],
-): Promise<CommandResult> {
-	return new Promise((resolve) => {
-		// execFile with shell: true resolves command via PATH on all platforms
-		execFile(command, args, { shell: true }, (error, stdout, stderr) => {
-			resolve({
-				code:
-					error && "code" in error && typeof error.code === "number"
-						? error.code
-						: 0,
-				stdout: stdout || "",
-				stderr: stderr || "",
-			});
-		});
-	});
-}
-
-export type ThinkingLevel =
-	| "off"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh";
-
-type VoiceHelperMessage = {
-	type: string;
-	message?: string;
-	text?: string;
-	error?: string;
-	code?: string;
-	level?: number;
-	speechActive?: boolean;
-};
-
-function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
-	const platform = process.platform;
-	const arch = process.arch;
-	// Prefer extensionUri (from ExtensionContext) because getExtension requires
-	// an exact publisher.name match that may break if the extension ID changes.
-	const extensionPath = extensionUri?.fsPath ||
-		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")?.extensionPath ||
-		"";
-	const voiceDir = path.join(extensionPath, "media", "voice");
-
-	switch (platform) {
-		case "darwin":
-			return path.join(voiceDir, "pi-voice-helper");
-		case "linux":
-			if (arch === "arm64") {
-				return path.join(voiceDir, "pi-voice-helper-linux-arm64");
-			}
-			return path.join(voiceDir, "pi-voice-helper-linux-x64");
-		case "win32":
-			if (arch === "arm64") {
-				return path.join(voiceDir, "pi-voice-helper-win32-arm64.exe");
-			}
-			return path.join(voiceDir, "pi-voice-helper-win32-x64.exe");
-		default:
-			throw new Error(`Unsupported platform: ${platform}`);
-	}
-}
-
-// ── Voice model definitions (whisper.cpp models from Hugging Face) ────────
-
-interface VoiceModelDef {
-	label: string;
-	remoteFilename: string;
-	cacheFilename: string;
-	expectedSizeMb: number;
-	englishOnly: boolean;
-}
-
-const VOICE_MODELS: Record<string, VoiceModelDef> = {
-	"tiny-q5_1": {
-		label: "Tiny multilingual (Q5_1)",
-		remoteFilename: "ggml-tiny-q5_1.bin",
-		cacheFilename: "tiny-q5_1.bin",
-		expectedSizeMb: 31,
-		englishOnly: false,
-	},
-	"tiny": {
-		label: "Tiny multilingual",
-		remoteFilename: "ggml-tiny.bin",
-		cacheFilename: "tiny.bin",
-		expectedSizeMb: 75,
-		englishOnly: false,
-	},
-	"tiny.en": {
-		label: "Tiny English-only",
-		remoteFilename: "ggml-tiny.en.bin",
-		cacheFilename: "tiny.en.bin",
-		expectedSizeMb: 75,
-		englishOnly: true,
-	},
-	"base-q5_1": {
-		label: "Base multilingual (Q5_1)",
-		remoteFilename: "ggml-base-q5_1.bin",
-		cacheFilename: "base-q5_1.bin",
-		expectedSizeMb: 57,
-		englishOnly: false,
-	},
-	"base": {
-		label: "Base multilingual",
-		remoteFilename: "ggml-base.bin",
-		cacheFilename: "base.bin",
-		expectedSizeMb: 141,
-		englishOnly: false,
-	},
-	"base.en": {
-		label: "Base English-only",
-		remoteFilename: "ggml-base.en.bin",
-		cacheFilename: "base.en.bin",
-		expectedSizeMb: 141,
-		englishOnly: true,
-	},
-};
-
-const VOICE_MODEL_BASE_URL =
-	"https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
-
-function getVoiceModelCacheDir(): string {
-	const agentDir = getAgentDir();
-	return path.join(agentDir, "voice-models");
-}
-
-function getVoiceModelPath(modelName: string): string {
-	const modelDef = VOICE_MODELS[modelName];
-	if (!modelDef) {
-		throw new Error(`Unknown voice model: ${modelName}`);
-	}
-	return path.join(getVoiceModelCacheDir(), modelDef.cacheFilename);
-}
-
-async function downloadVoiceModel(
-	modelName: string,
-	onProgress?: (downloaded: number, total: number) => void,
-	onPhase?: (phase: string, message?: string) => void,
-	signal?: AbortSignal,
-): Promise<string> {
-	const modelDef = VOICE_MODELS[modelName];
-	if (!modelDef) {
-		throw new Error(`Unknown voice model: ${modelName}`);
-	}
-
-	const cacheDir = getVoiceModelCacheDir();
-	await fs.promises.mkdir(cacheDir, { recursive: true });
-	const destPath = path.join(cacheDir, modelDef.cacheFilename);
-
-	// Check if already cached — verify size roughly matches expected
-	if (fs.existsSync(destPath)) {
-		const stats = await fs.promises.stat(destPath);
-		const sizeMb = stats.size / (1024 * 1024);
-		if (
-			Math.abs(sizeMb - modelDef.expectedSizeMb) <=
-			modelDef.expectedSizeMb * 0.2
-		) {
-			console.log(
-				`[PI Voice] Model already cached: ${destPath} (${sizeMb.toFixed(1)} MB)`,
-			);
-			onPhase?.("ready", "Voice model ready.");
-			return destPath;
-		}
-		console.log(
-			`[PI Voice] Cached model size mismatch, re-downloading: ${sizeMb.toFixed(1)}MB vs expected ${modelDef.expectedSizeMb}MB`,
-		);
-	}
-
-	const url = `${VOICE_MODEL_BASE_URL}/${modelDef.remoteFilename}`;
-	onPhase?.(
-		"downloading",
-		`Downloading ${modelDef.label} (~${modelDef.expectedSizeMb} MB)...`,
-	);
-
-	const https = await import("node:https");
-	const { createWriteStream } = await import("node:fs");
-
-	const tmpPath = destPath + ".tmp";
-
-	await new Promise<void>((resolve, reject) => {
-		const doRequest = (requestUrl: string) => {
-			https
-				.get(requestUrl, (response) => {
-					// Handle redirects
-					if (
-						response.statusCode &&
-						response.statusCode >= 300 &&
-						response.statusCode < 400 &&
-						response.headers.location
-					) {
-						doRequest(response.headers.location);
-						return;
-					}
-
-					if (response.statusCode !== 200) {
-						reject(
-							new Error(
-								`Failed to download voice model: HTTP ${response.statusCode}`,
-							),
-						);
-						return;
-					}
-
-					const totalSize = parseInt(
-						response.headers["content-length"] || "0",
-						10,
-					);
-					let downloaded = 0;
-
-					const fileStream = createWriteStream(tmpPath);
-
-					// Support cancellation via AbortSignal
-					const onAbort = () => {
-						response.destroy();
-						fileStream.close();
-						reject(new Error("Download cancelled"));
-					};
-					if (signal?.aborted) {
-						onAbort();
-						return;
-					}
-					signal?.addEventListener("abort", onAbort, { once: true });
-
-					response.on("data", (chunk: Buffer) => {
-						downloaded += chunk.length;
-						onProgress?.(downloaded, totalSize);
-					});
-
-					response.on("error", reject);
-					fileStream.on("error", reject);
-					fileStream.on("finish", () => {
-						signal?.removeEventListener("abort", onAbort);
-						resolve();
-					});
-					response.pipe(fileStream);
-				})
-				.on("error", reject);
-		};
-		doRequest(url);
-	});
-
-	// Atomic rename
-	await fs.promises.rename(tmpPath, destPath);
-	console.log(`[PI Voice] Model downloaded to: ${destPath}`);
-	onPhase?.("ready", "Voice model ready.");
-	return destPath;
-}
 
 const THINKING_LEVELS: ReadonlySet<string> = new Set([
 	"off",
@@ -597,10 +107,8 @@ export class PiAgentProvider
 		return this.session !== undefined;
 	}
 
-	private voiceHelperProcess?: ChildProcess;
-	private isListening = false;
-	private voiceModel: string = "tiny-q5_1"; // Default from package.json
-	private voiceLineBuffer = ""; // accumulates partial stdout lines across chunks
+	private voiceManager: VoiceManager;
+	private sessionResources: SessionResources;
 	private logChannel: vscode.OutputChannel;
 
 	constructor(
@@ -610,6 +118,18 @@ export class PiAgentProvider
 		this.config = config;
 		this.logChannel = vscode.window.createOutputChannel("PiLot Studio");
 		this.messageHandler = new MessageHandler(this);
+		this.voiceManager = new VoiceManager({
+			extensionUri: this.context.extensionUri,
+			agentDir: getAgentDir(),
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+			notifyWebview: this.notifyWebview.bind(this),
+		});
+		this.sessionResources = new SessionResources({
+			logError: this.logError.bind(this),
+			logDebug: this.logDebug.bind(this),
+			settingsManager: undefined,
+		});
 	}
 
 	/** Resolve the pi binary once at startup, logging the result. */
@@ -701,6 +221,11 @@ export class PiAgentProvider
 			}
 
 			this.isInitialized = true;
+
+		// Update SessionResources with the now-initialized settingsManager
+		if (this.settingsManager) {
+			this.sessionResources.setSettingsManager(this.settingsManager);
+		}
 
 		} catch (error) {
 			// Restore PATH on failure
@@ -841,55 +366,11 @@ export class PiAgentProvider
 	}
 
 	private getWorkspacePath(): string {
-		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		return this.sessionResources.getWorkspacePath();
 	}
 
 	private getConfiguredPackages(): InstalledPackage[] {
-		const workspacePath = this.getWorkspacePath();
-		const agentDir = getAgentDir();
-		const userSettingsPath = path.join(agentDir, "settings.json");
-		const projectSettingsPath = path.join(
-			workspacePath,
-			".pi",
-			"settings.json",
-		);
-
-		const packageSources = [
-			...readPackageSourcesFromSettingsFile(userSettingsPath),
-			...readPackageSourcesFromSettingsFile(projectSettingsPath),
-		];
-
-		const packages = new Map<string, InstalledPackage>();
-		for (const source of packageSources) {
-			packages.set(source, { source, path: "" });
-		}
-
-		if (packages.size === 0 || !this.settingsManager) {
-			return [...packages.values()];
-		}
-
-		try {
-			const packageManager = new DefaultPackageManager({
-				cwd: workspacePath,
-				agentDir,
-				settingsManager: this.settingsManager,
-			});
-
-			for (const pkg of packageManager.listConfiguredPackages()) {
-				const existing = packages.get(pkg.source);
-				packages.set(pkg.source, {
-					source: pkg.source,
-					path: pkg.installedPath || existing?.path || "",
-				});
-			}
-		} catch (error) {
-			this.logError(
-				"[PI] Failed to enrich configured packages with install paths:",
-				error,
-			);
-		}
-
-		return [...packages.values()];
+		return this.sessionResources.getConfiguredPackages();
 	}
 
 	private async listPackagesFromCli(): Promise<InstalledPackage[]> {
@@ -1287,89 +768,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	private isBinaryExtension(filePath: string): boolean {
-		const binaryExts = new Set([
-			'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tiff', '.tif',
-			'.svg', '.avif', '.heic', '.heif',
-			'.mp3', '.wav', '.ogg', '.flac', '.aac', '.wma', '.m4a',
-			'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv',
-			'.zip', '.tar', '.gz', '.bz2', '.7z', '.rar',
-			'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-			'.exe', '.dll', '.so', '.dylib', '.wasm', '.o', '.a', '.lib',
-			'.woff', '.woff2', '.ttf', '.otf', '.eot',
-			'.db', '.sqlite', '.sqlite3',
-		]);
-		const ext = path.extname(filePath).toLowerCase();
-		return binaryExts.has(ext);
+		return isBinaryExtension(filePath);
 	}
 
 	private async resolveFileMentions(text: string): Promise<string> {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (!workspaceFolders || workspaceFolders.length === 0) {
-			return text;
-		}
-		const root = workspaceFolders[0].uri.fsPath;
-
-		// Find all @path mentions (non-whitespace after @)
-		const mentionRegex = /@([^\s]+)/g;
-		const mentions: Array<{ match: string; filePath: string; index: number }> =
-			[];
-		let match: RegExpExecArray | null;
-		while ((match = mentionRegex.exec(text)) !== null) {
-			mentions.push({
-				match: match[0],
-				filePath: match[1],
-				index: match.index,
-			});
-		}
-
-		if (mentions.length === 0) return text;
-
-		// Resolve and read each mentioned file
-		const fileContexts: string[] = [];
-		let resolvedText = text;
-
-		for (const mention of mentions) {
-			const absPath = path.resolve(root, mention.filePath);
-			if (!fs.existsSync(absPath)) continue;
-
-			// Skip binary files (images, audio, archives, etc.)
-			if (this.isBinaryExtension(mention.filePath)) continue;
-
-			try {
-				const content = fs.readFileSync(absPath, "utf-8");
-				const maxBytes = 50 * 1024; // 50KB per file
-				const truncated =
-					content.length > maxBytes
-						? content.slice(0, maxBytes) + "\n... [file truncated at 50KB]"
-						: content;
-				fileContexts.push(
-					`<file path="${mention.filePath}">\n${truncated}\n</file>`,
-				);
-				// Remove @mention from text — it's replaced by file context block
-				resolvedText = resolvedText.replace(mention.match, "");
-			} catch (e) {
-				this.logError(`[PI] Failed to read file ${absPath}:`, e);
-			}
-		}
-
-		if (fileContexts.length === 0) return text;
-
-		const fileBlock = fileContexts.join("\n\n");
-		const cleanText = resolvedText.replace(/\s+/g, " ").trim();
-
-		return `${fileBlock}\n\n${cleanText}`;
+		return this.sessionResources.resolveFileMentions(text);
 	}
 
-	private areImagesValid(images: any[]): images is Array<{ type: "image"; data: string; mimeType: string }> {
-		if (!Array.isArray(images) || images.length === 0) return false;
-		return images.every(
-			(img) =>
-				img &&
-				img.type === "image" &&
-				typeof img.data === "string" &&
-				typeof img.mimeType === "string" &&
-				img.data.length > 0
-		);
+	private areImagesValid(images: unknown[]): images is Array<{ type: "image"; data: string; mimeType: string }> {
+		return areImagesValid(images);
 	}
 
 	async prompt(text: string, images?: any[]) {
@@ -1442,337 +849,46 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	/** Try to handle slash commands locally. Returns true if handled. */
 	private async tryHandleCommand(text: string): Promise<boolean> {
-		const spaceIndex = text.indexOf(" ");
-		const command =
-			spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+		// Handle /logout here — it needs direct access to session.prompt
+		// with streamingBehavior: "steer" which differs from the default prompt path.
+		const spaceIdx = text.indexOf(" ");
+		const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
 
-		switch (command) {
-			// ── UI-triggered commands ──────────────────
-			case "model":
-				this.notifyWebview({ type: "pickModel" });
-				return true;
-			case "new":
-				this.notifyWebview({ type: "new-session" });
-				return true;
-			case "login":
-				this.notifyWebview({ type: "show-login" });
-				return true;
-			case "settings":
-				await vscode.commands.executeCommand(
-					"workbench.action.openSettings",
-					"pi-agent",
-				);
-				return true;
-			case "resume":
-				this.notifyWebview({ type: "switchTab", data: { tab: "sessions" } });
-				return true;
-
-			case "scoped-models":
-				// Open model selector to manage scoped/favorite models
-				this.notifyWebview({ type: "switchTab", data: { tab: "models" } });
-				return true;
-
-			// ── Session-level commands ─────────────────
-			case "name": {
-				if (!this.session) return true;
-				const name = args;
-				if (!name) {
-					const current = this.session.sessionName;
-					this.notifyWebview({
-						type: "system-message",
-						data: {
-							message: current
-								? `Session name: ${current}`
-								: "Usage: /name <name>",
-						},
-					});
-				} else {
-					this.session.setSessionName(name);
-					this.notifyWebview({
-						type: "system-message",
-						data: { message: `Session name set: ${name}` },
-					});
+		if (cmd === "logout") {
+			try {
+				if (this.session) {
+					await this.session.prompt(text, { streamingBehavior: "steer" });
 				}
-				return true;
-			}
-
-			case "compact": {
-				if (!this.session) return true;
-				try {
-					await this.session.compact(args || undefined);
-					this.notifyWebview({
-						type: "compact-result",
-						data: { success: true },
-					});
-				} catch (error) {
-					this.notifyWebview({
-						type: "error",
-						data: {
-							message: error instanceof Error ? error.message : String(error),
-							timestamp: Date.now(),
-						},
-					});
-				}
-				return true;
-			}
-
-			case "session": {
-				if (!this.session) return true;
-				try {
-					const stats = this.session.getSessionStats();
-					const name = this.session.sessionName;
-					const lines: string[] = [];
-					lines.push(`📊 **Session Info**`);
-					if (name) lines.push(`Name: ${name}`);
-					lines.push(`File: ${stats.sessionFile ?? "In-memory"}`);
-					lines.push(`ID: ${stats.sessionId}`);
-					lines.push("");
-					lines.push(`**Messages:** User ${stats.userMessages} · Asst ${stats.assistantMessages} · Tools ${stats.toolCalls}/${stats.toolResults} · Total ${stats.totalMessages}`);
-					lines.push(`**Tokens:** In ${stats.tokens.input.toLocaleString()} · Out ${stats.tokens.output.toLocaleString()} · Total ${stats.tokens.total.toLocaleString()}`);
-					if (stats.tokens.cacheRead > 0)
-						lines.push(`Cache: Read ${stats.tokens.cacheRead.toLocaleString()} · Write ${stats.tokens.cacheWrite.toLocaleString()}`);
-					if (stats.cost > 0)
-						lines.push(`**Cost:** $${stats.cost.toFixed(4)}`);
-					this.notifyWebview({
-						type: "system-message",
-						data: { message: lines.join("\n") },
-					});
-				} catch (error) {
-					this.notifyWebview({
-						type: "error",
-						data: {
-							message: error instanceof Error ? error.message : String(error),
-							timestamp: Date.now(),
-						},
-					});
-				}
-				return true;
-			}
-
-			case "export": {
-				if (!this.session) return true;
-				try {
-					let filePath: string;
-					if (args.endsWith(".jsonl")) {
-						filePath = this.session.exportToJsonl(args || undefined);
-					} else {
-						filePath = await this.session.exportToHtml(
-							args || undefined,
-						);
-					}
-					// Open the exported file in VS Code
-					const uri = vscode.Uri.file(filePath);
-					await vscode.commands.executeCommand("vscode.open", uri);
-					vscode.window.showInformationMessage(
-						`Session exported to: ${filePath}`,
-					);
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`,
-					);
-				}
-				return true;
-			}
-
-			case "copy": {
-				if (!this.session) return true;
-				const text = this.session.getLastAssistantText();
-				if (!text) {
-					vscode.window.showWarningMessage(
-						"No agent messages to copy yet.",
-					);
-				} else {
-					await vscode.env.clipboard.writeText(text);
-					vscode.window.showInformationMessage(
-						"Copied last agent message to clipboard",
-					);
-				}
-				return true;
-			}
-
-			case "fork": {
-				// Open fork selector via session tree or show message selector
-				if (!this.session) return true;
+			} catch (error) {
 				this.notifyWebview({
-					type: "system-message",
+					type: "error",
 					data: {
-						message:
-							"Use the Session Tree to select a message to fork from, or type /tree to navigate branches.",
+						message: error instanceof Error ? error.message : String(error),
+						timestamp: Date.now(),
 					},
 				});
-				return true;
 			}
-
-			case "clone": {
-				if (!this.session) return true;
-				// Clone: fork from current position (at the last user message)
-				try {
-					await this.forkSession();
-					vscode.window.showInformationMessage("Session cloned at current position");
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Failed to clone: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				return true;
-			}
-
-			case "tree": {
-				// Navigate session tree
-				this.notifyWebview({ type: "switchTab", data: { tab: "sessions" } });
-				return true;
-			}
-
-			case "reload": {
-				if (!this.session) return true;
-				try {
-					await (this.session as any).reload?.();
-					await this.sendSessionResources();
-					vscode.window.showInformationMessage(
-						"Reloaded keybindings, extensions, skills, prompts",
-					);
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Reload failed: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				return true;
-			}
-
-			case "import": {
-				if (!args) {
-					vscode.window.showErrorMessage("Usage: /import <path.jsonl>");
-					return true;
-				}
-				// Import is complex (involves session replacement).
-				// For now, show guidance — user can open the JSONL in editor.
-				vscode.window.showInformationMessage(
-					"Import from JSONL is not yet supported in the extension. Open the JSONL in the PI terminal to import.",
-				);
-				return true;
-			}
-
-			case "share": {
-				if (!this.session) return true;
-				try {
-					// Export session to temp HTML, then create a secret gist via gh CLI
-					const os = await import("node:os");
-					const tmpFile = path.join(os.tmpdir(), `pi-session-${this.session.sessionId}.html`);
-					await this.session.exportToHtml(tmpFile);
-
-					// Check if gh CLI is available
-					vscode.window.showInformationMessage(
-						"Session exported. Opening in VS Code — you can copy the content to a gist at https://gist.github.com",
-						"Open File",
-						"Copy Path",
-					).then((selection) => {
-						if (selection === "Open File") {
-							vscode.commands.executeCommand("vscode.open", vscode.Uri.file(tmpFile));
-						} else if (selection === "Copy Path") {
-							vscode.env.clipboard.writeText(tmpFile);
-							vscode.window.showInformationMessage("Path copied: " + tmpFile);
-						}
-					});
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Failed to share: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				return true;
-			}
-
-			case "changelog": {
-				// Read the most recent changelog entries from the pi-coding-agent package
-				try {
-					const changelogPath = path.join(
-						path.dirname(require.resolve("@earendil-works/pi-coding-agent/package.json")),
-						"CHANGELOG.md",
-					);
-					if (fs.existsSync(changelogPath)) {
-						const content = fs.readFileSync(changelogPath, "utf-8");
-						// Parse ## headers — take first 3 entries
-						const entries = content
-							.split(/^## /m)
-							.slice(1, 4)
-							.map((e) => {
-								const lines = e.split("\n");
-								const version = lines[0]?.trim() || "";
-								const body = lines.slice(1).join("\n").trim();
-								// Take first ~300 chars of each entry
-								const summary = body.length > 300
-									? body.slice(0, 300).replace(/\n$/, "") + "..."
-									: body;
-								return `**${version}**\n${summary}`;
-							});
-						if (entries.length > 0) {
-							this.notifyWebview({
-								type: "system-message",
-								data: {
-									message:
-										`📋 **Recent Changelog**\n\n${entries.join("\n\n---\n\n")}\n\n_See full changelog at: ${changelogPath}_`,
-								},
-							});
-						} else {
-							vscode.window.showInformationMessage("No changelog entries found.");
-						}
-					} else {
-						vscode.window.showInformationMessage(
-							"Changelog file not found at: " + changelogPath,
-						);
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Failed to read changelog: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				return true;
-			}
-
-			case "hotkeys": {
-				this.notifyWebview({
-					type: "system-message",
-					data: {
-						message:
-							"⌨ **Keyboard Shortcuts**\n" +
-							"Ctrl+Shift+Alt+P — Open PiLot Studio\n" +
-							"Ctrl+Shift+I — Focus chat input\n" +
-							"Ctrl+Shift+Alt+N — New session\n" +
-							"Ctrl+Shift+A — Attach file\n" +
-							"Ctrl+Shift+; — Toggle dictation\n" +
-							"Type / for slash commands",
-					},
-				});
-				return true;
-			}
-
-			case "quit":
-				// Not applicable in VS Code — ignore gracefully
-				return true;
-
-			case "logout":
-				try {
-					if (this.session) {
-						await this.session.prompt(text, {
-							streamingBehavior: "steer",
-						});
-					}
-				} catch (error) {
-					this.notifyWebview({
-						type: "error",
-						data: {
-							message: error instanceof Error ? error.message : String(error),
-							timestamp: Date.now(),
-						},
-					});
-				}
-				return true;
-
-			default:
-				// Unknown slash command — forward to the session as a regular prompt
-				// (handles extension commands registered via pi.registerCommand)
-				return false;
+			return true;
 		}
+
+		const ctx: SlashCommandContext = {
+			notifyWebview: this.notifyWebview.bind(this),
+			logError: this.logError.bind(this),
+			session: this.session ? {
+				sessionName: this.session.sessionName,
+				sessionId: this.session.sessionId,
+				setSessionName: (n) => this.session!.setSessionName(n),
+				compact: (t) => this.session!.compact(t),
+				getSessionStats: () => this.session!.getSessionStats(),
+				exportToJsonl: (p) => this.session!.exportToJsonl(p),
+				exportToHtml: (p) => this.session!.exportToHtml(p),
+				getLastAssistantText: () => this.session!.getLastAssistantText(),
+				messages: this.session!.messages,
+			} : undefined,
+			forkSession: this.forkSession.bind(this),
+			sendSessionResources: this.sendSessionResources.bind(this),
+		};
+		return tryHandleSlashCommand(text, ctx);
 	}
 
 	async steer(text: string, images?: any[]) {
@@ -2235,76 +1351,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	/** Serialize AgentSession messages to webview-friendly format */
-	private serializeMessages(messages: any[]): Array<{
-		role: string;
-		content: string;
-		thinking?: string;
-		images?: Array<{ type: "image"; data: string; mimeType: string }>;
-		timestamp: number;
-	}> {
-		const result: Array<{
-			role: string;
-			content: string;
-			thinking?: string;
-			images?: Array<{ type: "image"; data: string; mimeType: string }>;
-			timestamp: number;
-		}> = [];
-		for (const msg of messages) {
-			if (msg.role === "user") {
-				if (typeof msg.content === "string") {
-					result.push({ role: "user", content: msg.content, timestamp: msg.timestamp });
-				} else if (Array.isArray(msg.content)) {
-					const textParts: string[] = [];
-					const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
-					for (const c of msg.content) {
-						if (c.type === "text") {
-							textParts.push(c.text || "");
-						} else if (c.type === "image" && c.data && c.mimeType) {
-							images.push({
-								type: "image",
-								data: c.data,
-								mimeType: c.mimeType,
-							});
-						}
-					}
-					result.push({
-						role: "user",
-						content: textParts.join("\n"),
-						images: images.length > 0 ? images : undefined,
-						timestamp: msg.timestamp,
-					});
-				}
-			} else if (msg.role === "assistant") {
-				const content = Array.isArray(msg.content)
-					? msg.content
-							.filter((c: any) => c.type === "text")
-							.map((c: any) => c.text)
-							.join("\n")
-					: "";
-				const thinking = Array.isArray(msg.content)
-					? msg.content
-							.filter((c: any) => c.type === "thinking")
-							.map((c: any) => c.thinking)
-							.join("\n")
-					: undefined;
-				result.push({
-					role: "assistant",
-					content,
-					thinking,
-					timestamp: msg.timestamp,
-				});
-			} else if (msg.role === "toolResult") {
-				const content = Array.isArray(msg.content)
-					? msg.content.map((c: any) => c.text || "").join("\n")
-					: "";
-				result.push({
-					role: "system",
-					content: `[Tool: ${msg.toolName}] ${content.slice(0, 200)}`,
-					timestamp: msg.timestamp,
-				});
-			}
-		}
-		return result;
+	private serializeMessages(messages: any[]) {
+		return serializeMessages(messages);
 	}
 
 	private sendSessionStats() {
@@ -2324,28 +1372,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	private async getProjectContext(): Promise<string> {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (!workspaceFolders) return "";
-
-		const root = workspaceFolders[0].uri.fsPath;
-
-		try {
-			const packageJsonPath = vscode.Uri.joinPath(
-				workspaceFolders[0].uri,
-				"package.json",
-			);
-			const packageJsonContent =
-				await vscode.workspace.fs.readFile(packageJsonPath);
-			const pkg = JSON.parse(packageJsonContent.toString());
-
-			return `
-        Project Root: ${root}
-        Project Name: ${pkg.name || "Unknown"}
-        Project Version: ${pkg.version || "Unknown"}
-      `.trim();
-		} catch {
-			return `Project Root: ${root}`;
-		}
+		return this.sessionResources.getProjectContext();
 	}
 
 	// Package management methods using CLI
@@ -2533,301 +1560,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.notifyWebview({ type, data });
 	}
 
-	// Voice Capture Methods
-	private sendVoiceMessage(type: string, data?: unknown) {
-		this.notifyWebview({ type, data } as any);
-	}
+	// Voice Capture Methods — delegated to VoiceManager
 
 	async toggleVoiceCapture() {
-		if (this.isListening) {
-			this.stopVoiceCapture();
-		} else {
-			await this.startVoiceCapture();
-		}
-	}
-
-	private async startVoiceCapture() {
-		try {
-			// Check if voice is enabled in config
-			const config = vscode.workspace.getConfiguration("pi-agent");
-			if (config.get<boolean>("voice.enabled") === false) {
-				vscode.window.showInformationMessage("Voice dictation is disabled in settings");
-				return;
-			}
-
-			this.voiceModel = config.get<string>("voice.model") || "tiny-q5_1";
-
-			// Check if voice helper exists
-			const helperPath = getVoiceHelperPath(this.context.extensionUri);
-			try {
-				fs.accessSync(helperPath, fs.constants.X_OK);
-			} catch {
-				vscode.window.showErrorMessage(
-					`Voice helper not found at ${helperPath}. Please reinstall the extension.`,
-				);
-				return;
-			}
-
-			// Resolve / download the whisper model
-			let modelPath: string;
-			try {
-				modelPath = getVoiceModelPath(this.voiceModel);
-			} catch {
-				vscode.window.showErrorMessage(
-					`Unknown voice model: ${this.voiceModel}. Supported models: ${Object.keys(VOICE_MODELS).join(", ")}`,
-				);
-				return;
-			}
-
-			const modelExists =
-				fs.existsSync(modelPath) &&
-				fs.statSync(modelPath).size > 1024 * 1024; // at least 1 MB
-
-			if (!modelExists) {
-				const modelDef = VOICE_MODELS[this.voiceModel];
-				if (!modelDef) return;
-
-				const choice = await vscode.window.showInformationMessage(
-					`Voice dictation needs to download the whisper model "${modelDef.label}" (~${modelDef.expectedSizeMb} MB) from Hugging Face. The download is one-time and dictation always runs locally on your device.`,
-					{ modal: true },
-					"Download",
-					"Cancel",
-				);
-				if (choice !== "Download") {
-					return;
-				}
-
-				try {
-					modelPath = await vscode.window.withProgress(
-						{
-							location: vscode.ProgressLocation.Notification,
-							title: `Downloading ${modelDef.label}`,
-							cancellable: true,
-						},
-						async (progress, token) => {
-							const aborter = new AbortController();
-							token.onCancellationRequested(() => aborter.abort());
-
-							return downloadVoiceModel(
-								this.voiceModel,
-								(downloaded, total) => {
-									if (total > 0) {
-										const pct = Math.round((downloaded / total) * 100);
-										const mbDown = (downloaded / (1024 * 1024)).toFixed(1);
-										const mbTotal = (total / (1024 * 1024)).toFixed(1);
-										progress.report({
-											message: `${mbDown} / ${mbTotal} MB (${pct}%)`,
-											increment: pct,
-										});
-										this.sendVoiceMessage("voice-status", {
-											status: "downloading",
-											message: `Downloading voice model... ${pct}%`,
-										});
-									}
-								},
-								(phase, message) => {
-									this.sendVoiceMessage("voice-status", {
-										status: phase,
-										message: message || "",
-									});
-								},
-								aborter.signal,
-							);
-						},
-					);
-				} catch (err) {
-					if (
-						err instanceof Error &&
-						err.message === "Download cancelled"
-					) {
-						return;
-					}
-					vscode.window.showErrorMessage(
-						`Failed to download voice model: ${err instanceof Error ? err.message : String(err)}`,
-					);
-					return;
-				}
-			}
-
-			this.sendVoiceMessage("voice-status", {
-				status: "preparing",
-				message: "Loading voice model...",
-			});
-
-			// Initialize voice helper with full model path
-			this.voiceHelperProcess = spawn(helperPath, ["--model", modelPath]);
-
-			this.voiceHelperProcess.stdout?.on("data", (chunk) => {
-				const text = chunk.toString();
-				// Log all raw output for debugging transcription issues
-				this.logDebug("[PI Voice stdout]", text.substring(0, 200));
-				this.handleVoiceHelperOutput(text, modelPath);
-			});
-
-			this.voiceHelperProcess.stderr?.on("data", (chunk) => {
-				const text = chunk.toString().trim();
-				if (!text) return;
-
-				// whisper.cpp logs model info to stderr, but the helper may also
-				// send JSON messages (like transcriptions) to stderr on some platforms.
-				// Try to parse each line as JSON; if it's a transcription, forward it.
-				const lines = text.split("\n");
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (trimmed.startsWith("{")) {
-						try {
-							const msg: VoiceHelperMessage = JSON.parse(trimmed);
-							if (msg.type === "transcription" && msg.text) {
-								this.logDebug(
-									"[PI Voice] Transcription (from stderr):",
-									msg.text.substring(0, 100),
-								);
-								this.sendVoiceMessage("voice-transcription", { text: msg.text });
-								continue;
-							}
-						} catch {
-							// Not JSON, treat as log line
-						}
-					}
-					this.logDebug("[PI Voice Helper]", trimmed);
-				}
-			});
-
-			this.voiceHelperProcess.on("error", (err) => {
-				this.logError("[PI Voice Helper error]:", err);
-				// Detect missing library errors on Linux (e.g., missing ALSA)
-				const errMsg = err.message || String(err);
-				if (process.platform === "linux" && (errMsg.includes("error while loading shared libraries") || errMsg.includes("cannot open shared object file"))) {
-					vscode.window.showErrorMessage(
-						"Voice capture failed: Missing ALSA library. Install `libasound2` (Debian/Ubuntu) or `alsa-lib` (Fedora/RHEL) for microphone support.",
-					);
-				} else {
-					this.sendVoiceMessage("voice-listening-changed", { listening: false });
-				}
-				this.isListening = false;
-			});
-
-			this.voiceHelperProcess.on("close", (code) => {
-				this.logDebug("[PI Voice Helper] Process exited with code:", code);
-				if (this.isListening) {
-					this.sendVoiceMessage("voice-listening-changed", { listening: false });
-					this.isListening = false;
-				}
-			});
-		} catch (error) {
-			this.logError("[PI] Voice capture start failed:", error);
-			vscode.window.showErrorMessage(
-				`Failed to start voice capture: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
-	private stopVoiceCapture() {
-		if (this.voiceHelperProcess && this.isListening) {
-			this.voiceHelperProcess.stdin?.write(JSON.stringify({ type: "stop" }) + "\n");
-			this.voiceHelperProcess.stdin?.end();
-			this.voiceHelperProcess = undefined;
-		}
-		this.isListening = false;
-		this.voiceLineBuffer = "";
-		this.sendVoiceMessage("voice-listening-changed", { listening: false });
-	}
-
-	private handleVoiceHelperOutput(chunk: string, modelPath: string) {
-		// Accumulate partial lines — stdout chunks may split JSON lines
-		// across multiple data events.
-		this.voiceLineBuffer += chunk;
-		const lines = this.voiceLineBuffer.split("\n");
-		// The last entry is either empty (chunk ended with \n) or a partial
-		// line to carry forward. Pop it and save for the next chunk.
-		this.voiceLineBuffer = lines.pop() || "";
-
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			try {
-				const msg: VoiceHelperMessage = JSON.parse(trimmed);
-
-				switch (msg.type) {
-					case "ready":
-						// Helper binary is ready to accept commands.
-						// Send prepare to load the model, then start.
-						this.voiceHelperProcess?.stdin?.write(
-							JSON.stringify({ type: "prepare", modelPath }) + "\n",
-						);
-						break;
-
-					case "prepared":
-						// Model is loaded — start listening.
-						this.voiceHelperProcess?.stdin?.write(
-							JSON.stringify({ type: "start" }) + "\n",
-						);
-						break;
-
-					case "started":
-						// Microphone capture is active.
-						this.isListening = true;
-						this.sendVoiceMessage("voice-listening-changed", { listening: true });
-						this.sendVoiceMessage("voice-status", {
-							status: "listening",
-							message: "Listening...",
-						});
-						break;
-
-					case "permission":
-						// Microphone permission response — expected after prepare.
-						// The helper will send "prepared" next.
-						break;
-
-					case "transcript":
-						if (msg.text) {
-							this.logDebug(
-								"[PI Voice] Transcription:",
-								msg.text.substring(0, 100),
-							);
-							this.sendVoiceMessage("voice-transcription", { text: msg.text });
-						} else {
-							this.log(
-								"[PI Voice] Transcription message received but text field is empty or undefined. Full message: " + JSON.stringify(msg),
-							);
-						}
-						break;
-
-					case "error":
-						this.logError(
-							"[PI Voice Helper error]:",
-							msg.code + " " + (msg.message || msg.error),
-						);
-						// "start_failed" with "model is not ready" → model wasn't
-						// loaded properly; treat as transient and stop gracefully.
-						if (
-							msg.code === "start_failed" &&
-							msg.message?.includes("model is not ready")
-						) {
-							this.sendVoiceMessage("voice-status", {
-								status: "error",
-								message:
-									"Voice model failed to load. Please try again or choose a different model.",
-							});
-						} else {
-							vscode.window.showErrorMessage(
-								`Voice capture error: ${msg.message || msg.error || "Unknown error"}`,
-							);
-						}
-						this.stopVoiceCapture();
-						break;
-
-					case "level":
-						this.sendVoiceMessage("voice-audio-level", { level: msg.level });
-						break;
-				}
-			} catch {
-				this.logDebug(
-					"[PI] Failed to parse voice helper line:",
-					trimmed,
-				);
-			}
-		}
+		await this.voiceManager.toggleVoiceCapture();
 	}
 
 	dispose() {
@@ -2835,10 +1571,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (this.session) {
 			this.session.dispose();
 		}
-		// Clean up voice helper process if running
-		if (this.voiceHelperProcess) {
-			this.voiceHelperProcess.stdin?.end();
-			this.voiceHelperProcess.kill();
-		}
+		this.voiceManager.dispose();
 	}
 }

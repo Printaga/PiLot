@@ -2,14 +2,18 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [Unreleased] - 2026-06-08
+
+### Added
+- Auto-detect VS Code executable path for test runner
+
+### Changed
+- Updated tooling and logging
 
 ### Fixed
-
 - Fixed voice helper path resolution with correct extension ID
 - Fixed `context.autoAttach` setting key to match package.json configuration
 - Added user-friendly error message when voice helper fails due to missing ALSA libraries on Linux
-- Fixed hotkeys documentation to show correct `Ctrl+Shift+Alt+N` for New Session
 - Replaced console.log statements in message-handler with proper logDebug calls
 - Fixed indentation in listPackagesFromCli error handling for Windows platform
 

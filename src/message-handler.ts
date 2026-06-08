@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { PiAgentProvider } from "./pi-agent-provider.js";
+import { type ProviderApi } from "./protocol/types.js";
 
 export class MessageHandler {
-	constructor(private provider: PiAgentProvider) {}
+	constructor(private provider: ProviderApi) {}
 
 	async handle(message: {
 		type: string;
