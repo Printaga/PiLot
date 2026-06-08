@@ -31,7 +31,7 @@ importers:
         specifier: ^1.85.0
         version: 1.120.0
       '@vscode/test-electron':
-        specifier: ^2.4.0
+        specifier: ^2.5.2
         version: 2.5.2
       '@vscode/vsce':
         specifier: ^3.9.1

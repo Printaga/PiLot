@@ -905,7 +905,7 @@ export class PiAgentProvider
 		const shellCommand = getShellCommand(binaryPath, ["list"]);
 		if (!shellCommand) {
 			if (direct.stderr) {
-			this.logError("[PI] listPackagesFromCli error:", direct.stderr);
+				this.logError("[PI] listPackagesFromCli error:", direct.stderr);
 			}
 			return packages;
 		}

@@ -363,12 +363,12 @@ export class MessageHandler {
 				case "openFileAttachmentDialog":
 					{
 						const paths = await this.openFileAttachmentDialog();
-						console.log("[PiLot] openFileAttachmentDialog: selected paths =", JSON.stringify(paths));
+						this.provider.logDebug(`[PiLot] openFileAttachmentDialog: selected paths: ${JSON.stringify(paths)}`);
 						this.provider.webview?.postMessage({
 							type: "files-attached",
 							data: { paths },
 						});
-						console.log("[PiLot] openFileAttachmentDialog: response sent, webview exists =", !!this.provider.webview);
+						this.provider.logDebug(`[PiLot] openFileAttachmentDialog: response sent, webview exists: ${!!this.provider.webview}`);
 					}
 					break;
 

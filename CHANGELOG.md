@@ -9,6 +9,9 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Fixed voice helper path resolution with correct extension ID
 - Fixed `context.autoAttach` setting key to match package.json configuration
 - Added user-friendly error message when voice helper fails due to missing ALSA libraries on Linux
+- Fixed hotkeys documentation to show correct `Ctrl+Shift+Alt+N` for New Session
+- Replaced console.log statements in message-handler with proper logDebug calls
+- Fixed indentation in listPackagesFromCli error handling for Windows platform
 
 ## [1.2.0] - 2026-06-07
 
@@ -26,7 +29,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Made CLI commands respect the `pi-agent.binaryPath` setting instead of hardcoding "pi"
 - Added executable permission checks and improved binary validation via PATH
 - Added proper error messages when the PI binary is not found
-- Fix hotkeys documentation to match actual keybindings
+- Fix hotkeys documentation to match actual keybindings (Ctrl+Shift+Alt+N)
 - Removed leftover mock data from the capabilities tab
 - Minor fixes to the GUI layout and labels
 
