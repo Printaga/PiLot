@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -22,6 +23,7 @@ import { getShellCommand, execFileAsync } from "./utils/shell.js";
 import {
 	checkBetterSqlite3,
 	describeABIStatus,
+	ensureBetterSqlite3Compatible,
 } from "./utils/native-addons.js";
 
 import {
@@ -67,6 +69,18 @@ export interface SessionItem {
 	messageCount: number;
 }
 
+/** Internal session info with full details (including file path). */
+interface SessionInfoFull {
+	id: string;
+	label: string;
+	timestamp: number;
+	messageCount: number;
+	path: string;
+	name?: string;
+	firstMessage?: string;
+	cwd?: string;
+}
+
 /** @deprecated legacy interface for native tree view — kept for SessionsTreeProvider compatibility */
 export interface SessionNode {
 	id: string;
@@ -109,6 +123,9 @@ export class PiAgentProvider
 	/** Resolved absolute path to pi binary, set at initialization. */
 	private resolvedBinaryPath: string | null = null;
 
+	/** Cached PI CLI version string from `pi --version`. */
+	private piVersion: string | null = null;
+
 	/** Extension activity statuses forwarded from packages via ctx.ui.setStatus(). Cleared only when the extension explicitly clears them. */
 	private extensionStatuses = new Map<string, string>();
 	/** Interval handle for polling extension statuses from the runner. */
@@ -116,6 +133,20 @@ export class PiAgentProvider
 
 	/** Set to true after the first successful auto-name so we only title a session once. */
 	private _autoNamingTriggered = false;
+	/** Cached session list (for webview) to avoid re-reading all session files on every message. */
+	private _sessionListCache: SessionItem[] = [];
+	/** Cached full session info (for internal use, includes file path). */
+	private _sessionListFullCache: SessionInfoFull[] = [];
+	/** Timestamp of last session list refresh. */
+	private _sessionListCacheTime = 0;
+	/** Minimum interval between session list refreshes (ms). */
+	private readonly SESSION_LIST_REFRESH_INTERVAL = 5000;
+
+	/** Footer data for the status line (cwd, git branch, session name). */
+	private footerCwd = "";
+	private footerGitBranch: string | null = null;
+	private footerSessionName: string | null = null;
+	private gitBranchPoller: ReturnType<typeof setInterval> | undefined;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -155,6 +186,138 @@ export class PiAgentProvider
 			this.logError(
 				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.",
 			);
+		}
+	}
+
+	/** Resolve PI CLI version by running `pi --version`. Caches result. */
+	private async resolvePiVersion(): Promise<string | null> {
+		if (this.piVersion) return this.piVersion;
+		try {
+			const binaryPath = this.resolvedBinaryPath || findPiBinary();
+			const result = await execFileAsync(binaryPath, ["--version"]);
+			if (result.code === 0 && result.stdout) {
+				this.piVersion = result.stdout.trim();
+				this.log(`Resolved PI CLI version: ${this.piVersion}`);
+				return this.piVersion;
+			}
+			this.logError(
+				`pi --version failed (code ${result.code}): ${result.stderr}`,
+			);
+		} catch (e) {
+			this.logError("Failed to resolve PI version:", e);
+		}
+		return null;
+	}
+
+	/** Update the webview view container title/description with current version info. */
+	private async updateViewTitle(): Promise<void> {
+		const view = this.view;
+		if (!view) return;
+
+		const extVersion = this.context.extension.packageJSON.version || "0.0.0";
+		view.title = `PiLot Studio v${extVersion}`;
+
+		const piVer = await this.resolvePiVersion();
+		if (piVer) {
+			view.description = `Connected to PI v${piVer}`;
+		} else {
+			view.description = undefined;
+		}
+	}
+
+	/**
+	 * Resolve the current git branch by reading .git/HEAD.
+	 * Returns null if not in a git repo or on detached HEAD.
+	 */
+	private resolveGitBranch(cwd: string): string | null {
+		try {
+			let dir = cwd;
+			while (true) {
+				const gitPath = path.join(dir, ".git");
+				if (fsSync.existsSync(gitPath)) {
+					const stat = fsSync.statSync(gitPath);
+					if (stat.isDirectory()) {
+						const headPath = path.join(gitPath, "HEAD");
+						if (!fsSync.existsSync(headPath)) return null;
+						const content = fsSync.readFileSync(headPath, "utf8").trim();
+						if (content.startsWith("ref: refs/heads/")) {
+							return content.slice(16);
+						}
+						return "detached";
+					} else if (stat.isFile()) {
+						// Worktree: .git is a file with "gitdir: ..."
+						const content = fsSync.readFileSync(gitPath, "utf8").trim();
+						if (content.startsWith("gitdir: ")) {
+							const gitDir = path.resolve(dir, content.slice(8).trim());
+							const headPath = path.join(gitDir, "HEAD");
+							if (!fsSync.existsSync(headPath)) return null;
+							const headContent = fsSync.readFileSync(headPath, "utf8").trim();
+							if (headContent.startsWith("ref: refs/heads/")) {
+								return headContent.slice(16);
+							}
+							return "detached";
+						}
+					}
+				}
+				const parent = path.dirname(dir);
+				if (parent === dir) return null;
+				dir = parent;
+			}
+		} catch {
+			return null;
+		}
+	}
+
+	/** Send footer data (cwd, git branch, session name) to the webview. */
+	private sendFooterData(): void {
+		if (!this.session) return;
+		const rawCwd = this.session.sessionManager.getCwd();
+		const sessionName = this.session.sessionName ?? null;
+		const gitBranch = this.resolveGitBranch(rawCwd);
+
+		// Format cwd: replace home dir with ~
+		const home = process.env.HOME || process.env.USERPROFILE || "";
+		let cwd = rawCwd;
+		if (home && rawCwd.startsWith(home)) {
+			const rest = rawCwd.slice(home.length);
+			cwd = rest === "" ? "~" : `~${rest.startsWith("/") ? "" : "/"}${rest}`;
+		}
+
+		// Only send if something changed
+		if (
+			cwd === this.footerCwd &&
+			gitBranch === this.footerGitBranch &&
+			sessionName === this.footerSessionName
+		) {
+			return;
+		}
+
+		this.footerCwd = cwd;
+		this.footerGitBranch = gitBranch;
+		this.footerSessionName = sessionName;
+
+		this.notifyWebview({
+			type: "footer-data",
+			data: { cwd, gitBranch, sessionName },
+		});
+	}
+
+	/** Start polling git branch for footer data. */
+	private startGitBranchPoller(): void {
+		this.stopGitBranchPoller();
+		// Send immediately
+		this.sendFooterData();
+		// Then poll every 5 seconds
+		this.gitBranchPoller = setInterval(() => {
+			this.sendFooterData();
+		}, 5000);
+	}
+
+	/** Stop the git branch poller. */
+	private stopGitBranchPoller(): void {
+		if (this.gitBranchPoller !== undefined) {
+			clearInterval(this.gitBranchPoller);
+			this.gitBranchPoller = undefined;
 		}
 	}
 
@@ -352,6 +515,10 @@ export class PiAgentProvider
 					await this.newSession();
 				}
 				this.logDebug("[PiLot Studio] Webview fully initialized");
+				// Set the view title and description with version info
+				this.updateViewTitle().catch((e) =>
+					this.logError("[PiLot Studio] Failed to update view title:", e),
+				);
 			})
 			.catch((error) => {
 				this.logError("[PiLot Studio] Initialization error:", error);
@@ -429,32 +596,72 @@ export class PiAgentProvider
 
 	/**
 	 * Check native addon (better-sqlite3) ABI compatibility.
-	 * Logs warnings when the compiled module doesn't match the current runtime.
-	 * Non-blocking — runs during initialization for diagnostic purposes.
+	 * Auto-rebuilds if mismatched. Logs result.
 	 */
 	private checkNativeAddons(): void {
 		try {
-			const status = checkBetterSqlite3();
-			if (!status.ok) {
+			const result = ensureBetterSqlite3Compatible();
+			if (result.ok) {
+				if (result.rebuilt) {
+					this.log(
+						"[PI] Native addon ABI mismatch detected — auto-rebuilt better-sqlite3 successfully",
+					);
+				} else {
+					this.logDebug("[PI] Native addon ABI check: OK");
+				}
+			} else {
+				const status = checkBetterSqlite3();
 				const abiInfo = describeABIStatus(status.runtimeABI, status.moduleABI);
 				const runtime = status.electronVersion
 					? `Electron ${status.electronVersion} `
 					: "";
-				this.log(`[PI] Native addon ABI mismatch: ${runtime}${abiInfo}`);
 				this.log(
-					"[PI] Code intelligence won't work until better-sqlite3 is rebuilt.",
+					`[PI] Native addon ABI mismatch: ${runtime}${abiInfo}. Auto-rebuild failed: ${result.output}`,
+				);
+				this.log(
+					"[PI] Code intelligence won't work until better-sqlite3 is rebuilt. Run 'PiLot: Rebuild Native Addons' command.",
 				);
 				if (status.modulePath) {
 					this.log(`[PI] Module path: ${status.modulePath}`);
 				}
-			} else {
-				this.logDebug("[PI] Native addon ABI check: OK");
 			}
 		} catch (error) {
 			// Don't let this block anything
 			this.logDebug(
 				"[PI] Native addon check failed:",
 				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
+	/** Manually trigger better-sqlite3 rebuild. Called from command palette. */
+	async rebuildNativeAddons(): Promise<void> {
+		try {
+			await vscode.window.withProgress(
+				{
+					location: vscode.ProgressLocation.Notification,
+					title: "Rebuilding native addons (better-sqlite3)...",
+					cancellable: false,
+				},
+				async () => {
+					const result = ensureBetterSqlite3Compatible();
+					if (result.ok) {
+						vscode.window.showInformationMessage(
+							result.rebuilt
+								? "Native addon rebuilt successfully. Code intelligence should work now."
+								: "Native addon already compatible.",
+						);
+					} else {
+						vscode.window.showErrorMessage(
+							`Native addon rebuild failed: ${result.output}`,
+						);
+					}
+				},
+			);
+		} catch (error) {
+			this.logError("[PI] Manual native addon rebuild failed:", error);
+			vscode.window.showErrorMessage(
+				`Native addon rebuild failed: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	}
@@ -563,6 +770,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// This also emits session_start to initialize extensions (LSP, indexing, etc.)
 		await this.bindExtensionUI();
 
+		// Start sending footer data (cwd, git branch, session name) to the webview
+		this.startGitBranchPoller();
+
 		return this.session;
 	}
 
@@ -582,6 +792,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const name = generateSessionName(userText, assistantText);
 		if (name) {
 			this.logDebug("[PI] Auto-generated session name:", name);
+			this.session.setSessionName(name);
+			return true;
+		}
+
+		return false;
+	}
+
+	/** Generate and apply a session title from the first user message only.
+	 * Matches PI CLI behavior where the first user message becomes the session display name.
+	 */
+	private tryAutoSessionNameFromUserMessage(userMessage: {
+		role: string;
+		content: string | Array<{ type: string; text?: string }> | null;
+	}): boolean {
+		if (!this.session || this.session.sessionName) return false;
+
+		const userText = extractTextFromMessage(userMessage);
+		if (!userText) return false;
+
+		const name = generateSessionName(userText, "");
+		if (name) {
+			this.logDebug(
+				"[PI] Auto-generated session name from user message:",
+				name,
+			);
 			this.session.setSessionName(name);
 			return true;
 		}
@@ -619,7 +854,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				await this.newSession();
 			}
 
-			await this.refreshSessionList();
+			await this.refreshSessionList(true);
 		} catch (error) {
 			this.logError("[PI] Failed to delete sessions:", error);
 			vscode.window.showErrorMessage(
@@ -742,6 +977,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this._autoNamingTriggered = false;
 		// Dispose old session properly before creating a new one
 		this.stopStatusPoller();
+		this.stopGitBranchPoller();
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
@@ -754,6 +990,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.sessionManager.newSession();
 		}
 		await this.createSession();
+		this.invalidateSessionListCache(); // New session created, invalidate cache
 		this._onDidChangeTreeData.fire();
 		this.notifyWebview({
 			type: "session-updated",
@@ -884,15 +1121,25 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async switchSession(sessionId: string) {
 		this._autoNamingTriggered = false;
-		// Find the session info from the list
+		// Invalidate cache to get fresh session list
+		this.invalidateSessionListCache();
+		// Find the session info from the list (use full cache for path)
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		const allSessions = await SessionManager.list(cwd, this.config.sessionDir);
-		const info = allSessions.find((s) => s.id === sessionId);
-		if (!info) return;
+		await this.listSessions(true); // force refresh (populates _sessionListFullCache)
+		const info = this._sessionListFullCache.find((s) => s.id === sessionId);
+		if (!info) {
+			this.logError(`[PI] Session not found: ${sessionId}`);
+			this.notifyWebview({
+				type: "error",
+				data: { message: `Session not found: ${sessionId}`, timestamp: Date.now() },
+			});
+			return;
+		}
 
 		// Dispose old session
 		this.stopStatusPoller();
+		this.stopGitBranchPoller();
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
@@ -1472,26 +1719,55 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		});
 	}
 
-	async listSessions(): Promise<SessionItem[]> {
+	async listSessions(forceRefresh = false): Promise<SessionItem[]> {
+		const now = Date.now();
+		// Return cached list if recent and not forced
+		if (!forceRefresh && this._sessionListCache.length > 0 && now - this._sessionListCacheTime < this.SESSION_LIST_REFRESH_INTERVAL) {
+			return this._sessionListCache;
+		}
+
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
 			const sessions = await SessionManager.list(cwd, this.config.sessionDir);
-			this.sessionList = sessions.map((s) => ({
+			// Cache full info for internal use (includes file path)
+			this._sessionListFullCache = sessions.map((s) => ({
 				id: s.id,
 				label: s.name || s.firstMessage.slice(0, 60) || "Untitled",
 				timestamp: s.modified.getTime(),
 				messageCount: s.messageCount,
+				path: s.path,
+				name: s.name,
+				firstMessage: s.firstMessage,
+				cwd: s.cwd,
 			}));
+			// Cache webview-friendly version
+			this._sessionListCache = this._sessionListFullCache.map((s) => ({
+				id: s.id,
+				label: s.label,
+				timestamp: s.timestamp,
+				messageCount: s.messageCount,
+			}));
+			this._sessionListCacheTime = now;
+			this.sessionList = this._sessionListCache; // Keep legacy property in sync
 		} catch {
+			this._sessionListFullCache = [];
+			this._sessionListCache = [];
 			this.sessionList = [];
 		}
-		return this.sessionList;
+		return this._sessionListCache;
 	}
 
-	private async refreshSessionList() {
-		await this.listSessions();
-		this.notifyWebview({ type: "sessions-list", data: this.sessionList });
+	/** Invalidate the session list cache so next call re-reads from disk. */
+	invalidateSessionListCache(): void {
+		this._sessionListCache = [];
+		this._sessionListFullCache = [];
+		this._sessionListCacheTime = 0;
+	}
+
+	private async refreshSessionList(forceRefresh = false) {
+		await this.listSessions(forceRefresh);
+		this.notifyWebview({ type: "sessions-list", data: this._sessionListCache });
 	}
 
 	/** @deprecated Use listSessions() for webview, kept for native tree view compatibility */
@@ -1510,9 +1786,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	private handleSessionEvent(event: AgentSessionEvent) {
 		this.notifyWebview({ type: "pi-event", data: event });
 
-		// Refresh the session list when messages change
+		// Refresh the session list when messages change (use cache to avoid disk I/O)
 		if (event.type === "message_end" || event.type === "agent_end") {
-			this.refreshSessionList();
+			this.refreshSessionList(false);
 		}
 
 		// Push token stats on message/agent end
@@ -1534,7 +1810,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		if (event.type === "session_info_changed") {
-			this.refreshSessionList().catch((e) =>
+			this.refreshSessionList(true).catch((e) =>
 				this.logError("[PI] refreshSessionList in event handler failed:", e),
 			);
 			this.notifyWebview({
@@ -1544,17 +1820,47 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.sendSessionResources().catch((e) =>
 				this.logError("[PI] sendSessionResources in event handler failed:", e),
 			);
+			// Immediately push updated footer data (includes session name)
+			this.sendFooterData();
 		}
 
 		// ── Session auto-naming flow ──────────────────
-		// Title the session after the first real user+assistant exchange.
+		// Title the session on first user message (matching PI CLI behavior:
+		// first user message becomes the session display name immediately).
+		if (
+			event.type === "message_start" &&
+			event.message?.role === "user" &&
+			!this._autoNamingTriggered &&
+			this.session &&
+			!this.session.sessionName
+		) {
+			this.logDebug("[PI] Auto-naming: first user message received, attempting to name session");
+			this._autoNamingTriggered = this.tryAutoSessionNameFromUserMessage(
+				event.message,
+			);
+			if (this._autoNamingTriggered) {
+				this.logDebug("[PI] Auto-naming: session named from user message");
+				this.invalidateSessionListCache(); // Force session list refresh
+				this.refreshSessionList(true);
+			}
+		}
+
+		// Also try to improve the name after the first assistant response,
+		// but only if we didn't already set a name from the user message.
 		if (
 			event.type === "agent_end" &&
 			!event.willRetry &&
 			!this._autoNamingTriggered &&
-			!this.session?.sessionName
+			this.session &&
+			!this.session.sessionName
 		) {
+			this.logDebug("[PI] Auto-naming: agent response complete, attempting to improve session name");
 			this._autoNamingTriggered = this.tryAutoSessionName();
+			if (this._autoNamingTriggered) {
+				this.logDebug("[PI] Auto-naming: session name improved from assistant response");
+				this.invalidateSessionListCache(); // Force session list refresh
+				this.refreshSessionList(true);
+			}
 		}
 
 		// Derive activity statuses from session events
@@ -1750,38 +2056,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					const factoryName = factory.name || "";
 					const callerLine =
 						new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
-					const actionTag = factoryName
-						? `'${factoryName}'`
-						: callerLine
-							? `(${callerLine})`
-							: "this command";
 					this.logDebug(
-						`[PI] Extension tried to show custom UI: factory=${factoryName}, caller=${callerLine}`,
+						`[PI] Extension custom UI (no TUI): factory=${factoryName}, caller=${callerLine}`,
 					);
 					void options;
 
-					// Offer to open the PI TUI so the user can run this command interactively
-					const openTerminal = "Open in PI Terminal";
-					const choice = await vscode.window.showInformationMessage(
-						`${actionTag} needs interactive TUI. Open the PI terminal to run it.`,
-						openTerminal,
-					);
-
-					if (choice === openTerminal) {
-						const binaryPath = findPiBinary();
-						const sessionFile = (this.session as any)?.sessionFile;
-						const cwd =
-							this.session?.sessionManager?.getCwd?.() ?? process.cwd();
-						const terminalArgs = sessionFile ? ["--continue"] : [];
-						const term = vscode.window.createTerminal({
-							name: "PI Terminal",
-							cwd,
-						});
-						term.sendText(`${binaryPath} ${terminalArgs.join(" ")}`.trim());
-						term.show();
-					}
-
-					return undefined as unknown as T;
+					// Call factory with no TUI context so extensions gracefully detect
+					// headless mode and call done() to complete initialization.
+					return new Promise<T>((resolve) => {
+						const done = (result: T) => resolve(result);
+						try {
+							const component = factory(undefined, undefined, undefined, done);
+							// Factory may return a Promise (async component factory).
+							// Resolution/failure handled via done() call.
+							if (component && typeof (component as any)?.then === "function") {
+								(component as Promise<any>).catch((e: unknown) => {
+									this.logDebug(
+										`[PI] Extension custom factory promise error: ${e}`,
+									);
+								});
+							}
+						} catch (e) {
+							this.logDebug(`[PI] Extension custom factory error: ${e}`);
+							resolve(undefined as unknown as T);
+						}
+					});
 				},
 				pasteToEditor: () => {},
 				setEditorText: () => {},
@@ -2190,6 +2489,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	dispose() {
 		this.stopStatusPoller();
+		this.stopGitBranchPoller();
 		this.extensionStatuses.clear();
 		this._onDidChangeTreeData.dispose();
 		if (this.session) {

@@ -60,7 +60,8 @@
     "onCommand:pi-agent.manageResources",
     "onCommand:pi-agent.showDiagnosticsLog",
     "onCommand:pi-agent.checkForUpdates",
-    "onCommand:pi-agent.exportDiagnosticsLog"
+    "onCommand:pi-agent.exportDiagnosticsLog",
+    "onCommand:pi-agent.rebuildNativeAddons"
   ],
   "repository": {
     "type": "git",
@@ -171,6 +172,10 @@
       {
         "command": "pi-agent.exportDiagnosticsLog",
         "title": "Export Diagnostics Log..."
+      },
+      {
+        "command": "pi-agent.rebuildNativeAddons",
+        "title": "Rebuild Native Addons"
       }
     ],
     "viewsContainers": {

@@ -156,6 +156,31 @@ export function rebuildBetterSqlite3(): { success: boolean; output: string } {
 }
 
 /**
+ * Check ABI and auto-rebuild if mismatched.
+ * Returns true if OK or successfully rebuilt.
+ */
+export function ensureBetterSqlite3Compatible(): {
+	ok: boolean;
+	rebuilt: boolean;
+	output: string;
+} {
+	const status = checkBetterSqlite3();
+	if (status.ok) {
+		return { ok: true, rebuilt: false, output: "ABI compatible" };
+	}
+
+	const rebuildResult = rebuildBetterSqlite3();
+	if (rebuildResult.success) {
+		// Verify the rebuild fixed it
+		const verify = checkBetterSqlite3();
+		if (verify.ok) {
+			return { ok: true, rebuilt: true, output: rebuildResult.output };
+		}
+	}
+	return { ok: false, rebuilt: false, output: rebuildResult.output };
+}
+
+/**
  * Human-readable description of ABI status.
  */
 export function describeABIStatus(

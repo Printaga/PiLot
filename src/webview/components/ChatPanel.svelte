@@ -5,7 +5,7 @@ import { tick } from "svelte";
   import ContextIndicator from "./ContextIndicator.svelte";
   import ResourceBadge from "./ResourceBadge.svelte";
   import HelpTooltip from "./HelpTooltip.svelte";
-  import ActivityBar from "./ActivityBar.svelte";
+  import StatusLine from "./StatusLine.svelte";
   import type { ImageContent, Message } from "../types/index";
 
   interface ContextFile {
@@ -91,6 +91,9 @@ import { tick } from "svelte";
     onShowPromptTemplates?: () => void;
     previousResourceCount?: Record<string, number>;
     activityStatuses?: Record<string, { text: string; type: "extension" | "tool" | "system"; timestamp: number }>;
+    footerCwd?: string;
+    footerGitBranch?: string | null;
+    footerSessionName?: string | null;
   }
 
   let {
@@ -118,6 +121,9 @@ import { tick } from "svelte";
     onShowPromptTemplates = () => {},
     previousResourceCount = {},
     activityStatuses = {},
+    footerCwd = "",
+    footerGitBranch = null,
+    footerSessionName = null,
   }: Props = $props();
 
   let messagesContainer: HTMLDivElement | null = null;
@@ -639,10 +645,6 @@ import { tick } from "svelte";
             >PI coding agent</a
           >. Type a message below to start.
         </p>
-        <p class="subtitle hint">
-          Press <kbd>1</kbd>-<kbd>7</kbd> for tabs · <kbd>Ctrl+Shift+A</kbd> attach
-          files
-        </p>
 
         <div class="setup-card">
           <div class="setup-header">
@@ -762,30 +764,7 @@ import { tick } from "svelte";
       {#each visibleMessages as message, i (i)}
         <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
           <MessageBubble {message} />
-          {#if message.role === "user" && !message.isStreaming}
-            <button
-              class="edit-msg-btn"
-              onclick={() =>
-                startEdit(messages.indexOf(message), message.content)}
-              title="Edit message"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
-                />
-                <path
-                  d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
-                />
-              </svg>
-            </button>
-          {/if}
+
         </div>
       {/each}
 
@@ -1154,7 +1133,12 @@ import { tick } from "svelte";
       />
     </div>
   </div>
-  <ActivityBar activities={activityStatuses} />
+  <StatusLine
+    cwd={footerCwd}
+    gitBranch={footerGitBranch}
+    sessionName={footerSessionName}
+    activities={activityStatuses}
+  />
 </div>
 
 <style>

@@ -21,7 +21,7 @@
 		},
 		{
 			title: '📋 Session History',
-			content: 'Click the clock icon in the sidebar to view and switch between sessions. You can fork from any point in your conversation tree.',
+			content: 'Click the clock icon in the sidebar to view and switch between sessions. Browse your conversation tree to revisit any point.',
 			icon: 'history'
 		},
 		{
@@ -38,6 +38,11 @@
 			title: '📦 Packages',
 			content: 'Discover and install PI packages (extensions, skills, prompts, themes) from the marketplace in the Packages tab.',
 			icon: 'package'
+		},
+		{
+			title: '🔑 Provider API Keys',
+			content: 'Open the Providers tab (key icon) to add API keys for your preferred AI providers. Configure once, then switch models freely.',
+			icon: 'key'
 		},
 
 	];
@@ -244,8 +249,10 @@
 		border-color: var(--color-primary);
 	}
 
-	.nav-btn.primary:hover {
-		filter: brightness(1.1);
+	.nav-btn.primary:hover:not(:disabled) {
+		background: var(--color-primary);
+		border-color: var(--color-primary);
+		filter: brightness(1.15);
 	}
 
 	.skip-btn {

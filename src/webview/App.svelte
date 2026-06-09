@@ -11,12 +11,10 @@
   import OnboardingTour from "./components/OnboardingTour.svelte";
   import ExportDialog from "./components/ExportDialog.svelte";
   import PromptTemplates from "./components/PromptTemplates.svelte";
-  import ActivityBar from "./components/ActivityBar.svelte";
   import type {
     ImageContent,
     Message,
     Model,
-    ToolCallMessage,
   } from "./types/index";
 
   let activeTab = $state<
@@ -63,6 +61,11 @@
   let hasUpdates = $state(false);
   let piUpdateAvailable = $state<string | null>(null);
   let packageUpdateCount = $state(0);
+
+  // Footer data for PI TUI-style status line
+  let footerCwd = $state("");
+  let footerGitBranch = $state<string | null>(null);
+  let footerSessionName = $state<string | null>(null);
 
   // Feature states: onboarding, export, prompt templates
   let showOnboarding = $state(false);
@@ -438,6 +441,14 @@
         }
         break;
 
+      case "footer-data": {
+        // Footer data from extension host (cwd, git branch, session name)
+        if (data.cwd) footerCwd = data.cwd;
+        if (data.gitBranch !== undefined) footerGitBranch = data.gitBranch;
+        if (data.sessionName !== undefined) footerSessionName = data.sessionName;
+        break;
+      }
+
       case "activity-start": {
         const { key, text, activityType } = data;
         activityStatuses = {
@@ -459,7 +470,7 @@
       }
 
       case "extension-notify": {
-        const { message, type } = data;
+        const { message, type: _type } = data;
         if (message) {
           // Show package notifications as system messages in chat instead of popup toasts
           messages = [
@@ -927,15 +938,6 @@
     });
   }
 
-  function handleExportDone() {
-    showToast({
-      type: "success",
-      title: "Export initiated",
-      message: "Check the messages for export status.",
-    });
-    showExport = false;
-  }
-
   function handleInsertPromptTemplate(text: string) {
     draftInputText = text;
     showPromptTemplates = false;
@@ -1206,6 +1208,9 @@
           onShowPromptTemplates={() => (showPromptTemplates = true)}
           {previousResourceCount}
           {activityStatuses}
+          footerCwd={footerCwd}
+          footerGitBranch={footerGitBranch}
+          footerSessionName={footerSessionName}
         />
       {:else if activeTab === "sessions"}
         <SessionTree />

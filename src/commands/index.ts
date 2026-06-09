@@ -5,8 +5,10 @@ import { runUpdateCheck } from "../update-checker.js";
 
 // ── Diagnostics output channel and log buffer ──────────────────────────────
 
-export const diagnosticsChannel =
-	vscode.window.createOutputChannel("PiLot Studio Diagnostics", { log: true });
+export const diagnosticsChannel = vscode.window.createOutputChannel(
+	"PiLot Studio Diagnostics",
+	{ log: true },
+);
 
 const diagnosticsBuffer: string[] = [];
 let isDiagnosticsEnabled = false;
@@ -19,7 +21,8 @@ export function logDiagnostics(message: string, ...args: unknown[]) {
 	diagnosticsBuffer.push(line);
 	if (args.length > 0) {
 		for (const arg of args) {
-			const argLine = typeof arg === "string" ? arg : JSON.stringify(arg, null, 2);
+			const argLine =
+				typeof arg === "string" ? arg : JSON.stringify(arg, null, 2);
 			diagnosticsChannel.appendLine(argLine);
 			diagnosticsBuffer.push(argLine);
 		}
@@ -316,9 +319,10 @@ export function registerCommands(
 				if (!uri) return;
 
 				try {
-					const content = diagnosticsBuffer.length > 0
-						? diagnosticsBuffer.join("\n") + "\n"
-						: "[PiLot Studio Diagnostics — no log entries yet]\n";
+					const content =
+						diagnosticsBuffer.length > 0
+							? diagnosticsBuffer.join("\n") + "\n"
+							: "[PiLot Studio Diagnostics — no log entries yet]\n";
 					await vscode.workspace.fs.writeFile(
 						uri,
 						Buffer.from(content, "utf-8"),
@@ -340,7 +344,9 @@ export function registerCommands(
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("pi-agent.diagnostics")) {
 				const config = vscode.workspace.getConfiguration("pi-agent");
-				setDiagnosticsEnabled(config.get<boolean>("diagnostics.enabled", false));
+				setDiagnosticsEnabled(
+					config.get<boolean>("diagnostics.enabled", false),
+				);
 			}
 		}),
 	);
@@ -374,5 +380,15 @@ export function registerCommands(
 				}
 			}
 		}),
+	);
+
+	// Rebuild Native Addons command
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			"pi-agent.rebuildNativeAddons",
+			async () => {
+				await provider.rebuildNativeAddons();
+			},
+		),
 	);
 }

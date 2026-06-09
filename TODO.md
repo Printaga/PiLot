@@ -1,0 +1,12 @@
+- Improved package status messages
+- Support for opening config files
+- Support for skill management
+- Fork support in chat window
+- Edit message support
+- Copy message support
+- Slash command support
+- Oauth authentication
+- More settings in GUI
+- Prompt enhancement
+- Version tooltip
+- Better onboarding
