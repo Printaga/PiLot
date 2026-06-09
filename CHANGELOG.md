@@ -8,19 +8,20 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - Activity Bar component status messages and information
 - Toast notifications and improved error messages
-- Automatic session naming based on conversation content
-- Session deletion command
+- Session select and delete
 - Session export feature
 - Resizable chat window for an improved user experience
 - Onboarding tour for new users, including new tooltips
 - Prompt templates feature with editable starter text
 - ResourceBadge component with change-indicator animations
+- TODO.md file for future development and improvements
 
 ### Changed
 
 - Removed the bundled PI binary from the extension package; the extension now relies on the user's local PI binary installation
+- Major GUI and design overhaul
 - Major codebase refactoring
-- Major GUI overhaul
+- Documentation update
 
 ### Fixed
 

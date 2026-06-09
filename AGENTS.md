@@ -10,13 +10,18 @@
 - Dev watch (VS Code host assets): `pnpm run webview:dev`
 - Package extension: `pnpm run package`
 
+## Verification Flow
+
+- Build requires both webview and extension: `pnpm run build`
+- Tests require compilation first: `pnpm test` runs `compile && node ./dist-tsc/test/runTest.js`
+- Lint: `pnpm run lint` (ESLint on src/**/*.ts)
+
 ## Tech Stack
 
-- TypeScript `^6.0.3` (NodeNext/ESM), Node.js `>=24.16.0`
-- Svelte `^5.56.0` for the webview UI, VS Code Extension Host for the extension runtime
+- TypeScript `^6.0.3` (NodeNext/ESM), VS Code Extension Host runtime
+- Svelte `^5.56.0` for the webview UI
 - Vite `^8.0.15`, ESLint `^10.4.1`, Mocha + `@vscode/test-electron`, esbuild `^0.28.0`
-- Key runtime dependency: `@earendil-works/pi-coding-agent@^0.78.0`
-- Preferred additions if new stack is introduced: SvelteKit `v2.60.1+`, SQLite with `better-sqlite3 v12.9.0+`
+- Key runtime dependency: `@earendil-works/pi-coding-agent@^0.78.0` (external, loaded at runtime)
 
 ## Project Structure
 
@@ -75,8 +80,3 @@
 - Svelte 5 runes (`$state`, `$derived`, `$effect`) are used throughout — no stores.
 - State flows: `App.svelte` owns top-level state → passes as props → child components emit events via callbacks.
 - Message handling centralized in `App.svelte`'s `handleVSCodeMessage` which dispatches to state updates.
-
-## Agent Platforms
-
-- Universal instructions file in use: `AGENTS.md`
-- No platform-specific instruction files detected under `.github/`, `.claude/`, `.cursor/`, or `.windsurf/`

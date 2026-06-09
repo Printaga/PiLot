@@ -1,12 +1,15 @@
 - Improved package status messages
 - Support for opening config files
-- Support for skill management
-- Fork support in chat window
+- GUI skill management
+- GUI rules management
+- GUI fork support
+- GUI MCP support
 - Edit message support
 - Copy message support
 - Slash command support
 - Oauth authentication
-- More settings in GUI
-- Prompt enhancement
-- Version tooltip
-- Better onboarding
+- More settings exposed in GUI
+- Prompt enhancement tool
+- Current version tooltip
+- Worktree support
+- Agents support

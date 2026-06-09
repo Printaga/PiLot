@@ -125,10 +125,13 @@ Everything is configurable under `pi-agent.*` settings. Key options:
 
 ### Session
 
-- **Thinking level** — Control how deep PI reasons (minimal → xhigh)
-- **Tool access** — Restrict what PI can do (read-only, custom, or full)
+- **Thinking level** — Control how deep PI reasons (off → minimal → low → medium → high → xhigh)
 - **Auto-compact** — Automatically manage conversation context
 - **Auto-retry** — Retry on transient errors automatically
+
+### Tools
+
+- **Tool preset** — Restrict what PI can do (default, review, none, or custom)
 
 ### Context
 
