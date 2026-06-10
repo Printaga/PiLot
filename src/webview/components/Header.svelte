@@ -6,12 +6,13 @@
   }
 
   interface Props {
+    appVersion: string;
     currentModel: string | null;
     modelName: string;
+    piCliVersion: string | null;
     providerName: string;
     thinkingLevel: string;
     onNewSession?: () => void;
-    isStreaming?: boolean;
     favoriteModels: string[];
     models: Model[];
     onSelectFavorite: (modelId: string) => void;
@@ -26,12 +27,13 @@
   }
 
   let {
+    appVersion = "0.0.0",
     currentModel = null,
     modelName = "",
+    piCliVersion = null,
     providerName = "",
     thinkingLevel = "medium",
     onNewSession,
-    isStreaming = false,
     favoriteModels = [],
     models = [],
     onSelectFavorite,
@@ -110,45 +112,24 @@
     return `Updates Available\n${parts.join("\n")}\n\nClick to run pi update`;
   }
 
-  let mediaIcon = $state(
-    typeof window !== "undefined"
-      ? (((window as any).__MEDIA_ICON__ as string | undefined) ?? "")
-      : "",
-  );
+  const logoTitle = $derived.by(() => {
+    const parts = [`PiLot Studio v${appVersion}`];
+    parts.push(
+      piCliVersion ? `PI CLI v${piCliVersion}` : "PI CLI not detected",
+    );
+    return parts.join("\n");
+  });
 </script>
 
 <header class="header">
   <div class="header-left">
-    <div class="logo" title="PiLot Studio">
-      {#if mediaIcon}
-        <img src={mediaIcon} alt="PiLot Studio" class="logo-image" />
-      {:else}
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <rect
-            x="2"
-            y="2"
-            width="20"
-            height="20"
-            rx="6"
-            stroke="var(--color-primary)"
-            stroke-width="2"
-          />
-          <path
-            d="M7 8h10M12 8v8M9 16h6"
-            stroke="var(--color-primary)"
-            stroke-width="2"
-            stroke-linecap="round"
-          />
-          <circle
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="var(--accent-glow)"
-            stroke-width="4"
-            opacity="0.2"
-          />
-        </svg>
-      {/if}
+    <div class="logo" title={logoTitle}>
+      <svg width="22" height="22" viewBox="0 0 24 24">
+        <path
+          d="M4 5h16v2H4zM6 11v2h2v6h2v-6h2v3c0 2.2 1.3 3.5 3 3.5s3-1.3 3-3.5h-2c0 .8-.5 1.5-1 1.5s-1-.7-1-1.5v-3h4v-2H6z"
+          fill="var(--color-primary)"
+        />
+      </svg>
     </div>
 
     {#if currentModel}
@@ -389,13 +370,6 @@
     flex-shrink: 0;
     transition: all var(--transition-fast);
     cursor: default;
-  }
-
-  .logo-image {
-    width: 22px;
-    height: 22px;
-    border-radius: 0;
-    object-fit: contain;
   }
 
   .logo:hover {

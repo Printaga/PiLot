@@ -61,6 +61,8 @@
   let hasUpdates = $state(false);
   let piUpdateAvailable = $state<string | null>(null);
   let packageUpdateCount = $state(0);
+  let appVersion = $state("0.0.0");
+  let piCliVersion = $state<string | null>(null);
 
   // Footer data for PI TUI-style status line
   let footerCwd = $state("");
@@ -490,9 +492,11 @@
 
   function handleReady(data: any) {
     isInitialized = true;
+    if (data?.appVersion) appVersion = data.appVersion;
     if (data?.models) models = data.models;
     if (data?.currentModel) currentModel = data.currentModel;
     if (data?.favoriteModels) favoriteModels = data.favoriteModels;
+    piCliVersion = data?.piCliVersion ?? null;
     if (data?.thinkingLevel) thinkingLevel = data.thinkingLevel;
 
     // Show onboarding on first launch (Feature 3)
@@ -1026,8 +1030,10 @@
 
 <div class="app">
   <Header
+    {appVersion}
     {currentModel}
     modelName={getModelDisplay(currentModel)}
+    {piCliVersion}
     providerName={currentModel?.split("/")[0] || ""}
     {thinkingLevel}
     onNewSession={handleNewSession}

@@ -195,8 +195,10 @@ export class PiAgentProvider
 		try {
 			const binaryPath = this.resolvedBinaryPath || findPiBinary();
 			const result = await execFileAsync(binaryPath, ["--version"]);
-			if (result.code === 0 && result.stdout) {
-				this.piVersion = result.stdout.trim();
+			// pi --version may output to stdout or stderr depending on the version
+			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
+			if (result.code === 0 && versionOutput) {
+				this.piVersion = versionOutput;
 				this.log(`Resolved PI CLI version: ${this.piVersion}`);
 				return this.piVersion;
 			}
@@ -721,7 +723,7 @@ export class PiAgentProvider
 
 		// Compute webview URIs for media assets and inject them as globals
 		const mediaIconUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png"),
+			vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.svg"),
 		);
 		const mediaKofiUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.context.extensionUri, "media", "kofi.png"),
@@ -1132,7 +1134,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.logError(`[PI] Session not found: ${sessionId}`);
 			this.notifyWebview({
 				type: "error",
-				data: { message: `Session not found: ${sessionId}`, timestamp: Date.now() },
+				data: {
+					message: `Session not found: ${sessionId}`,
+					timestamp: Date.now(),
+				},
 			});
 			return;
 		}
@@ -1504,6 +1509,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.currentModelId;
 	}
 
+	getExtensionVersion(): string {
+		return this.context.extension.packageJSON.version || "0.0.0";
+	}
+
+	getPiCliVersion(): Promise<string | null> {
+		return this.resolvePiVersion();
+	}
+
 	getThinkingLevel(): ThinkingLevel {
 		if (this.settingsManager) {
 			const level = this.settingsManager.getDefaultThinkingLevel();
@@ -1722,7 +1735,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	async listSessions(forceRefresh = false): Promise<SessionItem[]> {
 		const now = Date.now();
 		// Return cached list if recent and not forced
-		if (!forceRefresh && this._sessionListCache.length > 0 && now - this._sessionListCacheTime < this.SESSION_LIST_REFRESH_INTERVAL) {
+		if (
+			!forceRefresh &&
+			this._sessionListCache.length > 0 &&
+			now - this._sessionListCacheTime < this.SESSION_LIST_REFRESH_INTERVAL
+		) {
 			return this._sessionListCache;
 		}
 
@@ -1834,7 +1851,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.session &&
 			!this.session.sessionName
 		) {
-			this.logDebug("[PI] Auto-naming: first user message received, attempting to name session");
+			this.logDebug(
+				"[PI] Auto-naming: first user message received, attempting to name session",
+			);
 			this._autoNamingTriggered = this.tryAutoSessionNameFromUserMessage(
 				event.message,
 			);
@@ -1854,10 +1873,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.session &&
 			!this.session.sessionName
 		) {
-			this.logDebug("[PI] Auto-naming: agent response complete, attempting to improve session name");
+			this.logDebug(
+				"[PI] Auto-naming: agent response complete, attempting to improve session name",
+			);
 			this._autoNamingTriggered = this.tryAutoSessionName();
 			if (this._autoNamingTriggered) {
-				this.logDebug("[PI] Auto-naming: session name improved from assistant response");
+				this.logDebug(
+					"[PI] Auto-naming: session name improved from assistant response",
+				);
 				this.invalidateSessionListCache(); // Force session list refresh
 				this.refreshSessionList(true);
 			}

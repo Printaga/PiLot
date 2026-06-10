@@ -10,6 +10,7 @@
 - Oauth authentication
 - More settings exposed in GUI
 - Prompt enhancement tool
-- Current version tooltip
 - Worktree support
 - Agents support
+- Move 'see more' to the top of the GUI
+- Remove redundant Exts in context section

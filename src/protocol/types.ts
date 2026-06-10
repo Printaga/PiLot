@@ -40,6 +40,8 @@ export interface ProviderApi {
 	setAutoCompactionEnabled(enabled: boolean): void;
 	getAvailableModels(): Promise<Array<{ id: string; provider: string; name: string }>>;
 	getCurrentModelId(): string | null;
+	getExtensionVersion(): string;
+	getPiCliVersion(): Promise<string | null>;
 	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	getFavorites(): string[];
 	getProviderAuthData(): Promise<Array<{ provider: string; name: string; configured: boolean; status: string }>>;

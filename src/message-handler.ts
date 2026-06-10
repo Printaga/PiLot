@@ -526,6 +526,8 @@ export class MessageHandler {
 		const models = await this.provider.getAvailableModels();
 		const sessions = await this.provider.listSessions();
 		const currentModel = this.provider.getCurrentModelId();
+		const appVersion = this.provider.getExtensionVersion();
+		const piCliVersion = await this.provider.getPiCliVersion();
 		const favoriteModels = this.provider.getFavorites();
 		const thinkingLevel = this.provider.getThinkingLevel();
 
@@ -533,10 +535,12 @@ export class MessageHandler {
 		this.provider.sendSessionResources();
 
 		return {
+			appVersion,
 			models,
 			sessions,
 			currentModel,
 			favoriteModels,
+			piCliVersion,
 			thinkingLevel,
 			sessionId: undefined,
 		};

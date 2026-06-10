@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Tooltip for the top left icon showing the current version of the extension and PI binary
+
 ## [2.0.0] - 2026-06-09
 
 ### Added
