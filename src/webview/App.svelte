@@ -1238,6 +1238,7 @@
       {:else}
         <SettingsPanel
           {autoContext}
+          {appVersion}
           {thinkingLevel}
           onAutoContextChange={(value) => (autoContext = value)}
           onThinkingLevelChange={handleSetThinkingLevel}

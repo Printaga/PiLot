@@ -61,7 +61,6 @@
 
   function buildTree() {
     // Build a tree from flat sessions list
-    const roots: TreeNode[] = [];
     const nodeMap = new Map<string, TreeNode>();
 
     // First pass: create nodes
@@ -76,56 +75,33 @@
       nodeMap.set(session.id, node);
     }
 
-    // Second pass: establish parent-child relationships
+    // Second pass: establish parent-child relationships using parentId when available
     const sorted = [...sessions].sort((a, b) => a.timestamp - b.timestamp);
-    const assignedChildren = new Set<string>();
+    const childrenOf = new Map<string, TreeNode[]>();
+    const rootNodes: TreeNode[] = [];
 
-    for (let i = 0; i < sorted.length; i++) {
-      const node = nodeMap.get(sorted[i].id);
+    for (const item of sorted) {
+      const node = nodeMap.get(item.id);
       if (!node) continue;
 
-      // Try to find a parent (earlier session with similar name prefix or close in time)
-      let parent: TreeNode | null = null;
-      for (let j = i - 1; j >= 0; j--) {
-        const candidate = nodeMap.get(sorted[j].id);
-        if (candidate && !assignedChildren.has(candidate.id)) {
-          // Check if labels share common prefix (likely related branches)
-          if (
-            candidate.label &&
-            node.label &&
-            candidate.label.slice(0, 20) === node.label.slice(0, 20)
-          ) {
-            parent = candidate;
-            break;
-          }
-          // Or if they're close in time (within 5 minutes)
-          if (Math.abs(candidate.timestamp - node.timestamp) < 300000) {
-            parent = candidate;
-            break;
-          }
-        }
-      }
-
-      if (parent) {
+      // Prefer explicit parentId if present and valid
+      if (item.parentId && nodeMap.has(item.parentId)) {
+        const parent = nodeMap.get(item.parentId)!;
         node.level = parent.level + 1;
-        parent.children.push(node);
-        assignedChildren.add(node.id);
+        if (!childrenOf.has(parent.id)) childrenOf.set(parent.id, []);
+        childrenOf.get(parent.id)!.push(node);
+      } else {
+        rootNodes.push(node);
       }
     }
 
-    // Collect roots (nodes not assigned as children)
-    for (const session of sessions) {
-      const node = nodeMap.get(session.id);
-      if (
-        node &&
-        !assignedChildren.has(node.id) &&
-        !roots.some((r) => r.id === node.id)
-      ) {
-        roots.push(node);
-      }
+    // Wire children arrays from the parentId-based pass
+    for (const [parentId, children] of childrenOf) {
+      const parent = nodeMap.get(parentId);
+      if (parent) parent.children = children;
     }
 
-    treeNodes = roots;
+    treeNodes = rootNodes;
   }
 
   function selectSession(id: string) {
@@ -139,9 +115,6 @@
     sendMessage({ type: "newSession" });
   }
 
-  function navigateTree(nodeId: string) {
-    sendMessage({ type: "navigateTree", data: { nodeId } });
-  }
 
   function toggleExpand(id: string) {
     treeNodes = treeNodes.map((n) => updateNodeExpand(n, id));
@@ -192,13 +165,6 @@
     return date.toLocaleDateString();
   }
 
-  function getBranchesFromNode(node: TreeNode): number {
-    let count = node.children.length;
-    for (const child of node.children) {
-      count += getBranchesFromNode(child);
-    }
-    return count;
-  }
 
   // Flatten the tree for flat rendering (avoids recursive snippet issues)
   function flattenVisibleTree(nodes: TreeNode[]): TreeNode[] {
@@ -921,27 +887,6 @@
     background: var(--color-primary);
   }
 
-  /* Connection lines for tree hierarchy */
-  .tree-connector {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-
-  .tree-line {
-    position: absolute;
-    left: 12px;
-    top: -6px;
-    bottom: 14px;
-    width: 1px;
-    background: var(--color-border);
-  }
 
   .expand-btn {
     width: 16px;
@@ -1077,42 +1022,6 @@
     opacity: 1;
   }
 
-  .navigate-btn {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--color-text-muted);
-    border-radius: 0;
-    transition: all var(--transition-fast);
-  }
-
-  .tree-row .navigate-btn {
-    width: 18px;
-    height: 18px;
-  }
-
-  .navigate-btn:hover {
-    background: var(--color-primary);
-    color: var(--color-text-inverse);
-    border-color: var(--color-border);
-    transform: translate(-1px, -1px);
-    box-shadow: 2px 2px 0px rgba(0, 0, 0, 1);
-  }
-
-  .session-row.active .navigate-btn {
-    color: var(--color-text-inverse);
-    opacity: 0.8;
-  }
-
-  .session-row.active .navigate-btn:hover {
-    background: var(--color-surface);
-    color: var(--color-text);
-    opacity: 1;
-  }
 
   .selection-bar {
     padding: var(--space-1) var(--space-2);

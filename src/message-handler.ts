@@ -21,10 +21,7 @@ export class MessageHandler {
 
 				case "prompt":
 					try {
-						await this.provider.prompt(
-							message.data.text,
-							message.data.images
-						);
+						await this.provider.prompt(message.data.text, message.data.images);
 						result = { success: true };
 					} catch (error) {
 						// Send error as system message to webview
@@ -75,20 +72,14 @@ export class MessageHandler {
 					} catch (error) {
 						result = {
 							success: false,
-							error:
-								error instanceof Error
-									? error.message
-									: String(error),
+							error: error instanceof Error ? error.message : String(error),
 						};
 						// Send error back to webview so the dialog shows proper feedback
 						this.provider.webview?.postMessage({
 							type: "exportResult",
 							data: {
 								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: String(error),
+								error: error instanceof Error ? error.message : String(error),
 							},
 						});
 					}
@@ -111,7 +102,7 @@ export class MessageHandler {
 					}
 					break;
 
-			case "navigateTree":
+				case "navigateTree":
 					await this.provider.navigateTree(message.data.nodeId);
 					result = { success: true };
 					break;
@@ -331,7 +322,10 @@ export class MessageHandler {
 				case "listPackages":
 					this.provider.logDebug("[MessageHandler] listPackages case called");
 					result = await this.provider.listPackages();
-					this.provider.logDebug("[MessageHandler] listPackages result:", JSON.stringify(result));
+					this.provider.logDebug(
+						"[MessageHandler] listPackages result:",
+						JSON.stringify(result),
+					);
 					this.sendPackagesList(result);
 					break;
 
@@ -400,12 +394,16 @@ export class MessageHandler {
 				case "openFileAttachmentDialog":
 					{
 						const paths = await this.openFileAttachmentDialog();
-						this.provider.logDebug(`[PiLot] openFileAttachmentDialog: selected paths: ${JSON.stringify(paths)}`);
+						this.provider.logDebug(
+							`[PiLot] openFileAttachmentDialog: selected paths: ${JSON.stringify(paths)}`,
+						);
 						this.provider.webview?.postMessage({
 							type: "files-attached",
 							data: { paths },
 						});
-						this.provider.logDebug(`[PiLot] openFileAttachmentDialog: response sent, webview exists: ${!!this.provider.webview}`);
+						this.provider.logDebug(
+							`[PiLot] openFileAttachmentDialog: response sent, webview exists: ${!!this.provider.webview}`,
+						);
 					}
 					break;
 
@@ -425,82 +423,86 @@ export class MessageHandler {
 					}
 					break;
 
-			case "showRenameSessionDialog":
-				{
-					const newName = await vscode.window.showInputBox({
-						prompt: "Enter a new name for this session",
-						placeHolder: "My session name",
-					});
-					if (newName) {
-						await this.provider.setSessionName(newName);
-						result = { success: true };
-					} else {
-						result = { cancelled: true };
+				case "showRenameSessionDialog":
+					{
+						const newName = await vscode.window.showInputBox({
+							prompt: "Enter a new name for this session",
+							placeHolder: "My session name",
+						});
+						if (newName) {
+							await this.provider.setSessionName(newName);
+							result = { success: true };
+						} else {
+							result = { cancelled: true };
+						}
 					}
-				}
-				break;
+					break;
 
-			case "deleteSessions": {
-				const sessionIds = message.data?.sessionIds ?? [];
-				if (sessionIds.length === 0) {
-					result = { success: true, skipped: true };
+				case "deleteSessions": {
+					const sessionIds = message.data?.sessionIds ?? [];
+					if (sessionIds.length === 0) {
+						result = { success: true, skipped: true };
+						break;
+					}
+
+					// Confirm with the user via VS Code dialog (webviews cannot use confirm())
+					const count = sessionIds.length;
+					const confirmBtn =
+						count === 1
+							? await vscode.window.showWarningMessage(
+									"Delete this session? This cannot be undone.",
+									{ modal: true },
+									"Delete",
+								)
+							: await vscode.window.showWarningMessage(
+									`Delete ${count} sessions? This cannot be undone.`,
+									{ modal: true },
+									"Delete",
+								);
+
+					if (confirmBtn !== "Delete") {
+						result = { success: true, cancelled: true };
+						break;
+					}
+
+					try {
+						await this.provider.deleteSessions(sessionIds);
+						result = { success: true };
+					} catch (error: any) {
+						this.provider.webview?.postMessage({
+							type: "error",
+							data: {
+								message: error?.message ?? String(error),
+								timestamp: Date.now(),
+							},
+						});
+						throw error;
+					}
 					break;
 				}
 
-				// Confirm with the user via VS Code dialog (webviews cannot use confirm())
-				const count = sessionIds.length;
-				const confirmBtn = count === 1
-					? await vscode.window.showWarningMessage(
-						"Delete this session? This cannot be undone.",
-						{ modal: true },
-						"Delete",
-					)
-					: await vscode.window.showWarningMessage(
-							`Delete ${count} sessions? This cannot be undone.`,
-							{ modal: true },
-							"Delete",
+				case "edit-message":
+					try {
+						await this.provider.editMessage(
+							message.data.index,
+							message.data.text,
 						);
-
-				if (confirmBtn !== "Delete") {
-					result = { success: true, cancelled: true };
+						result = { success: true };
+					} catch (error) {
+						this.provider.webview?.postMessage({
+							type: "error",
+							data: {
+								message: error instanceof Error ? error.message : String(error),
+								timestamp: Date.now(),
+							},
+						});
+						throw error;
+					}
 					break;
-				}
 
-				try {
-					await this.provider.deleteSessions(sessionIds);
-					result = { success: true };
-				} catch (error: any) {
-					this.provider.webview?.postMessage({
-						type: "error",
-						data: {
-							message: error?.message ?? String(error),
-							timestamp: Date.now(),
-						},
-					});
-					throw error;
-				}
-				break;
-			}
-
-			case "edit-message":
-				try {
-					await this.provider.editMessage(message.data.index, message.data.text);
-					result = { success: true };
-				} catch (error) {
-					this.provider.webview?.postMessage({
-						type: "error",
-						data: {
-							message: error instanceof Error ? error.message : String(error),
-							timestamp: Date.now(),
-						},
-					});
-					throw error;
-				}
-				break;
-
-			default:
-				this.provider.logDebug("Unknown message type:", message.type);
-				result = { error: `Unknown message type: ${message.type}` };
+				default:
+					this.provider.logDebug("Unknown message type:", message.type);
+					result = { error: `Unknown message type: ${message.type}` };
 			}
 
 			if (message.id) {
@@ -530,6 +532,9 @@ export class MessageHandler {
 		const piCliVersion = await this.provider.getPiCliVersion();
 		const favoriteModels = this.provider.getFavorites();
 		const thinkingLevel = this.provider.getThinkingLevel();
+		const sessionId = this.provider.hasSession
+			? (this.provider as any).session?.sessionId
+			: undefined;
 
 		// Re-send session resources now that webview is ready to receive
 		this.provider.sendSessionResources();
@@ -542,7 +547,7 @@ export class MessageHandler {
 			favoriteModels,
 			piCliVersion,
 			thinkingLevel,
-			sessionId: undefined,
+			sessionId,
 		};
 	}
 
@@ -672,7 +677,10 @@ export class MessageHandler {
 	}
 
 	private sendPackagesList(data: any) {
-		this.provider.logDebug("[MessageHandler] sendPackagesList called with:", JSON.stringify(data));
+		this.provider.logDebug(
+			"[MessageHandler] sendPackagesList called with:",
+			JSON.stringify(data),
+		);
 		this.provider.webview?.postMessage({
 			type: "installed",
 			data: data,
@@ -692,8 +700,8 @@ export class MessageHandler {
 			// Explicit exclude pattern: only skip node_modules, .git, and typical build
 			// artifacts. The VS Code default exclusion set (null) can be unexpectedly
 			// restrictive (e.g. hiding src/ or dist/ depending on user settings).
-			const excludePattern = '{**/node_modules/**,**/.git/**,**/dist-tsc/**}';
-			const pattern = new vscode.RelativePattern(rootUri, '**/*');
+			const excludePattern = "{**/node_modules/**,**/.git/**,**/dist-tsc/**}";
+			const pattern = new vscode.RelativePattern(rootUri, "**/*");
 			const fileUris = await vscode.workspace.findFiles(
 				pattern,
 				excludePattern,
@@ -706,8 +714,8 @@ export class MessageHandler {
 				// Filter out node_modules and hidden files (belt and suspenders)
 				if (
 					!relativePath ||
-					relativePath.includes('node_modules') ||
-					relativePath.startsWith('.')
+					relativePath.includes("node_modules") ||
+					relativePath.startsWith(".")
 				) {
 					continue;
 				}
@@ -717,7 +725,7 @@ export class MessageHandler {
 				files.push(relativePath);
 			}
 		} catch (e) {
-			this.provider.logError('Failed to get workspace files:', e);
+			this.provider.logError("Failed to get workspace files:", e);
 		}
 
 		return files.sort();

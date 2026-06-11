@@ -1,4 +1,3 @@
-- Improved package status messages
 - Support for opening config files
 - GUI skill management
 - GUI rules management

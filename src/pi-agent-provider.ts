@@ -86,15 +86,6 @@ interface SessionInfoFull {
 	cwd?: string;
 }
 
-/** @deprecated legacy interface for native tree view — kept for SessionsTreeProvider compatibility */
-export interface SessionNode {
-	id: string;
-	label: string;
-	timestamp: number;
-	children: SessionNode[];
-	parent: string | null;
-}
-
 export class PiAgentProvider
 	implements vscode.WebviewViewProvider, vscode.Disposable
 {
@@ -1788,19 +1779,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	private async refreshSessionList(forceRefresh = false) {
 		await this.listSessions(forceRefresh);
 		this.notifyWebview({ type: "sessions-list", data: this._sessionListCache });
-	}
-
-	/** @deprecated Use listSessions() for webview, kept for native tree view compatibility */
-	async getSessionTree(): Promise<SessionNode[]> {
-		const items = await this.listSessions();
-		return items.map(
-			(i) =>
-				({
-					...i,
-					children: [],
-					parent: null,
-				}) as SessionNode,
-		);
 	}
 
 	private handleSessionEvent(event: AgentSessionEvent) {

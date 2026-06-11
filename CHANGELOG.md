@@ -6,7 +6,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
-- Tooltip for the top left icon showing the current version of the extension and PI binary
+- New tooltip for the top left icon showing the current version of the extension and PI binary
 - More detailed information about installed PI packages
 
 ### Changed
@@ -22,6 +22,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Fixed StatusLine Uses Non-existent Events
 - Fixed debug Logging Bypasses Diagnostics Setting
 - Removed Unused CSS selectors
+- Multiple minor issues fixed
 
 ## [2.0.0] - 2026-06-09
 
