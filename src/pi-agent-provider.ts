@@ -954,19 +954,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// DIAGNOSTIC: Log extension count after reload
 		const extResult = resourceLoader.getExtensions();
-		console.log(
+		this.logDebug(
 			`[PiLot DIAGNOSTIC] After resourceLoader.reload(): ${extResult.extensions.length} extensions loaded`,
 		);
 		if (extResult.extensions.length > 0) {
-			console.log(
+			this.logDebug(
 				"[PiLot DIAGNOSTIC] First 3 extensions:",
 				extResult.extensions.slice(0, 3).map((e: any) => e.path),
 			);
 		}
 		if (extResult.errors.length > 0) {
-			console.log("[PiLot DIAGNOSTIC] Extension loading errors:");
+			this.logDebug("[PiLot DIAGNOSTIC] Extension loading errors:");
 			extResult.errors.forEach((err: any, i: number) => {
-				console.log(`  [${i}] ${err.path}: ${err.error}`);
+				this.logDebug(`  [${i}] ${err.path}: ${err.error}`);
 			});
 		}
 
@@ -1028,7 +1028,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			let prompts: PromptTemplate[] = [];
 			try {
 				const rl = this.session.resourceLoader;
-				console.log(
+				this.logDebug(
 					"[PiLot DIAGNOSTIC] sendSessionResources - resourceLoader exists:",
 					!!rl,
 				);
@@ -1038,11 +1038,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					const sr = rl.getSkills();
 					skills = sr.skills || [];
 					const er = rl.getExtensions();
-					console.log(
+					this.logDebug(
 						"[PiLot DIAGNOSTIC] sendSessionResources - extensions array length:",
 						er.extensions?.length,
 					);
-					console.log(
+					this.logDebug(
 						"[PiLot DIAGNOSTIC] sendSessionResources - first 3 extensions:",
 						er.extensions?.slice(0, 3).map((e: any) => e.path),
 					);
@@ -1051,7 +1051,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					prompts = pr?.prompts || [];
 				}
 			} catch (e) {
-				console.error("[PiLot DIAGNOSTIC] sendSessionResources error:", e);
+				this.logError("[PiLot DIAGNOSTIC] sendSessionResources error:", e);
 				contextFiles = [];
 				skills = [];
 				extensions = [];
@@ -2037,7 +2037,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				},
 				onTerminalInput: () => () => {},
 				setStatus: (key: string, text: string | undefined) => {
-					console.log(`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`);
+					this.logDebug(
+						`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`,
+					);
 					if (text === undefined || text === null) {
 						this.extensionStatuses.delete(key);
 					} else {
@@ -2132,23 +2134,25 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			const extensionPaths = runner.getExtensionPaths?.() ?? [];
 			const extensionCount = extensionPaths.length;
-			console.log(
+			this.logDebug(
 				`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`,
 			);
 			if (extensionCount > 0) {
-				console.log("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
+				this.logDebug("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
 			}
 
 			// Check if extensions have session_start handlers
 			const extensions = (runner as any).extensions ?? [];
-			console.log(`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`);
+			this.logDebug(
+				`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`,
+			);
 			if (extensions.length > 0) {
 				const handlers = extensions.map((ext: any) => ({
 					path: ext.path,
 					hasSessionStart: ext.handlers?.has("session_start"),
 					handlerCount: ext.handlers?.get("session_start")?.length ?? 0,
 				}));
-				console.log("[PiLot DIAGNOSTIC] Extension handlers:", handlers);
+				this.logDebug("[PiLot DIAGNOSTIC] Extension handlers:", handlers);
 			}
 
 			this.logDebug(
@@ -2171,22 +2175,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			// Store it for future reload() calls
 			(this.session as any)._sessionStartEvent = sessionStartEvent;
 
-			console.log(
+			this.logDebug(
 				"[PiLot DIAGNOSTIC] Emitting session_start event:",
 				sessionStartEvent,
 			);
 			this.logDebug("[PI] Emitting session_start to extensions");
 			await runner.emit(sessionStartEvent);
-			console.log("[PiLot DIAGNOSTIC] session_start emitted successfully");
+			this.logDebug("[PiLot DIAGNOSTIC] session_start emitted successfully");
 
 			// Let extensions discover additional resources (skills, prompts, themes)
 			await (this.session as any).extendResourcesFromExtensions?.("startup");
 
-			console.log(
+			this.logDebug(
 				`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.extensionStatuses.size}`,
 			);
 			if (this.extensionStatuses.size > 0) {
-				console.log(
+				this.logDebug(
 					"[PiLot DIAGNOSTIC] Statuses:",
 					Object.fromEntries(this.extensionStatuses),
 				);
@@ -2202,7 +2206,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			// Send any statuses that extensions may have already set during initialization
 			if (this.extensionStatuses.size > 0) {
-				console.log(
+				this.logDebug(
 					"[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview",
 				);
 				this.notifyWebview({
