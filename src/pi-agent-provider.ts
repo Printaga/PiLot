@@ -187,9 +187,10 @@ export class PiAgentProvider
 		if (this.resolvedBinaryPath) {
 			this.log(`Resolved pi binary: ${this.resolvedBinaryPath}`);
 		} else {
-			this.logError(
-				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.",
-			);
+			const msg =
+				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.";
+			this.logError(msg);
+			vscode.window.showErrorMessage(msg);
 		}
 	}
 

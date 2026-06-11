@@ -1,34 +1,26 @@
 # Codebase Review Findings
 
-## High Priority Issues
-
-### 3. Missing Error Handling for Critical Paths
-
-**Location:** `src/pi-agent-provider.ts:186-194` (resolvePiBinaryAtStartup)
-**Severity:** High - Extension may fail silently
-**Issue:** When pi binary resolution fails, the error is logged but no user-facing notification is shown. Users may be confused why the extension doesn't work.
-
 ## Medium Priority Issues
 
-### 4. Duplicate Package Display Prevention Incomplete
+### 1. Duplicate Package Display Prevention Incomplete
 
 **Location:** `src/pi-agent-provider.ts:78-79, 1755-1764`
 **Severity:** Medium - UI inconsistency
 **Issue:** The `getConfiguredPackages()` method returns duplicates if the same package is listed in both user and project settings. While there's a `Set` for deduplication by source, the fallback path doesn't check for duplicates properly.
 
-### 5. Session Tree Navigation Logic is Fragile
+### 2. Session Tree Navigation Logic is Fragile
 
 **Location:** `src/webview/components/SessionTree.svelte:83-106`
 **Severity:** Medium - UI bug
 **Issue:** The tree building logic attempts to infer parent-child relationships from label prefixes and timestamps, but this heuristic is unreliable and could produce incorrect tree structures. The tree doesn't use actual parent-child data from PI.
 
-### 6. StatusLine Uses Non-existent Events
+### 3. StatusLine Uses Non-existent Events
 
 **Location:** `src/webview/components/StatusLine.svelte:49-50`
 **Severity:** Medium - Broken feature
 **Issue:** The component listens for `stream_start` and `stream_end` events which are never sent from the extension host. The streaming indicator won't work. Should use `agent_start` and `agent_end` instead.
 
-### 7. Message Editing Session ID Issue
+### 4. Message Editing Session ID Issue
 
 **Location:** `src/webview/App.svelte:545`
 **Severity:** Medium - Feature defect
@@ -65,29 +57,3 @@
 **Location:** `src/voice-manager.ts:361-368`
 **Severity:** Low - Edge case
 **Issue:** Voice helper is spawned and immediately writes to stdin via `handleVoiceHelperOutput`, but there's no guarantee the process is ready to receive input before the first message arrives.
-
-## Recommendations
-
-1. **Immediate:** Replace `console.log` diagnostic statements with `logDebug` calls that respect the diagnostics setting
-2. **Soon:** Use `os.homedir()` instead of hardcoded path in native-addons.ts (line 30)
-3. **Soon:** Fix StatusLine.svelte to use `agent_start`/`agent_end` instead of `stream_start`/`stream_end`
-4. **Soon:** Fix handleReady to properly set sessionId from ready data
-5. **Later:** Add proper type definitions for message serialization
-6. **Later:** Remove `SessionsTreeProvider` and related deprecated interfaces if unused
-
-## Summary
-
-| Priority | Issue                             | File(s)                | Effort   |
-| -------- | --------------------------------- | ---------------------- | -------- |
-| Medium   | Debug logging bypasses setting    | `pi-agent-provider.ts` | Low      |
-| High     | Hardcoded home directory          | `native-addons.ts:30`  | Low      |
-| Medium   | Missing binary error notification | `pi-agent-provider.ts` | Low      |
-| Medium   | StatusLine event mismatch         | `StatusLine.svelte`    | Low      |
-| Medium   | Session tree heuristic logic      | `SessionTree.svelte`   | Medium   |
-| Low      | Hardcoded version in settings     | `SettingsPanel.svelte` | Very Low |
-| Low      | Dead code (SessionsTreeProvider)  | `sessions-tree.ts`     | Low      |
-
-## Verified Not Issues
-
-- CSS variables are properly defined in `global.css`
-- ESLint passes with no errors
