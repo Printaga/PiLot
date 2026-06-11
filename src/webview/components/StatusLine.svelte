@@ -46,9 +46,8 @@
 			const { type } = event.data;
 			if (type === "pi-event") {
 				const evt = event.data.data;
-				if (evt?.type === "stream_start") isStreaming = true;
-				if (evt?.type === "stream_end" || evt?.type === "agent_end")
-					isStreaming = false;
+				if (evt?.type === "message_start" || evt?.type === "tool_execution_start") isStreaming = true;
+				if (evt?.type === "message_end" || evt?.type === "tool_execution_end" || evt?.type === "agent_end") isStreaming = false;
 			}
 		}
 

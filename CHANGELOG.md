@@ -15,12 +15,13 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Fixed
 
-- Edge case where the app uses the wrong PI binary path
+- Fixed edge case where the app uses the wrong PI binary path
 - Removed hardcoded Home Directory fallback path in Native Addons
-- Duplicate package/extention display in the GUI context view
+- Removed duplicate package/extention display in the GUI context view
 - Fixed missing error handling for critical paths in the PI binary resolution logic
-- Debug Logging Bypasses Diagnostics Setting
-- Unused CSS selectors
+- Fixed StatusLine Uses Non-existent Events
+- Fixed debug Logging Bypasses Diagnostics Setting
+- Removed Unused CSS selectors
 
 ## [2.0.0] - 2026-06-09
 

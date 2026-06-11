@@ -14,12 +14,6 @@
 **Severity:** Medium - UI bug
 **Issue:** The tree building logic attempts to infer parent-child relationships from label prefixes and timestamps, but this heuristic is unreliable and could produce incorrect tree structures. The tree doesn't use actual parent-child data from PI.
 
-### 3. StatusLine Uses Non-existent Events
-
-**Location:** `src/webview/components/StatusLine.svelte:49-50`
-**Severity:** Medium - Broken feature
-**Issue:** The component listens for `stream_start` and `stream_end` events which are never sent from the extension host. The streaming indicator won't work. Should use `agent_start` and `agent_end` instead.
-
 ### 4. Message Editing Session ID Issue
 
 **Location:** `src/webview/App.svelte:545`
