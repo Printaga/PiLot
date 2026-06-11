@@ -1471,6 +1471,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
+	getAutoContext(): boolean {
+		return this.config.autoContext;
+	}
+
+	setAutoContext(enabled: boolean) {
+		this.config.autoContext = enabled;
+	}
+
 	async getAvailableModels() {
 		if (!this.isInitialized) {
 			await this.initialize();

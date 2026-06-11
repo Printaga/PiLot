@@ -145,7 +145,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					e.affectsConfiguration("pi-agent.appendSystemPrompts")
 				) {
 					provider.reloadSessionResources().catch((err) => {
-						console.error("[PI] Failed to reload session resources:", err);
+						provider.logDebug("[PI] Failed to reload session resources:", err);
 					});
 				}
 			}

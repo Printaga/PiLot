@@ -2,7 +2,7 @@
   "name": "pilots-studio",
   "displayName": "PiLot Studio",
   "description": "Integrate the PI AI coding agent into VS Code with a user-friendly GUI",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "PrintagaPublishingLLC",
   "license": "Apache-2.0",
   "icon": "media/icon.png",

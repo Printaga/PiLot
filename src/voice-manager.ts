@@ -6,7 +6,10 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import { type VoiceHelperMessage, type VoiceModelDef } from "./webview/types/index.js";
+import {
+	type VoiceHelperMessage,
+	type VoiceModelDef,
+} from "./webview/types/index.js";
 
 // ── Voice model definitions (whisper.cpp models from Hugging Face) ────────
 
@@ -18,7 +21,7 @@ const VOICE_MODELS: Record<string, VoiceModelDef> = {
 		expectedSizeMb: 31,
 		englishOnly: false,
 	},
-	"tiny": {
+	tiny: {
 		label: "Tiny multilingual",
 		remoteFilename: "ggml-tiny.bin",
 		cacheFilename: "tiny.bin",
@@ -39,7 +42,7 @@ const VOICE_MODELS: Record<string, VoiceModelDef> = {
 		expectedSizeMb: 57,
 		englishOnly: false,
 	},
-	"base": {
+	base: {
 		label: "Base multilingual",
 		remoteFilename: "ggml-base.bin",
 		cacheFilename: "base.bin",
@@ -63,8 +66,10 @@ const VOICE_MODEL_BASE_URL =
 function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
 	const platform = process.platform;
 	const arch = process.arch;
-	const extensionPath = extensionUri?.fsPath ||
-		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")?.extensionPath ||
+	const extensionPath =
+		extensionUri?.fsPath ||
+		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")
+			?.extensionPath ||
 		"";
 	const voiceDir = path.join(extensionPath, "media", "voice");
 
@@ -108,6 +113,7 @@ async function downloadVoiceModel(
 	onProgress?: (downloaded: number, total: number) => void,
 	onPhase?: (phase: string, message?: string) => void,
 	signal?: AbortSignal,
+	logDebug?: (msg: string, ...details: unknown[]) => void,
 ): Promise<string> {
 	const modelDef = VOICE_MODELS[modelName];
 	if (!modelDef) {
@@ -126,13 +132,13 @@ async function downloadVoiceModel(
 			Math.abs(sizeMb - modelDef.expectedSizeMb) <=
 			modelDef.expectedSizeMb * 0.2
 		) {
-			console.log(
+			logDebug?.(
 				`[PI Voice] Model already cached: ${destPath} (${sizeMb.toFixed(1)} MB)`,
 			);
 			onPhase?.("ready", "Voice model ready.");
 			return destPath;
 		}
-		console.log(
+		logDebug?.(
 			`[PI Voice] Cached model size mismatch, re-downloading: ${sizeMb.toFixed(1)}MB vs expected ${modelDef.expectedSizeMb}MB`,
 		);
 	}
@@ -210,7 +216,7 @@ async function downloadVoiceModel(
 	});
 
 	await fs.promises.rename(tmpPath, destPath);
-	console.log(`[PI Voice] Model downloaded to: ${destPath}`);
+	logDebug?.(`[PI Voice] Model downloaded to: ${destPath}`);
 	onPhase?.("ready", "Voice model ready.");
 	return destPath;
 }
@@ -261,7 +267,9 @@ export class VoiceManager {
 		try {
 			const config = vscode.workspace.getConfiguration("pi-agent");
 			if (config.get<boolean>("voice.enabled") === false) {
-				vscode.window.showInformationMessage("Voice dictation is disabled in settings");
+				vscode.window.showInformationMessage(
+					"Voice dictation is disabled in settings",
+				);
 				return;
 			}
 
@@ -290,8 +298,7 @@ export class VoiceManager {
 			}
 
 			const modelExists =
-				fs.existsSync(modelPath) &&
-				fs.statSync(modelPath).size > 1024 * 1024;
+				fs.existsSync(modelPath) && fs.statSync(modelPath).size > 1024 * 1024;
 
 			if (!modelExists) {
 				const modelDef = VOICE_MODELS[this.voiceModel];
@@ -341,11 +348,13 @@ export class VoiceManager {
 									});
 								},
 								aborter.signal,
+								this.deps.logDebug,
 							);
 						},
 					);
 				} catch (err) {
-					if (err instanceof Error && err.message === "Download cancelled") return;
+					if (err instanceof Error && err.message === "Download cancelled")
+						return;
 					vscode.window.showErrorMessage(
 						`Failed to download voice model: ${err instanceof Error ? err.message : String(err)}`,
 					);
@@ -382,7 +391,9 @@ export class VoiceManager {
 									"[PI Voice] Transcription (from stderr):",
 									msg.text.substring(0, 100),
 								);
-								this.sendVoiceMessage("voice-transcription", { text: msg.text });
+								this.sendVoiceMessage("voice-transcription", {
+									text: msg.text,
+								});
 								continue;
 							}
 						} catch {
@@ -396,12 +407,18 @@ export class VoiceManager {
 			this.voiceHelperProcess.on("error", (err) => {
 				this.deps.logError("[PI Voice Helper error]:", err);
 				const errMsg = err.message || String(err);
-				if (process.platform === "linux" && (errMsg.includes("error while loading shared libraries") || errMsg.includes("cannot open shared object file"))) {
+				if (
+					process.platform === "linux" &&
+					(errMsg.includes("error while loading shared libraries") ||
+						errMsg.includes("cannot open shared object file"))
+				) {
 					vscode.window.showErrorMessage(
 						"Voice capture failed: Missing ALSA library. Install `libasound2` (Debian/Ubuntu) or `alsa-lib` (Fedora/RHEL) for microphone support.",
 					);
 				} else {
-					this.sendVoiceMessage("voice-listening-changed", { listening: false });
+					this.sendVoiceMessage("voice-listening-changed", {
+						listening: false,
+					});
 				}
 				this.isListening = false;
 			});
@@ -409,7 +426,9 @@ export class VoiceManager {
 			this.voiceHelperProcess.on("close", (code) => {
 				this.deps.logDebug("[PI Voice Helper] Process exited with code:", code);
 				if (this.isListening) {
-					this.sendVoiceMessage("voice-listening-changed", { listening: false });
+					this.sendVoiceMessage("voice-listening-changed", {
+						listening: false,
+					});
 					this.isListening = false;
 				}
 			});
@@ -423,7 +442,9 @@ export class VoiceManager {
 
 	private stopVoiceCapture() {
 		if (this.voiceHelperProcess && this.isListening) {
-			this.voiceHelperProcess.stdin?.write(JSON.stringify({ type: "stop" }) + "\n");
+			this.voiceHelperProcess.stdin?.write(
+				JSON.stringify({ type: "stop" }) + "\n",
+			);
 			this.voiceHelperProcess.stdin?.end();
 			this.voiceHelperProcess = undefined;
 		}
@@ -458,7 +479,9 @@ export class VoiceManager {
 
 					case "started":
 						this.isListening = true;
-						this.sendVoiceMessage("voice-listening-changed", { listening: true });
+						this.sendVoiceMessage("voice-listening-changed", {
+							listening: true,
+						});
 						this.sendVoiceMessage("voice-status", {
 							status: "listening",
 							message: "Listening...",
@@ -477,7 +500,8 @@ export class VoiceManager {
 							this.sendVoiceMessage("voice-transcription", { text: msg.text });
 						} else {
 							this.deps.logDebug(
-								"[PI Voice] Transcription message received but text field is empty or undefined. Full message: " + JSON.stringify(msg),
+								"[PI Voice] Transcription message received but text field is empty or undefined. Full message: " +
+									JSON.stringify(msg),
 							);
 						}
 						break;
@@ -509,10 +533,7 @@ export class VoiceManager {
 						break;
 				}
 			} catch {
-				this.deps.logDebug(
-					"[PI] Failed to parse voice helper line:",
-					trimmed,
-				);
+				this.deps.logDebug("[PI] Failed to parse voice helper line:", trimmed);
 			}
 		}
 	}

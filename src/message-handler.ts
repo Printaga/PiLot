@@ -301,6 +301,11 @@ export class MessageHandler {
 					result = { success: true };
 					break;
 
+				case "setAutoContext":
+					this.provider.setAutoContext(message.data.enabled);
+					result = { success: true };
+					break;
+
 				case "getSessionInfo":
 					result = await this.getSessionInfo();
 					break;

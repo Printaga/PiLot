@@ -115,6 +115,10 @@
 					<span class="shortcut-desc">Close dialogs / dropdowns</span>
 				</div>
 				<div class="shortcut-item">
+					<span class="shortcut-key">Ctrl+Shift+I</span>
+					<span class="shortcut-desc">Focus chat input</span>
+				</div>
+				<div class="shortcut-item">
 					<span class="shortcut-key">Ctrl+Shift+A</span>
 					<span class="shortcut-desc">Attach file to chat</span>
 				</div>
@@ -127,32 +131,9 @@
 					<span class="shortcut-desc">Open PiLot Studio panel</span>
 				</div>
 				<div class="shortcut-item">
-					<span class="shortcut-key">Ctrl+N</span>
+					<span class="shortcut-key">Ctrl+Shift+Alt+N</span>
 					<span class="shortcut-desc">New session</span>
 				</div>
-				<div class="shortcut-item">
-					<span class="shortcut-key">Right-click</span>
-					<span class="shortcut-desc">Context menu actions on files</span>
-				</div>
-			</div>
-
-			<div class="shortcut-hint">
-				<span class="hint-text">Type <kbd>/hotkeys</kbd> in chat for all PI CLI shortcuts</span>
-			</div>
-		</section>
-
-		<section class="settings-section">
-			<h4>Slash Commands</h4>
-			<p class="section-description">Type <kbd>/</kbd> in the chat input to see available commands</p>
-			<div class="cmd-grid">
-				<div class="cmd-item">/model</div>
-				<div class="cmd-item">/export</div>
-				<div class="cmd-item">/fork</div>
-				<div class="cmd-item">/tree</div>
-				<div class="cmd-item">/name</div>
-				<div class="cmd-item">/compact</div>
-				<div class="cmd-item">/share</div>
-				<div class="cmd-item">/help</div>
 			</div>
 		</section>
 
@@ -215,17 +196,7 @@
 		margin-bottom: var(--space-3);
 	}
 
-	.section-description kbd {
-		display: inline-block;
-		padding: 0 4px;
-		font-family: var(--font-mono);
-		font-size: 10px;
-		font-weight: 700;
-		background: oklch(from var(--color-surface-2) l c h / 0.5);
-		border: 1px solid oklch(from var(--color-border) l c h / 0.3);
-		border-radius: var(--radius-sm);
-		color: var(--color-text);
-	}
+
 
 	.setting-header-row {
 		display: flex;
@@ -353,29 +324,7 @@
 
 	.shortcut-desc { color: var(--color-text-muted); font-size: var(--text-xs); }
 
-	.shortcut-hint {
-		margin-top: var(--space-2);
-		text-align: center;
-	}
 
-	.hint-text { font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.7; }
-	.hint-text kbd {
-		display: inline-block; padding: 0 4px; font-family: var(--font-mono); font-size: 10px;
-		font-weight: 700; background: oklch(from var(--color-surface-2) l c h / 0.5);
-		border: 1px solid oklch(from var(--color-border) l c h / 0.3); border-radius: var(--radius-sm); color: var(--color-text);
-	}
-
-	/* ── Slash Commands Grid ─── */
-	.cmd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
-
-	.cmd-item {
-		padding: var(--space-2); text-align: center; background: var(--color-surface);
-		border: 1px solid var(--color-border); border-radius: var(--radius-md);
-		font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 600;
-		color: var(--color-primary); transition: all var(--transition-interactive);
-	}
-
-	.cmd-item:hover { border-color: var(--color-primary); background: var(--accent-glow); }
 
 	.about-info {
 		padding: var(--space-3); background: var(--color-surface);

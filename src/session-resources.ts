@@ -3,28 +3,84 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { DefaultPackageManager, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
-import { readPackageSourcesFromSettingsFile, type InstalledPackage } from "./pi-binary.js";
+import {
+	DefaultPackageManager,
+	getAgentDir,
+	type SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+import {
+	readPackageSourcesFromSettingsFile,
+	type InstalledPackage,
+} from "./pi-binary.js";
 
 /** Check whether a file extension indicates a binary (non-text) file. */
 export function isBinaryExtension(filePath: string): boolean {
 	const binaryExts = new Set([
-		'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tiff', '.tif',
-		'.svg', '.avif', '.heic', '.heif',
-		'.mp3', '.wav', '.ogg', '.flac', '.aac', '.wma', '.m4a',
-		'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv',
-		'.zip', '.tar', '.gz', '.bz2', '.7z', '.rar',
-		'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-		'.exe', '.dll', '.so', '.dylib', '.wasm', '.o', '.a', '.lib',
-		'.woff', '.woff2', '.ttf', '.otf', '.eot',
-		'.db', '.sqlite', '.sqlite3',
+		".png",
+		".jpg",
+		".jpeg",
+		".gif",
+		".webp",
+		".bmp",
+		".ico",
+		".tiff",
+		".tif",
+		".svg",
+		".avif",
+		".heic",
+		".heif",
+		".mp3",
+		".wav",
+		".ogg",
+		".flac",
+		".aac",
+		".wma",
+		".m4a",
+		".mp4",
+		".mov",
+		".avi",
+		".mkv",
+		".webm",
+		".flv",
+		".wmv",
+		".zip",
+		".tar",
+		".gz",
+		".bz2",
+		".7z",
+		".rar",
+		".pdf",
+		".doc",
+		".docx",
+		".xls",
+		".xlsx",
+		".ppt",
+		".pptx",
+		".exe",
+		".dll",
+		".so",
+		".dylib",
+		".wasm",
+		".o",
+		".a",
+		".lib",
+		".woff",
+		".woff2",
+		".ttf",
+		".otf",
+		".eot",
+		".db",
+		".sqlite",
+		".sqlite3",
 	]);
 	const ext = path.extname(filePath).toLowerCase();
 	return binaryExts.has(ext);
 }
 
 /** Validate that an array of image objects is well-formed. */
-export function areImagesValid(images: unknown[]): images is Array<{ type: "image"; data: string; mimeType: string }> {
+export function areImagesValid(
+	images: unknown[],
+): images is Array<{ type: "image"; data: string; mimeType: string }> {
 	if (!Array.isArray(images) || images.length === 0) return false;
 	return images.every(
 		(img) =>
@@ -64,11 +120,21 @@ export class SessionResources {
 		const workspacePath = this.getWorkspacePath();
 		const agentDir = getAgentDir();
 		const userSettingsPath = path.join(agentDir, "settings.json");
-		const projectSettingsPath = path.join(workspacePath, ".pi", "settings.json");
+		const projectSettingsPath = path.join(
+			workspacePath,
+			".pi",
+			"settings.json",
+		);
 
 		const packageSources = [
-			...readPackageSourcesFromSettingsFile(userSettingsPath),
-			...readPackageSourcesFromSettingsFile(projectSettingsPath),
+			...readPackageSourcesFromSettingsFile(
+				userSettingsPath,
+				this.deps.logDebug,
+			),
+			...readPackageSourcesFromSettingsFile(
+				projectSettingsPath,
+				this.deps.logDebug,
+			),
 		];
 
 		const packages = new Map<string, InstalledPackage>();
@@ -113,10 +179,15 @@ export class SessionResources {
 		const root = workspaceFolders[0].uri.fsPath;
 
 		const mentionRegex = /@([^\s]+)/g;
-		const mentions: Array<{ match: string; filePath: string; index: number }> = [];
+		const mentions: Array<{ match: string; filePath: string; index: number }> =
+			[];
 		let match: RegExpExecArray | null;
 		while ((match = mentionRegex.exec(text)) !== null) {
-			mentions.push({ match: match[0], filePath: match[1], index: match.index });
+			mentions.push({
+				match: match[0],
+				filePath: match[1],
+				index: match.index,
+			});
 		}
 
 		if (mentions.length === 0) return text;
@@ -165,7 +236,8 @@ export class SessionResources {
 				workspaceFolders[0].uri,
 				"package.json",
 			);
-			const packageJsonContent = await vscode.workspace.fs.readFile(packageJsonPath);
+			const packageJsonContent =
+				await vscode.workspace.fs.readFile(packageJsonPath);
 			const pkg = JSON.parse(packageJsonContent.toString());
 
 			return `

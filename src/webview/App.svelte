@@ -278,10 +278,6 @@
           };
         }
         sessionResources = data;
-        console.log(
-          "[PI Webview] session-resources received:",
-          JSON.stringify(data),
-        );
         break;
 
       case "auto-compaction-changed":
@@ -1240,7 +1236,10 @@
           {autoContext}
           {appVersion}
           {thinkingLevel}
-          onAutoContextChange={(value) => (autoContext = value)}
+          onAutoContextChange={(value) => {
+            autoContext = value;
+            sendMessage({ type: "setAutoContext", data: { enabled: value } });
+          }}
           onThinkingLevelChange={handleSetThinkingLevel}
         />
       {/if}

@@ -2,7 +2,7 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [2.0.1] - 2026-06-11
 
 ### Added
 
@@ -12,16 +12,19 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Changed
 
 - "Show more (x older messages)" option moved from the bottom of the chat window to the top of the GUI for easier access
+- Cleaned up Settings & Help tab
 
 ### Fixed
 
-- Fixed edge case where the app uses the wrong PI binary path
+- Fixed an edge case where the app uses the wrong PI binary path
 - Removed hardcoded Home Directory fallback path in Native Addons
-- Removed duplicate package/extention display in the GUI context view
+- Removed duplicate package/extension display in the GUI context view
 - Fixed missing error handling for critical paths in the PI binary resolution logic
-- Fixed StatusLine Uses Non-existent Events
-- Fixed debug Logging Bypasses Diagnostics Setting
-- Removed Unused CSS selectors
+- Fixed StatusLine uses non-existent events
+- Fixed incorrect keyboard shortcut hints
+- Fixed auto context toggle in settings
+- Fixed debug logging bypasses Diagnostics setting
+- Removed unused CSS selectors
 - Multiple minor issues fixed
 
 ## [2.0.0] - 2026-06-09

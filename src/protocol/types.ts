@@ -40,6 +40,8 @@ export interface ProviderApi {
 	getSessionStats(): unknown;
 	getAutoCompactionEnabled(): boolean;
 	setAutoCompactionEnabled(enabled: boolean): void;
+	getAutoContext(): boolean;
+	setAutoContext(enabled: boolean): void;
 	getAvailableModels(): Promise<
 		Array<{ id: string; provider: string; name: string }>
 	>;

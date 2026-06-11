@@ -578,6 +578,7 @@ function load() {
 		};
 	}
 
+	// NOTE: runs before VS Code extension host — no logDebug() available here.
 	console.log("[PiLot] Using global PI SDK from: " + piNodeModules);
 
 	// Add global PI node_modules to module resolution paths as secondary fallback

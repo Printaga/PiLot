@@ -211,7 +211,10 @@ export function readPackageManifest(installedPath: string): {
 }
 
 /** Read package source entries from a pi settings.json file. */
-export function readPackageSourcesFromSettingsFile(filePath: string): string[] {
+export function readPackageSourcesFromSettingsFile(
+	filePath: string,
+	logDebug?: (msg: string, ...details: unknown[]) => void,
+): string[] {
 	try {
 		if (!fs.existsSync(filePath)) {
 			return [];
@@ -230,7 +233,7 @@ export function readPackageSourcesFromSettingsFile(filePath: string): string[] {
 					typeof entry === "string" && entry.length > 0,
 			);
 	} catch (error) {
-		console.error(
+		logDebug?.(
 			"[PI] Failed to read package sources from settings file:",
 			filePath,
 			error,
