@@ -30,7 +30,9 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 		}
 	}
 
-	const hasPathSep = trimmed.includes("/") || (process.platform === "win32" && trimmed.includes("\\"));
+	const hasPathSep =
+		trimmed.includes("/") ||
+		(process.platform === "win32" && trimmed.includes("\\"));
 	if (hasPathSep) {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		const basePath = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -62,26 +64,8 @@ export function findPiBinary(): string {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 
-	if (workspaceFolders) {
-		for (const folder of workspaceFolders) {
-			const workspacePath = path.join(
-				folder.uri.fsPath,
-				"node_modules",
-				".bin",
-				process.platform === "win32" ? "pi.cmd" : "pi",
-			);
-			try {
-				fs.accessSync(
-					workspacePath,
-					process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-				);
-				return workspacePath;
-			} catch {
-				continue;
-			}
-		}
-	}
-
+	// Check global well-known paths first — prefer the user's global PI install
+	// over any workspace-local copy that may come from an SDK dependency.
 	const candidates =
 		process.platform === "win32"
 			? [
@@ -107,6 +91,27 @@ export function findPiBinary(): string {
 		}
 	}
 
+	// Fallback: workspace node_modules (only if no global install found)
+	if (workspaceFolders) {
+		for (const folder of workspaceFolders) {
+			const workspacePath = path.join(
+				folder.uri.fsPath,
+				"node_modules",
+				".bin",
+				process.platform === "win32" ? "pi.cmd" : "pi",
+			);
+			try {
+				fs.accessSync(
+					workspacePath,
+					process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+				);
+				return workspacePath;
+			} catch {
+				continue;
+			}
+		}
+	}
+
 	return "pi";
 }
 
@@ -126,14 +131,20 @@ export function resolvePiBinary(): string | null {
 	}
 	try {
 		if (process.platform === "win32") {
-			const result = spawnSync("where", [binary], { shell: true, timeout: 1000 });
+			const result = spawnSync("where", [binary], {
+				shell: true,
+				timeout: 1000,
+			});
 			if (result.status === 0 && result.stdout) {
 				const resolved = result.stdout.toString().split(/\r?\n/)[0]?.trim();
 				return resolved || null;
 			}
 			return null;
 		} else {
-			const result = spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, { shell: true, timeout: 1000 });
+			const result = spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, {
+				shell: true,
+				timeout: 1000,
+			});
 			if (result.status === 0 && result.stdout) {
 				const resolved = result.stdout.toString().trim();
 				return resolved || null;
