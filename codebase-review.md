@@ -2,18 +2,6 @@
 
 ## High Priority Issues
 
-### 2. Hardcoded Home Directory in Native Addons
-
-**Location:** `src/utils/native-addons.ts:30`
-**Severity:** High - Portability issue
-**Issue:** Falls back to `"/home/lenovo"` as a hardcoded path when `HOME` environment variable is not set. This won't work on Windows or other systems.
-
-```typescript
-const home = process.env.HOME || "/home/lenovo"; // Should use os.homedir()
-```
-
-**Fix:** Use `require('os').homedir()` or `process.env.USERPROFILE` fallback instead.
-
 ### 3. Missing Error Handling for Critical Paths
 
 **Location:** `src/pi-agent-provider.ts:186-194` (resolvePiBinaryAtStartup)

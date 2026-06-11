@@ -5,6 +5,7 @@
  * and the current Electron/Node.js runtime. Provides auto-repair by
  * rebuilding better-sqlite3 for the detected Electron version.
  */
+import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
@@ -27,7 +28,7 @@ const NODE_MODULE_VERSIONS: Record<number, string> = {
  */
 function findBetterSqlite3Paths(): string[] {
 	const candidates: string[] = [];
-	const home = process.env.HOME || "/home/lenovo";
+	const home = os.homedir();
 
 	// PI agent global npm
 	const piNpmDir = path.join(home, ".pi", "agent", "npm", "node_modules");
