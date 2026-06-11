@@ -129,7 +129,13 @@ function findGlobalPiInstallation() {
 	const homeDir = getHomeDir();
 	const possiblePaths = [];
 
-	// First, try to find via 'pi' command in PATH (most reliable)
+	// First, try to find via user-configured binary path setting (highest priority)
+	const settingSdkPath = findPiSdkFromSetting();
+	if (settingSdkPath) {
+		possiblePaths.unshift(settingSdkPath);
+	}
+
+	// Then, try to find via 'pi' command in PATH
 	const piSdkPath = findPiSdkFromCommand();
 	if (piSdkPath) {
 		possiblePaths.unshift(piSdkPath);
@@ -355,13 +361,58 @@ function findPiSdkFromCommand() {
 		// For pnpm, the shim contains # cmd-shim-target=... line pointing to the actual CLI
 		// For npm/pnpm, it might also contain exec "..." lines with the actual path
 
+		return deriveSdkPathFromBinary(piPath);
+	} catch (e) {
+		// pi command not found
+		return null;
+	}
+}
+
+/**
+ * Try to find the PI SDK by reading the pi-agent.binaryPath VS Code setting.
+ * This respects the user-configured path when 'pi' is not on PATH.
+ */
+function findPiSdkFromSetting() {
+	try {
+		const vscode = require("vscode");
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		const rawPath = config.get("binaryPath", "pi");
+		if (!rawPath || rawPath.trim() === "pi") {
+			return null; // Default value, not a custom path
+		}
+
+		const trimmed = rawPath.trim();
+
+		// Only handle absolute paths — relative paths are ambiguous without workspace context
+		if (!path.isAbsolute(trimmed)) {
+			return null;
+		}
+
+		if (!fs.existsSync(trimmed)) {
+			return null;
+		}
+
+		// Try the same derivation logic as findPiSdkFromCommand
+		return deriveSdkPathFromBinary(trimmed);
+	} catch (e) {
+		// VS Code not available yet or config read failed
+		return null;
+	}
+}
+
+/**
+ * Derive the PI SDK node_modules path from a binary path.
+ * Shared by findPiSdkFromCommand and findPiSdkFromSetting.
+ */
+function deriveSdkPathFromBinary(piPath) {
+	// Try to parse as a text script (shim, .cmd, .js wrapper)
+	try {
 		const content = fs.readFileSync(piPath, "utf8");
 
 		// Check for pnpm cmd-shim-target comment (Unix pnpm)
 		const cmdShimMatch = content.match(/# cmd-shim-target=(.+)/);
 		if (cmdShimMatch) {
 			let targetPath = cmdShimMatch[1].trim();
-			// pnpm cmd-shim-target might end with /dist/cli.js or similar
 			const sdkNodeModules = extractNodeModulesPath(targetPath);
 			if (
 				sdkNodeModules &&
@@ -373,7 +424,7 @@ function findPiSdkFromCommand() {
 			}
 		}
 
-		// Check pnpm exec line: exec "node" "$basedir/../global/v11/.../node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+		// Check pnpm exec line
 		const pnpmExecMatch = content.match(
 			/node_modules[^'"]*pi-coding-agent[^'"]*cli\.js/,
 		);
@@ -390,9 +441,10 @@ function findPiSdkFromCommand() {
 			}
 		}
 
-		// Derive node_modules path from the CLI location (for direct JS files like npm/bun without shims)
+		// Derive node_modules path from the CLI location (for direct JS files)
 		// cli.js is at: .../node_modules/@earendil-works/pi-coding-agent/dist/cli.js
-		const distIndex = piPath.indexOf("/dist/");
+		const normalizedPiPath = piPath.replace(/\\/g, "/");
+		const distIndex = normalizedPiPath.indexOf("/dist/");
 		if (distIndex > 0) {
 			const nodeModulesPath = piPath.substring(0, distIndex);
 			if (
@@ -403,12 +455,30 @@ function findPiSdkFromCommand() {
 				return nodeModulesPath;
 			}
 		}
-
-		return null;
-	} catch (e) {
-		// pi command not found
-		return null;
+	} catch (_e) {
+		// Binary is not a text file (e.g. native .exe) — fall through to directory checks
 	}
+
+	// For .exe/.cmd binaries on Windows, try to find sibling node_modules
+	try {
+		const binDir = path.dirname(piPath);
+		const parentDir = path.dirname(binDir);
+		for (const candidate of [binDir, parentDir]) {
+			const sdkPath = path.join(
+				candidate,
+				"node_modules",
+				"@earendil-works",
+				"pi-coding-agent",
+			);
+			if (fs.existsSync(sdkPath)) {
+				return path.join(candidate, "node_modules");
+			}
+		}
+	} catch (_e) {
+		// Directory access failed
+	}
+
+	return null;
 }
 
 /**
@@ -417,8 +487,9 @@ function findPiSdkFromCommand() {
  * Output: ~/.local/share/pnpm/global/v11/.../node_modules
  */
 function extractNodeModulesPath(cliPath) {
-	// Find the position of /node_modules/
-	const nodeModulesIdx = cliPath.indexOf("/node_modules/");
+	// Find the position of /node_modules/ or \node_modules\ (Windows)
+	const normalized = cliPath.replace(/\\/g, "/");
+	const nodeModulesIdx = normalized.indexOf("/node_modules/");
 	if (nodeModulesIdx > 0) {
 		return cliPath.substring(0, nodeModulesIdx + "/node_modules".length);
 	}

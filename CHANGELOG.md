@@ -6,7 +6,8 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Fixed
 
-- Fixed edge issues with PI binary resolution on Windows
+- Fixed edge issues with manually set PI binary resolution on Windows. findGlobalPiInstallation() now checks setting first → PATH → hardcoded paths
+- Fixed extractNodeModulesPath() to handle Windows \ path separators
 
 ## [2.0.1] - 2026-06-11
 
