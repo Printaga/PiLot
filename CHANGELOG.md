@@ -8,6 +8,10 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - Tooltip for the top left icon showing the current version of the extension and PI binary
 
+### Fixed
+
+- Edge case where the app uses the wrong PI binary path
+
 ## [2.0.0] - 2026-06-09
 
 ### Added

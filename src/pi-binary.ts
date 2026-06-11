@@ -61,14 +61,16 @@ export function findPiBinary(): string {
 		return settingResult;
 	}
 
-	const workspaceFolders = vscode.workspace.workspaceFolders;
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 
 	// Check global well-known paths first — prefer the user's global PI install
 	// over any workspace-local copy that may come from an SDK dependency.
+	// NOTE: workspace node_modules/.bin/pi is intentionally excluded — it may
+	// point to a devDependency copy, not the user's global PI install.
 	const candidates =
 		process.platform === "win32"
 			? [
+					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi"),
 					path.join(process.env.APPDATA || "", "npm", "pi"),
 					path.join(home, ".npm-global", "pi"),
 				]
@@ -76,6 +78,7 @@ export function findPiBinary(): string {
 					path.join(home, ".bun/bin/pi"),
 					path.join(home, ".local/bin/pi"),
 					path.join(home, ".npm-global/bin/pi"),
+					path.join(home, ".local/share/pnpm/bin/pi"),
 					"pi",
 				];
 
@@ -88,27 +91,6 @@ export function findPiBinary(): string {
 			return c;
 		} catch {
 			continue;
-		}
-	}
-
-	// Fallback: workspace node_modules (only if no global install found)
-	if (workspaceFolders) {
-		for (const folder of workspaceFolders) {
-			const workspacePath = path.join(
-				folder.uri.fsPath,
-				"node_modules",
-				".bin",
-				process.platform === "win32" ? "pi.cmd" : "pi",
-			);
-			try {
-				fs.accessSync(
-					workspacePath,
-					process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-				);
-				return workspacePath;
-			} catch {
-				continue;
-			}
 		}
 	}
 

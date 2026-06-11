@@ -207,6 +207,42 @@ function findGlobalPiInstallation() {
 				"npm",
 				"node_modules",
 			),
+		);
+
+		// Windows pnpm global installations (versioned dirs like Linux)
+		const pnpmWinBase = path.join(
+			homeDir,
+			"AppData",
+			"Local",
+			"pnpm",
+			"global",
+		);
+		if (fs.existsSync(pnpmWinBase)) {
+			const pnpmVersionDirs = fs
+				.readdirSync(pnpmWinBase)
+				.filter((name) => name.startsWith("v") || /^\d+$/.test(name));
+			for (const versionDir of pnpmVersionDirs) {
+				const versionedPath = path.join(pnpmWinBase, versionDir);
+				const entries = fs
+					.readdirSync(versionedPath)
+					.filter(
+						(name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."),
+					);
+				for (const hashDir of entries) {
+					const nodeModulesPath = path.join(
+						versionedPath,
+						hashDir,
+						"node_modules",
+					);
+					if (fs.existsSync(nodeModulesPath)) {
+						possiblePaths.push(nodeModulesPath);
+					}
+				}
+			}
+		}
+
+		// Windows Roaming pnpm (less common, flat structure)
+		possiblePaths.push(
 			path.join(
 				homeDir,
 				"AppData",
@@ -215,7 +251,6 @@ function findGlobalPiInstallation() {
 				"global",
 				"node_modules",
 			),
-			path.join(homeDir, "AppData", "Local", "pnpm", "global", "node_modules"),
 		);
 	}
 
@@ -302,6 +337,13 @@ function findPiSdkFromCommand() {
 		}
 
 		if (!piPath || !fs.existsSync(piPath)) {
+			return null;
+		}
+
+		// Skip workspace-local copies (e.g., node_modules/.bin/pi from devDependencies)
+		// These may not match the user's global PI installation.
+		const cwd = process.cwd();
+		if (piPath.startsWith(cwd + path.sep)) {
 			return null;
 		}
 
