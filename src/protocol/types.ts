@@ -48,6 +48,7 @@ export interface ProviderApi {
 	getCurrentModelId(): string | null;
 	getExtensionVersion(): string;
 	getPiCliVersion(): Promise<string | null>;
+	isBinaryAvailable(): boolean;
 	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	getFavorites(): string[];
 	getProviderAuthData(): Promise<

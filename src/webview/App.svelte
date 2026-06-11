@@ -63,6 +63,7 @@
   let packageUpdateCount = $state(0);
   let appVersion = $state("0.0.0");
   let piCliVersion = $state<string | null>(null);
+  let isBinaryAvailable = $state(false);
 
   // Footer data for PI TUI-style status line
   let footerCwd = $state("");
@@ -493,6 +494,7 @@
     if (data?.currentModel) currentModel = data.currentModel;
     if (data?.favoriteModels) favoriteModels = data.favoriteModels;
     piCliVersion = data?.piCliVersion ?? null;
+    isBinaryAvailable = data?.isBinaryAvailable ?? false;
     if (data?.thinkingLevel) thinkingLevel = data.thinkingLevel;
 
     // Show onboarding on first launch (Feature 3)
@@ -1192,6 +1194,8 @@
           onNewSession={handleNewSession}
           onAbort={handleAbort}
           {sessionResources}
+          {isBinaryAvailable}
+          {piCliVersion}
           {isListening}
           onToggleVoice={handleToggleVoice}
           bind:inputText={draftInputText}

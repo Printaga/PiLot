@@ -1521,6 +1521,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.resolvePiVersion();
 	}
 
+	/** Whether a usable pi binary was resolved (not just the fallback 'pi' name). */
+	isBinaryAvailable(): boolean {
+		return this.resolvedBinaryPath !== null;
+	}
+
 	getThinkingLevel(): ThinkingLevel {
 		if (this.settingsManager) {
 			const level = this.settingsManager.getDefaultThinkingLevel();

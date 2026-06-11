@@ -535,6 +535,7 @@ export class MessageHandler {
 		const currentModel = this.provider.getCurrentModelId();
 		const appVersion = this.provider.getExtensionVersion();
 		const piCliVersion = await this.provider.getPiCliVersion();
+		const isBinaryAvailable = this.provider.isBinaryAvailable();
 		const favoriteModels = this.provider.getFavorites();
 		const thinkingLevel = this.provider.getThinkingLevel();
 		const sessionId = this.provider.hasSession
@@ -551,6 +552,7 @@ export class MessageHandler {
 			currentModel,
 			favoriteModels,
 			piCliVersion,
+			isBinaryAvailable,
 			thinkingLevel,
 			sessionId,
 		};

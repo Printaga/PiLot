@@ -36,6 +36,17 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 			);
 			return trimmed;
 		} catch {
+			// On Windows, try common executable suffixes when the bare path doesn't exist
+			if (process.platform === "win32") {
+				for (const ext of [".exe", ".cmd"]) {
+					try {
+						fs.accessSync(trimmed + ext, fs.constants.F_OK);
+						return trimmed + ext;
+					} catch {
+						/* suffix not found, try next */
+					}
+				}
+			}
 			return null;
 		}
 	}
@@ -80,9 +91,29 @@ export function findPiBinary(): string {
 	const candidates =
 		process.platform === "win32"
 			? [
+					// pnpm global
 					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi"),
+					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.exe"),
+					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.cmd"),
+					// npm global (APPDATA/npm)
 					path.join(process.env.APPDATA || "", "npm", "pi"),
+					path.join(process.env.APPDATA || "", "npm", "pi.exe"),
+					path.join(process.env.APPDATA || "", "npm", "pi.cmd"),
+					// npm global (LOCALAPPDATA/npm)
+					path.join(process.env.LOCALAPPDATA || "", "npm", "pi"),
+					path.join(process.env.LOCALAPPDATA || "", "npm", "pi.exe"),
+					path.join(process.env.LOCALAPPDATA || "", "npm", "pi.cmd"),
+					// ProgramFiles/nodejs (nodejs installer global dir)
+					path.join(process.env.ProgramFiles || "", "nodejs", "pi"),
+					path.join(process.env.ProgramFiles || "", "nodejs", "pi.exe"),
+					path.join(process.env.ProgramFiles || "", "nodejs", "pi.cmd"),
+					// bun / other
+					path.join(home, ".bun", "bin", "pi"),
 					path.join(home, ".npm-global", "pi"),
+					path.join(home, ".npm-global", "pi.exe"),
+					path.join(home, ".npm-global", "pi.cmd"),
+					path.join(home, ".local", "bin", "pi"),
+					path.join(home, ".local", "share", "pnpm", "bin", "pi"),
 				]
 			: [
 					path.join(home, ".bun/bin/pi"),

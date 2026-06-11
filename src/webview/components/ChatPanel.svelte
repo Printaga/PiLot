@@ -91,9 +91,11 @@ import { tick } from "svelte";
     onShowPromptTemplates?: () => void;
     previousResourceCount?: Record<string, number>;
     activityStatuses?: Record<string, { text: string; type: "extension" | "tool" | "system"; timestamp: number }>;
-    footerCwd?: string;
-    footerGitBranch?: string | null;
-    footerSessionName?: string | null;
+	footerCwd?: string;
+	footerGitBranch?: string | null;
+	footerSessionName?: string | null;
+	isBinaryAvailable?: boolean;
+	piCliVersion?: string | null;
   }
 
   let {
@@ -122,9 +124,16 @@ import { tick } from "svelte";
     previousResourceCount = {},
     activityStatuses = {},
     footerCwd = "",
-    footerGitBranch = null,
-    footerSessionName = null,
+	footerGitBranch = null,
+	footerSessionName = null,
+	isBinaryAvailable = false,
+	piCliVersion = null,
   }: Props = $props();
+
+  // Show setup guidance only when PI binary is not available and no messages exist
+  const showSetupCard = $derived(
+    messages.length === 0 && (!piCliVersion || !isBinaryAvailable),
+  );
 
   let messagesContainer: HTMLDivElement | null = null;
   let transcriptWindowSize = $state(100);
@@ -623,6 +632,7 @@ import { tick } from "svelte";
           >. Type a message below to start.
         </p>
 
+        {#if showSetupCard}
         <div class="setup-card">
           <div class="setup-header">
             <svg
@@ -668,6 +678,7 @@ import { tick } from "svelte";
             </svg>
           </button>
         </div>
+        {/if}
 
         {#if mediaKofi}
           <a
