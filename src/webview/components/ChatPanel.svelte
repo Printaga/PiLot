@@ -162,7 +162,6 @@ import { tick } from "svelte";
     Boolean(
       resources.contextFileCount > 0 ||
         resources.skillCount > 0 ||
-        resources.extensionCount > 0 ||
         resources.promptCount > 0 ||
         resources.packageCount > 0,
     ),
@@ -182,16 +181,6 @@ import { tick } from "svelte";
           )
           .join("\n")
       : "No skills loaded",
-  );
-  const extensionsTitle = $derived(
-    resources.extensions.length > 0
-      ? resources.extensions
-          .map(
-            (e, i) =>
-              `${i + 1}. ${e.path}${e.sourceInfo?.name ? ` (${e.sourceInfo.name})` : ""}`,
-          )
-          .join("\n")
-      : "No PI extensions loaded",
   );
   const promptsTitle = $derived(
     resources.prompts.length > 0
@@ -332,12 +321,6 @@ import { tick } from "svelte";
     }
   }
 
-  function startEdit(index: number, content: string) {
-    // Calculate actual index in full messages array
-    const actualIndex = messages.length - visibleMessages.length + index;
-    editingMessageIndex = actualIndex;
-    editText = content;
-  }
 
   function cancelEdit() {
     editingMessageIndex = null;
@@ -555,12 +538,6 @@ import { tick } from "svelte";
           title={skillsTitle}
         />
         <ResourceBadge
-          type="extensions"
-          count={resources.extensionCount}
-          previousCount={previousResourceCount.extensions}
-          title={extensionsTitle}
-        />
-        <ResourceBadge
           type="prompts"
           count={resources.promptCount}
           previousCount={previousResourceCount.prompts}
@@ -761,18 +738,18 @@ import { tick } from "svelte";
         </div>
       </div>
     {:else}
+      {#if hasMoreMessages}
+        <button class="show-more-btn" onclick={handleShowMore}>
+          Show more ({messages.length - visibleMessageCount} older messages)
+        </button>
+      {/if}
+
       {#each visibleMessages as message, i (i)}
         <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
           <MessageBubble {message} />
 
         </div>
       {/each}
-
-      {#if hasMoreMessages}
-        <button class="show-more-btn" onclick={handleShowMore}>
-          Show more ({messages.length - visibleMessageCount} older messages)
-        </button>
-      {/if}
 
       <!-- Editing overlay (Feature 7) -->
       {#if editingMessageIndex !== null}
@@ -1384,24 +1361,7 @@ import { tick } from "svelte";
   .empty-state .subtitle a:hover {
     border-bottom-color: var(--color-primary);
   }
-  .empty-state .subtitle kbd,
-  .hint kbd {
-    display: inline-block;
-    padding: 0 5px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    background: oklch(from var(--color-surface-2) l c h / 0.5);
-    border: 1px solid oklch(from var(--color-border) l c h / 0.3);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-    line-height: 1.6;
-  }
-  .empty-state .hint {
-    margin-top: -8px;
-    font-size: var(--text-xs);
-    opacity: 0.7;
-  }
+
 
   .setup-card {
     background: oklch(from var(--color-surface) l c h / 0.6);
@@ -1520,31 +1480,7 @@ import { tick } from "svelte";
     flex-direction: column;
   }
 
-  .edit-msg-btn {
-    position: absolute;
-    top: 0;
-    right: -28px;
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-sm);
-    color: var(--color-text-muted);
-    opacity: 0;
-    transition: all var(--transition-fast);
-    z-index: 5;
-  }
 
-  .message-wrapper:hover .edit-msg-btn {
-    opacity: 0.6;
-  }
-
-  .edit-msg-btn:hover {
-    opacity: 1 !important;
-    color: var(--color-primary);
-    background: var(--accent-glow);
-  }
 
   /* ── Edit message overlay ───────────────── */
   .edit-message-overlay {

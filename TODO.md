@@ -12,5 +12,3 @@
 - Prompt enhancement tool
 - Worktree support
 - Agents support
-- Move 'see more' to the top of the GUI
-- Remove redundant Exts in context section
