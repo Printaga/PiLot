@@ -7,12 +7,16 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Added
 
 - Tooltip for the top left icon showing the current version of the extension and PI binary
+- More detailed information about installed PI packages
+
+### Changed
+
+- "Show more (x older messages)" option moved from the bottom of the chat window to the top of the GUI for easier access
 
 ### Fixed
 
 - Edge case where the app uses the wrong PI binary path
 - Duplicate package/extention display in the GUI context view
-- The option "Show more (x older messages)" was displayed at the bottom of the chat window, instead of at top
 - Unused CSS selectors
 
 ## [2.0.0] - 2026-06-09

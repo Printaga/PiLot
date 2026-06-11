@@ -15,6 +15,12 @@
   interface InstalledPackage {
     source: string;
     path: string;
+    description: string;
+    version: string;
+    types: string[];
+    skills: Array<{ name: string; description: string }>;
+    extensions: Array<{ path: string; sourceName: string | null }>;
+    prompts: Array<{ name: string; description: string }>;
   }
 
   // State
@@ -244,6 +250,13 @@ async function fetchMarketplacePackages() {
               <span class="package-name"
                 >{pkg.source.replace(/^npm:|^github:|^http/i, "")}</span
               >
+              {#if pkg.types?.length > 0}
+                <div class="package-badges">
+                  {#each pkg.types as type}
+                    <span class="badge badge-{type}">{type}</span>
+                  {/each}
+                </div>
+              {/if}
               {#if pkg.source.toLowerCase().startsWith("npm:")}
                 <a
                   href={npmUrl(pkg.source.replace("npm:", ""))}
@@ -267,9 +280,37 @@ async function fetchMarketplacePackages() {
                 </a>
               {/if}
             </div>
+            {#if pkg.description}
+              <div class="package-desc">{pkg.description}</div>
+            {/if}
             <div class="package-meta">
-              <span class="meta-item">{pkg.path}</span>
+              {#if pkg.version}<span class="meta-item">v{pkg.version}</span>{/if}
+              {#if pkg.path}<span class="meta-item">{pkg.path}</span>{/if}
             </div>
+            {#if pkg.skills?.length > 0}
+              <div class="package-resources">
+                <span class="resources-label">Skills:</span>
+                {#each pkg.skills as skill}
+                  <span class="resource-item" title={skill.description}>{skill.name}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if pkg.extensions?.length > 0}
+              <div class="package-resources">
+                <span class="resources-label">Extensions:</span>
+                {#each pkg.extensions as ext}
+                  <span class="resource-item">{ext.sourceName || ext.path.split('/').pop() || 'extension'}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if pkg.prompts?.length > 0}
+              <div class="package-resources">
+                <span class="resources-label">Prompts:</span>
+                {#each pkg.prompts as prompt}
+                  <span class="resource-item" title={prompt.description}>{prompt.name}</span>
+                {/each}
+              </div>
+            {/if}
             <div class="package-actions">
               <button
                 class="uninstall-btn"
@@ -608,6 +649,31 @@ async function fetchMarketplacePackages() {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     opacity: 0.8;
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .package-resources {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-size: var(--text-xs);
+  }
+
+  .resources-label {
+    color: var(--color-text-muted);
+    font-weight: 500;
+  }
+
+  .resource-item {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--color-surface-2);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-size: 10px;
   }
 
   .package-actions {

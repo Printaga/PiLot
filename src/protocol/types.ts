@@ -29,7 +29,9 @@ export interface ProviderApi {
 	navigateTree(nodeId: string): Promise<void>;
 	setSessionName(name: string): Promise<void>;
 	setModel(modelId: string): Promise<void>;
-	setThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): Promise<void>;
+	setThinkingLevel(
+		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
+	): Promise<void>;
 	steer(text: string, images?: unknown[]): Promise<void>;
 	followUp(text: string, images?: unknown[]): Promise<void>;
 	abort(): Promise<void>;
@@ -38,18 +40,45 @@ export interface ProviderApi {
 	getSessionStats(): unknown;
 	getAutoCompactionEnabled(): boolean;
 	setAutoCompactionEnabled(enabled: boolean): void;
-	getAvailableModels(): Promise<Array<{ id: string; provider: string; name: string }>>;
+	getAvailableModels(): Promise<
+		Array<{ id: string; provider: string; name: string }>
+	>;
 	getCurrentModelId(): string | null;
 	getExtensionVersion(): string;
 	getPiCliVersion(): Promise<string | null>;
 	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	getFavorites(): string[];
-	getProviderAuthData(): Promise<Array<{ provider: string; name: string; configured: boolean; status: string }>>;
+	getProviderAuthData(): Promise<
+		Array<{
+			provider: string;
+			name: string;
+			configured: boolean;
+			status: string;
+		}>
+	>;
 	setApiKey(provider: string, apiKey: string): Promise<void>;
 	removeAuth(provider: string): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
-	listSessions(): Promise<Array<{ id: string; label: string; timestamp: number; messageCount: number }>>;
-	listPackages(): Promise<Array<{ source: string; path: string }>>;
+	listSessions(): Promise<
+		Array<{
+			id: string;
+			label: string;
+			timestamp: number;
+			messageCount: number;
+		}>
+	>;
+	listPackages(): Promise<
+		Array<{
+			source: string;
+			path: string;
+			description: string;
+			version: string;
+			types: string[];
+			skills: Array<{ name: string; description: string }>;
+			extensions: Array<{ path: string; sourceName: string | null }>;
+			prompts: Array<{ name: string; description: string }>;
+		}>
+	>;
 	installPackage(source: string): Promise<void>;
 	uninstallPackage(source: string): Promise<void>;
 	updatePackages(): Promise<void>;

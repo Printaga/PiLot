@@ -7,6 +7,16 @@ import { spawnSync } from "node:child_process";
 import { stripAnsi } from "./utils/shell.js";
 
 export type InstalledPackage = { source: string; path: string };
+
+/** Enriched package info sent to the webview. */
+export type EnrichedPackage = InstalledPackage & {
+	description: string;
+	version: string;
+	types: string[];
+	skills: Array<{ name: string; description: string }>;
+	extensions: Array<{ path: string; sourceName: string | null }>;
+	prompts: Array<{ name: string; description: string }>;
+};
 type PackageSettingEntry = string | { source?: string };
 
 // ── Binary resolution ───────────────────────────────────────────────────
@@ -178,6 +188,26 @@ export function parseInstalledPackages(output: string): InstalledPackage[] {
 	}
 
 	return packages;
+}
+
+/** Read package.json from an installed package path, returning description + version. */
+export function readPackageManifest(installedPath: string): {
+	description: string;
+	version: string;
+} {
+	if (!installedPath) return { description: "", version: "" };
+	try {
+		const pkgJsonPath = path.join(installedPath, "package.json");
+		if (!fs.existsSync(pkgJsonPath)) return { description: "", version: "" };
+		const raw = fs.readFileSync(pkgJsonPath, "utf-8");
+		const pkg = JSON.parse(raw);
+		return {
+			description: typeof pkg.description === "string" ? pkg.description : "",
+			version: typeof pkg.version === "string" ? pkg.version : "",
+		};
+	} catch {
+		return { description: "", version: "" };
+	}
 }
 
 /** Read package source entries from a pi settings.json file. */

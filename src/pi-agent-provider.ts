@@ -15,6 +15,9 @@ import {
 	AgentSessionEvent,
 	DefaultResourceLoader,
 	type ResourceLoader,
+	type Skill,
+	type Extension,
+	type PromptTemplate,
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
 import { VoiceManager } from "./voice-manager.js";
@@ -30,7 +33,9 @@ import {
 	findPiBinary,
 	resolvePiBinary,
 	parseInstalledPackages,
+	readPackageManifest,
 	type InstalledPackage,
+	type EnrichedPackage,
 } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
 import { serializeMessages } from "./message-serializer.js";
@@ -117,7 +122,6 @@ export class PiAgentProvider
 	private cliModelIdsCache: Set<string> | null = null;
 	private cliModelIdsPromise: Promise<Set<string>> | null = null;
 	private currentModelId: string | null = null;
-	private sessionList: SessionItem[] = [];
 	private _onDidChangeTreeData = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 	/** Resolved absolute path to pi binary, set at initialization. */
@@ -473,7 +477,7 @@ export class PiAgentProvider
 
 		try {
 			// Call reload on the session's resource loader to pick up setting changes
-			const rl = (this.session as any).resourceLoader;
+			const rl = this.session.resourceLoader;
 			if (rl && typeof rl.reload === "function") {
 				await rl.reload();
 				this.logDebug("[PI] Resource loader reloaded");
@@ -1019,11 +1023,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			// Use the session resource loader so the webview matches the TUI exactly.
 			let contextFiles: Array<{ path: string }> = [];
-			let skills: any[] = [];
-			let extensions: any[] = [];
-			let prompts: any[] = [];
+			let skills: Skill[] = [];
+			let extensions: Extension[] = [];
+			let prompts: PromptTemplate[] = [];
 			try {
-				const rl = (this.session as any).resourceLoader;
+				const rl = this.session.resourceLoader;
 				console.log(
 					"[PiLot DIAGNOSTIC] sendSessionResources - resourceLoader exists:",
 					!!rl,
@@ -1766,11 +1770,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				messageCount: s.messageCount,
 			}));
 			this._sessionListCacheTime = now;
-			this.sessionList = this._sessionListCache; // Keep legacy property in sync
 		} catch {
 			this._sessionListFullCache = [];
 			this._sessionListCache = [];
-			this.sessionList = [];
 		}
 		return this._sessionListCache;
 	}
@@ -2278,7 +2280,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.session) return;
 
 		try {
-			const rl = (this.session as any).resourceLoader;
+			const rl = this.session.resourceLoader;
 			if (!rl) return;
 
 			const er = rl.getExtensions();
@@ -2289,10 +2291,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				const errKey = `ext:error:${err.path}`;
 				if (this.extensionStatuses.has(errKey)) continue;
 
+				const rawError = err.error as unknown;
 				const errorText =
-					typeof err.error === "string"
-						? err.error
-						: err.error?.message || String(err.error);
+					typeof rawError === "string"
+						? rawError
+						: rawError instanceof Error
+							? rawError.message
+							: String(rawError);
 				// Truncate long load errors to first 200 chars
 				const displayText =
 					errorText.length > 200 ? errorText.slice(0, 200) + "…" : errorText;
@@ -2318,8 +2323,78 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.sessionResources.getProjectContext();
 	}
 
+	/** Enrich installed packages with description, version, types, and per-package resources from the resource loader. */
+	private enrichPackages(packages: InstalledPackage[]): EnrichedPackage[] {
+		const rl = this.session?.resourceLoader;
+		let skills: Skill[] = [];
+		let extensions: Extension[] = [];
+		let prompts: PromptTemplate[] = [];
+		if (rl) {
+			try {
+				skills = rl.getSkills().skills || [];
+			} catch {
+				skills = [];
+			}
+			try {
+				extensions = rl.getExtensions().extensions || [];
+			} catch {
+				extensions = [];
+			}
+			try {
+				prompts = rl.getPrompts().prompts || [];
+			} catch {
+				prompts = [];
+			}
+		}
+
+		return packages.map((pkg) => {
+			const manifest = readPackageManifest(pkg.path);
+
+			// Match resource sourceInfo.source to this package's source string
+			const srcLower = pkg.source.toLowerCase();
+			const matchesSource = (sourceName: string | undefined) =>
+				sourceName?.toLowerCase() === srcLower;
+
+			const pkgSkills = skills
+				.filter((s) => matchesSource(s.sourceInfo?.source))
+				.map((s) => ({
+					name: s.name || "",
+					description: s.description || "",
+				}));
+
+			const pkgExtensions = extensions
+				.filter((e) => matchesSource(e.sourceInfo?.source))
+				.map((e) => ({
+					path: e.path || "",
+					sourceName: e.sourceInfo?.source || null,
+				}));
+
+			const pkgPrompts = prompts
+				.filter((p) => matchesSource(p.sourceInfo?.source))
+				.map((p) => ({
+					name: p.name || "",
+					description: p.description || "",
+				}));
+
+			const types: string[] = [];
+			if (pkgExtensions.length > 0) types.push("extensions");
+			if (pkgSkills.length > 0) types.push("skills");
+			if (pkgPrompts.length > 0) types.push("prompts");
+
+			return {
+				...pkg,
+				description: manifest.description,
+				version: manifest.version,
+				types,
+				skills: pkgSkills,
+				extensions: pkgExtensions,
+				prompts: pkgPrompts,
+			};
+		});
+	}
+
 	// Package management methods using CLI
-	async listPackages() {
+	async listPackages(): Promise<EnrichedPackage[]> {
 		this.logDebug("[PI] listPackages called");
 		const configuredPackages = this.getConfiguredPackages();
 		if (configuredPackages.length > 0) {
@@ -2327,10 +2402,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				"[PI] listPackages: found configured packages:",
 				configuredPackages,
 			);
-			return configuredPackages;
+			return this.enrichPackages(configuredPackages);
 		}
 
-		return this.listPackagesFromCli();
+		return this.enrichPackages(await this.listPackagesFromCli());
 	}
 
 	private spawnPackageCommand(args: string[]): ChildProcess {
