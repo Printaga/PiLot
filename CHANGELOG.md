@@ -2,6 +2,20 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Added missing `getSettings` and `setToolConfig` message handlers in MessageHandler
+- Added missing `getSettings()` and `setToolConfig()` methods to PiAgentProvider for VS Code configuration integration
+- Fixed forkSession message to pass `fromNodeId` instead of `sessionId` parameter
+- Fixed ToolsPanel to receive and sync `toolPreset` prop from App.svelte state
+- Fixed ToolsPanel to send correct data format (`toolPreset`, `customTools`) in setToolConfig messages
+
 ## [2.0.2] - 2026-06-11
 
 ### Fixed

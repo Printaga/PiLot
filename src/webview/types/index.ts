@@ -58,6 +58,12 @@ export interface SessionNode {
 	parent: string | null;
 }
 
+/** Tool configuration for getSettings/setToolConfig */
+export interface ToolConfig {
+	toolPreset: string;
+	customTools?: string[];
+}
+
 /** Voice helper message from the native process */
 export interface VoiceHelperMessage {
 	type: string;

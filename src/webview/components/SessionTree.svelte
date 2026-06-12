@@ -123,9 +123,9 @@
     selectedSessionIds = new Set();
   }
 
-  function forkSession(id: string) {
-    sendMessage({ type: "forkSession", data: { sessionId: id } });
-  }
+function forkSession(id: string) {
+		sendMessage({ type: "forkSession", data: { fromNodeId: id } });
+	}
 
   function deleteSession(id: string) {
     sendMessage({

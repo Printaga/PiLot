@@ -1191,6 +1191,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this._onDidChangeTreeData.fire();
 	}
 
+	async getSettings(): Promise<{ toolPreset: string; customTools: string[] }> {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		return {
+			toolPreset: config.get<string>("toolPreset", "default"),
+			customTools: config.get<string[]>("customTools", []),
+		};
+	}
+
+	async setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void> {
+		const targetConfig = vscode.workspace.getConfiguration("pi-agent");
+		await targetConfig.update("toolPreset", config.toolPreset, vscode.ConfigurationTarget.Global);
+		if (config.customTools !== undefined) {
+			await targetConfig.update("customTools", config.customTools, vscode.ConfigurationTarget.Global);
+		}
+	}
+
 	async navigateTree(nodeId: string) {
 		if (this.session) {
 			await this.session.navigateTree(nodeId);

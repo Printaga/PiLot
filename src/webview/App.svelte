@@ -52,12 +52,13 @@
       status: string;
     }>
   >([]);
-  let isListening = $state(false);
-  let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(
-    new Map(),
-  );
+let isListening = $state(false);
+	let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(
+		new Map(),
+	);
+	let toolPreset = $state<string | null>(null);
 
-  // Update notification state
+	// Update notification state
   let hasUpdates = $state(false);
   let piUpdateAvailable = $state<string | null>(null);
   let packageUpdateCount = $state(0);
@@ -285,11 +286,15 @@
         autoCompaction = data.enabled;
         break;
 
-      case "provider-auth":
-        providers = data || [];
-        break;
+case "provider-auth":
+			providers = data || [];
+			break;
 
-      case "switchTab":
+		case "settings-response":
+			toolPreset = data?.toolPreset ?? null;
+			break;
+
+		case "switchTab":
         if (data?.tab) {
           activeTab = data.tab;
         }
@@ -1232,7 +1237,7 @@
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />
       {:else if activeTab === "tools"}
-        <ToolsPanel />
+        <ToolsPanel toolPreset={toolPreset} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel />
       {:else}

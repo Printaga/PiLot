@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-
 	interface ToolDef {
 		name: string;
 		description: string;
@@ -8,6 +7,12 @@
 		category: 'builtin';
 		source?: string;
 	}
+
+	// Props
+	interface Props {
+		toolPreset?: string | null;
+	}
+	let { toolPreset: propPreset = null }: Props = $props();
 
 	// Default tools available in PI
 	const defaultTools: ToolDef[] = [
@@ -27,7 +32,6 @@
 	let isSynced = $state(false);
 
 
-
 	onMount(() => {
 		// Request session resources to sync
 		const vscode = (window as any).vscode;
@@ -36,6 +40,15 @@
 		}
 		// Read current tool preset from VS Code settings
 		fetchToolPreset();
+	});
+
+	// Update internal state when prop changes
+	$effect(() => {
+		if (propPreset !== null) {
+			toolPreset = propPreset;
+			applyPreset(propPreset, false);
+			isSynced = true;
+		}
 	});
 
 	function fetchToolPreset() {
@@ -63,11 +76,11 @@
 		const enabledTools = tools.filter(t => t.enabled).map(t => t.name);
 		sendToolUpdate({
 			type: 'setToolConfig',
-			data: { tools: enabledTools }
+			data: { toolPreset, customTools: enabledTools }
 		});
 	}
 
-	function applyPreset(preset: string) {
+	function applyPreset(preset: string, notify = true) {
 		toolPreset = preset;
 		switch (preset) {
 			case 'default':
@@ -87,7 +100,9 @@
 				break;
 		}
 		tools = [...tools];
-		notifyToolChange();
+		if (notify) {
+			notifyToolChange();
+		}
 	}
 
 	function addCustomTool() {
@@ -391,15 +406,6 @@
 		color: var(--color-text-muted);
 	}
 
-	.tool-category {
-		font-size: 9px;
-		color: var(--color-text-muted);
-		opacity: 0.5;
-		text-transform: uppercase;
-		font-weight: 700;
-		letter-spacing: 0.04em;
-	}
-
 	.tool-actions {
 		display: flex;
 		align-items: center;
@@ -493,15 +499,6 @@
 		filter: brightness(1.1);
 	}
 
-	.empty-state {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-6);
-		color: var(--color-text-muted);
-		font-size: var(--text-sm);
-	}
 
 	/* ── Presets ──────────────────────────────── */
 	.presets-list {

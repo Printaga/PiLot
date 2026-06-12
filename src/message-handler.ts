@@ -505,6 +505,44 @@ export class MessageHandler {
 					}
 					break;
 
+				case "forkSession":
+					try {
+						await this.provider.forkSession(message.data.fromNodeId);
+						result = { success: true };
+					} catch (error) {
+						this.provider.webview?.postMessage({
+							type: "error",
+							data: {
+								message: error instanceof Error ? error.message : String(error),
+								timestamp: Date.now(),
+							},
+						});
+						throw error;
+					}
+					break;
+
+				case "getSettings":
+					result = await this.provider.getSettings();
+					this.sendSettingsResponse(result);
+					break;
+
+				case "setToolConfig":
+					try {
+						await this.provider.setToolConfig(message.data);
+						result = { success: true };
+						this.sendSettingsResponse({ toolPreset: message.data.toolPreset, customTools: message.data.customTools });
+					} catch (error) {
+						this.provider.webview?.postMessage({
+							type: "error",
+							data: {
+								message: error instanceof Error ? error.message : String(error),
+								timestamp: Date.now(),
+							},
+						});
+						throw error;
+					}
+					break;
+
 				default:
 					this.provider.logDebug("Unknown message type:", message.type);
 					result = { error: `Unknown message type: ${message.type}` };
@@ -680,6 +718,13 @@ export class MessageHandler {
 		this.provider.webview?.postMessage({
 			type: "session-stats",
 			data: { tokens: data?.tokens },
+		});
+	}
+
+	private sendSettingsResponse(data: any) {
+		this.provider.webview?.postMessage({
+			type: "settings-response",
+			data,
 		});
 	}
 

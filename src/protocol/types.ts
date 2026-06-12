@@ -91,4 +91,6 @@ export interface ProviderApi {
 	logError(msg: string, error?: unknown): void;
 	deleteSessions(sessionIds: string[]): Promise<void>;
 	editMessage(index: number, text: string): Promise<void>;
+	getSettings(): Promise<{ toolPreset: string; customTools: string[] }>;
+	setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void>;
 }
