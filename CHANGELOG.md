@@ -8,8 +8,17 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Changed
 
+- Refactored PiAgentProvider (2719 → 1779 lines) by extracting 6 modules: BinaryService, FooterManager, ExtensionUIContext, ModelRegistryHandler, PackageManager, SessionListManager
+- Created `binary-service.ts` consolidating binary resolution, PATH management, and git branch detection
+- Created `footer-manager.ts` for git branch polling and footer data synchronization
+- Created `extension-ui-context.ts` for extension UI binding, status polling, and loading error forwarding
+- Created `model-registry-handler.ts` for model registry merging, favorites sync, and CLI model caching
+- Created `package-manager.ts` for package CLI operations, enrichment, and CRUD
+- Created `session-manager.ts` for session list caching, auto-naming, and deletion
+
 ### Fixed
 
+- Fixed BinaryService.log() using user-facing notifications instead of console logging
 - Added missing `getSettings` and `setToolConfig` message handlers in MessageHandler
 - Added missing `getSettings()` and `setToolConfig()` methods to PiAgentProvider for VS Code configuration integration
 - Fixed forkSession message to pass `fromNodeId` instead of `sessionId` parameter

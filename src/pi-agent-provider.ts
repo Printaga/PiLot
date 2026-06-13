@@ -1,9 +1,5 @@
 import * as vscode from "vscode";
-import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
-
-import { spawn, type ChildProcess } from "node:child_process";
 import {
 	createAgentSession,
 	SessionManager,
@@ -22,21 +18,21 @@ import {
 import { MessageHandler } from "./message-handler.js";
 import { VoiceManager } from "./voice-manager.js";
 import { type ThinkingLevel } from "./webview/types/index.js";
-import { getShellCommand, execFileAsync } from "./utils/shell.js";
+
 import {
 	checkBetterSqlite3,
 	describeABIStatus,
 	ensureBetterSqlite3Compatible,
 } from "./utils/native-addons.js";
 
-import {
-	findPiBinary,
-	resolvePiBinary,
-	parseInstalledPackages,
-	readPackageManifest,
-	type InstalledPackage,
-	type EnrichedPackage,
-} from "./pi-binary.js";
+import { BinaryService } from "./binary-service.js";
+import { FooterManager } from "./footer-manager.js";
+import { ExtensionUIContext } from "./extension-ui-context.js";
+import { ModelRegistryHandler } from "./model-registry-handler.js";
+import { PackageManager } from "./package-manager.js";
+import { SessionListManager, type SessionItem } from "./session-manager.js";
+
+import { type EnrichedPackage } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
 import { serializeMessages } from "./message-serializer.js";
 
@@ -65,26 +61,7 @@ export interface PiAgentConfig {
 	sessionDir?: string;
 }
 
-type RegistryModel = { provider: string; id: string; name?: string };
-
-export interface SessionItem {
-	id: string;
-	label: string;
-	timestamp: number;
-	messageCount: number;
-}
-
-/** Internal session info with full details (including file path). */
-interface SessionInfoFull {
-	id: string;
-	label: string;
-	timestamp: number;
-	messageCount: number;
-	path: string;
-	name?: string;
-	firstMessage?: string;
-	cwd?: string;
-}
+// RegistryModel type moved to model-registry-handler.ts
 
 export class PiAgentProvider
 	implements vscode.WebviewViewProvider, vscode.Disposable
@@ -104,44 +81,24 @@ export class PiAgentProvider
 	private modelRegistry?: ModelRegistry;
 	private sessionManager?: SessionManager;
 	private settingsManager?: SettingsManager;
+	private binaryService = new BinaryService();
+	private footerManager!: FooterManager;
+	private extensionUIContext!: ExtensionUIContext;
+	private modelRegistryHandler!: ModelRegistryHandler;
+	private packageManager!: PackageManager;
+	private sessionListManager!: SessionListManager;
 	private availableModels: Array<{
 		id: string;
 		provider: string;
 		name: string;
 	}> = [];
 	private favoriteModels: string[] = [];
-	private cliModelIdsCache: Set<string> | null = null;
-	private cliModelIdsPromise: Promise<Set<string>> | null = null;
 	private currentModelId: string | null = null;
 	private _onDidChangeTreeData = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-	/** Resolved absolute path to pi binary, set at initialization. */
-	private resolvedBinaryPath: string | null = null;
-
-	/** Cached PI CLI version string from `pi --version`. */
-	private piVersion: string | null = null;
 
 	/** Extension activity statuses forwarded from packages via ctx.ui.setStatus(). Cleared only when the extension explicitly clears them. */
 	private extensionStatuses = new Map<string, string>();
-	/** Interval handle for polling extension statuses from the runner. */
-	private statusPoller: ReturnType<typeof setInterval> | undefined;
-
-	/** Set to true after the first successful auto-name so we only title a session once. */
-	private _autoNamingTriggered = false;
-	/** Cached session list (for webview) to avoid re-reading all session files on every message. */
-	private _sessionListCache: SessionItem[] = [];
-	/** Cached full session info (for internal use, includes file path). */
-	private _sessionListFullCache: SessionInfoFull[] = [];
-	/** Timestamp of last session list refresh. */
-	private _sessionListCacheTime = 0;
-	/** Minimum interval between session list refreshes (ms). */
-	private readonly SESSION_LIST_REFRESH_INTERVAL = 5000;
-
-	/** Footer data for the status line (cwd, git branch, session name). */
-	private footerCwd = "";
-	private footerGitBranch: string | null = null;
-	private footerSessionName: string | null = null;
-	private gitBranchPoller: ReturnType<typeof setInterval> | undefined;
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
@@ -158,6 +115,58 @@ export class PiAgentProvider
 		this.config = config;
 		this.logChannel = vscode.window.createOutputChannel("PiLot Studio");
 		this.messageHandler = new MessageHandler(this);
+		this.footerManager = new FooterManager(this.binaryService, (msg) =>
+			this.notifyWebview(msg),
+		);
+		this.extensionUIContext = new ExtensionUIContext({
+			getSession: () => this.session,
+			extensionStatuses: this.extensionStatuses,
+			notifyWebview: (msg) => this.notifyWebview(msg),
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+		});
+		this.modelRegistryHandler = new ModelRegistryHandler({
+			getModelRegistry: () => this.modelRegistry,
+			getAuthStorage: () => this.authStorage,
+			getSettingsManager: () => this.settingsManager,
+			binaryService: this.binaryService,
+			availableModels: this.availableModels,
+			favoriteModels: this.favoriteModels,
+			currentModelId: this.currentModelId,
+			globalState: this.context.globalState,
+			notifyWebview: (msg) => this.notifyWebview(msg),
+			logError: this.logError.bind(this),
+			logDebug: this.logDebug.bind(this),
+		});
+		this.packageManager = new PackageManager({
+			getResourceLoader: () => this.session?.resourceLoader,
+			getConfiguredPackages: () =>
+				this.sessionResources.getConfiguredPackages(),
+			binaryService: this.binaryService,
+			notifyWebview: (msg) => this.notifyWebview(msg),
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+		});
+		this.sessionListManager = new SessionListManager({
+			config: this.config,
+			getSession: () => this.session,
+			setSession: (session) => {
+				this.session = session;
+			},
+			getSessionManager: () => this.sessionManager,
+			setSessionManager: (manager) => {
+				this.sessionManager = manager;
+			},
+			getAuthStorage: () => this.authStorage,
+			getModelRegistry: () => this.modelRegistry,
+			getSettingsManager: () => this.settingsManager,
+			notifyWebview: (msg) => this.notifyWebview(msg),
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+			onSessionDeleted: async () => {
+				await this.newSession();
+			},
+		});
 		this.voiceManager = new VoiceManager({
 			extensionUri: this.context.extensionUri,
 			agentDir: getAgentDir(),
@@ -172,41 +181,6 @@ export class PiAgentProvider
 		});
 	}
 
-	/** Resolve the pi binary once at startup, logging the result. */
-	private resolvePiBinaryAtStartup(): void {
-		this.resolvedBinaryPath = resolvePiBinary();
-		if (this.resolvedBinaryPath) {
-			this.log(`Resolved pi binary: ${this.resolvedBinaryPath}`);
-		} else {
-			const msg =
-				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.";
-			this.logError(msg);
-			vscode.window.showErrorMessage(msg);
-		}
-	}
-
-	/** Resolve PI CLI version by running `pi --version`. Caches result. */
-	private async resolvePiVersion(): Promise<string | null> {
-		if (this.piVersion) return this.piVersion;
-		try {
-			const binaryPath = this.resolvedBinaryPath || findPiBinary();
-			const result = await execFileAsync(binaryPath, ["--version"]);
-			// pi --version may output to stdout or stderr depending on the version
-			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
-			if (result.code === 0 && versionOutput) {
-				this.piVersion = versionOutput;
-				this.log(`Resolved PI CLI version: ${this.piVersion}`);
-				return this.piVersion;
-			}
-			this.logError(
-				`pi --version failed (code ${result.code}): ${result.stderr}`,
-			);
-		} catch (e) {
-			this.logError("Failed to resolve PI version:", e);
-		}
-		return null;
-	}
-
 	/** Update the webview view container title/description with current version info. */
 	private async updateViewTitle(): Promise<void> {
 		const view = this.view;
@@ -215,107 +189,11 @@ export class PiAgentProvider
 		const extVersion = this.context.extension.packageJSON.version || "0.0.0";
 		view.title = `PiLot Studio v${extVersion}`;
 
-		const piVer = await this.resolvePiVersion();
+		const piVer = await this.binaryService.getCliVersion();
 		if (piVer) {
 			view.description = `Connected to PI v${piVer}`;
 		} else {
 			view.description = undefined;
-		}
-	}
-
-	/**
-	 * Resolve the current git branch by reading .git/HEAD.
-	 * Returns null if not in a git repo or on detached HEAD.
-	 */
-	private resolveGitBranch(cwd: string): string | null {
-		try {
-			let dir = cwd;
-			while (true) {
-				const gitPath = path.join(dir, ".git");
-				if (fsSync.existsSync(gitPath)) {
-					const stat = fsSync.statSync(gitPath);
-					if (stat.isDirectory()) {
-						const headPath = path.join(gitPath, "HEAD");
-						if (!fsSync.existsSync(headPath)) return null;
-						const content = fsSync.readFileSync(headPath, "utf8").trim();
-						if (content.startsWith("ref: refs/heads/")) {
-							return content.slice(16);
-						}
-						return "detached";
-					} else if (stat.isFile()) {
-						// Worktree: .git is a file with "gitdir: ..."
-						const content = fsSync.readFileSync(gitPath, "utf8").trim();
-						if (content.startsWith("gitdir: ")) {
-							const gitDir = path.resolve(dir, content.slice(8).trim());
-							const headPath = path.join(gitDir, "HEAD");
-							if (!fsSync.existsSync(headPath)) return null;
-							const headContent = fsSync.readFileSync(headPath, "utf8").trim();
-							if (headContent.startsWith("ref: refs/heads/")) {
-								return headContent.slice(16);
-							}
-							return "detached";
-						}
-					}
-				}
-				const parent = path.dirname(dir);
-				if (parent === dir) return null;
-				dir = parent;
-			}
-		} catch {
-			return null;
-		}
-	}
-
-	/** Send footer data (cwd, git branch, session name) to the webview. */
-	private sendFooterData(): void {
-		if (!this.session) return;
-		const rawCwd = this.session.sessionManager.getCwd();
-		const sessionName = this.session.sessionName ?? null;
-		const gitBranch = this.resolveGitBranch(rawCwd);
-
-		// Format cwd: replace home dir with ~
-		const home = process.env.HOME || process.env.USERPROFILE || "";
-		let cwd = rawCwd;
-		if (home && rawCwd.startsWith(home)) {
-			const rest = rawCwd.slice(home.length);
-			cwd = rest === "" ? "~" : `~${rest.startsWith("/") ? "" : "/"}${rest}`;
-		}
-
-		// Only send if something changed
-		if (
-			cwd === this.footerCwd &&
-			gitBranch === this.footerGitBranch &&
-			sessionName === this.footerSessionName
-		) {
-			return;
-		}
-
-		this.footerCwd = cwd;
-		this.footerGitBranch = gitBranch;
-		this.footerSessionName = sessionName;
-
-		this.notifyWebview({
-			type: "footer-data",
-			data: { cwd, gitBranch, sessionName },
-		});
-	}
-
-	/** Start polling git branch for footer data. */
-	private startGitBranchPoller(): void {
-		this.stopGitBranchPoller();
-		// Send immediately
-		this.sendFooterData();
-		// Then poll every 5 seconds
-		this.gitBranchPoller = setInterval(() => {
-			this.sendFooterData();
-		}, 5000);
-	}
-
-	/** Stop the git branch poller. */
-	private stopGitBranchPoller(): void {
-		if (this.gitBranchPoller !== undefined) {
-			clearInterval(this.gitBranchPoller);
-			this.gitBranchPoller = undefined;
 		}
 	}
 
@@ -352,15 +230,11 @@ export class PiAgentProvider
 		if (this.isInitialized) return;
 
 		// Resolve pi binary once at startup
-		this.resolvePiBinaryAtStartup();
+		this.binaryService.resolveAtStartup();
 
 		// Prepend resolved binary directory to PATH for SDK internals (only for absolute paths)
 		const originalPath = process.env.PATH;
-		if (this.resolvedBinaryPath && path.isAbsolute(this.resolvedBinaryPath)) {
-			const binaryDir = path.dirname(this.resolvedBinaryPath);
-			const pathSep = process.platform === "win32" ? ";" : ":";
-			process.env.PATH = `${binaryDir}${pathSep}${process.env.PATH || ""}`;
-		}
+		this.binaryService.prependToPath();
 
 		try {
 			this.authStorage = AuthStorage.create();
@@ -372,8 +246,8 @@ export class PiAgentProvider
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
 
-			const models = await this.getMergedModels();
-			this.availableModels = this.buildModelList(models);
+			const models = await this.modelRegistryHandler.getMergedModels();
+			this.availableModels = this.modelRegistryHandler.buildModelList(models);
 
 			const savedFavorites = this.context.globalState.get<string[]>(
 				"favoriteModels",
@@ -384,7 +258,7 @@ export class PiAgentProvider
 			);
 
 			// Merge with PI CLI scoped models (bidirectional sync)
-			this.syncFromCliModels().catch(() => {});
+			this.modelRegistryHandler.syncFromCliModels().catch(() => {});
 
 			// Restore persisted model — settings.json first, then globalState
 			const settingsDefaultModel = this.settingsManager?.getDefaultModel();
@@ -409,7 +283,10 @@ export class PiAgentProvider
 			this.checkNativeAddons();
 		} catch (error) {
 			// Restore PATH on failure
-			if (originalPath !== undefined && this.resolvedBinaryPath) {
+			if (
+				originalPath !== undefined &&
+				this.binaryService.isBinaryAvailable()
+			) {
 				process.env.PATH = originalPath;
 			}
 			this.logError("Failed to initialize PiLot Studio:", error);
@@ -419,44 +296,13 @@ export class PiAgentProvider
 		}
 	}
 
-	private async getMergedModels() {
-		if (!this.modelRegistry) return [];
-		const available = await this.modelRegistry.getAvailable();
-		const all = this.modelRegistry.getAll();
-		const merged = new Map<string, RegistryModel>();
+	// Model methods delegated to modelRegistryHandler
 
-		for (const m of all) {
-			merged.set(m.provider + "/" + m.id, m);
-		}
-
-		for (const m of available) {
-			merged.set(m.provider + "/" + m.id, m);
-		}
-
-		return [...merged.values()];
-	}
-
-	private buildModelList(models: RegistryModel[]) {
-		return models
-			.map((m) => ({
-				id: m.provider + "/" + m.id,
-				provider: m.provider,
-				name: m.name || m.id,
-			}))
-			.sort(
-				(a, b) =>
-					a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),
-			);
-	}
-
-	private async refreshAvailableModels() {
-		if (!this.modelRegistry) return;
-		const models = await this.getMergedModels();
-		this.availableModels = this.buildModelList(models);
-		this.notifyWebview({
-			type: "models-updated",
-			data: { models: this.availableModels },
-		});
+	async toggleFavorite(
+		modelId: string,
+		isFavorite: boolean,
+	): Promise<string[]> {
+		return this.modelRegistryHandler.toggleFavorite(modelId, isFavorite);
 	}
 
 	updateConfig(config: PiAgentConfig) {
@@ -551,47 +397,6 @@ export class PiAgentProvider
 		});
 	}
 
-	private getConfiguredPackages(): InstalledPackage[] {
-		return this.sessionResources.getConfiguredPackages();
-	}
-
-	private async listPackagesFromCli(): Promise<InstalledPackage[]> {
-		const binaryPath = this.resolvedBinaryPath || findPiBinary();
-		const direct = await execFileAsync(binaryPath, ["list"]);
-		let packages = parseInstalledPackages(direct.stdout);
-		this.logDebug(
-			"[PI] listPackagesFromCli: direct parsed packages:",
-			packages,
-		);
-
-		if (packages.length > 0) {
-			return packages;
-		}
-
-		const shellCommand = getShellCommand(binaryPath, ["list"]);
-		if (!shellCommand) {
-			if (direct.stderr) {
-				this.logError("[PI] listPackagesFromCli error:", direct.stderr);
-			}
-			return packages;
-		}
-
-		const fromShell = await execFileAsync(
-			shellCommand.command,
-			shellCommand.args,
-		);
-		packages = parseInstalledPackages(fromShell.stdout);
-		this.logDebug("[PI] listPackagesFromCli: shell parsed packages:", packages);
-		if (packages.length === 0 && (direct.stderr || fromShell.stderr)) {
-			this.logError(
-				"[PI] listPackagesFromCli error:",
-				direct.stderr || fromShell.stderr,
-			);
-		}
-
-		return packages;
-	}
-
 	/**
 	 * Check native addon (better-sqlite3) ABI compatibility.
 	 * Auto-rebuilds if mismatched. Logs result.
@@ -667,7 +472,7 @@ export class PiAgentProvider
 	private async refreshInstalledPackagesInWebview() {
 		if (!this.view) return;
 
-		const packages = await this.listPackages();
+		const packages = await this.packageManager.listPackages();
 		this.notifyWebview({ type: "installed", data: packages });
 	}
 
@@ -766,61 +571,18 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// Bind extension UI context so package setStatus() calls reach the webview.
 		// This also emits session_start to initialize extensions (LSP, indexing, etc.)
-		await this.bindExtensionUI();
+		await this.extensionUIContext.bindExtensionUI();
 
 		// Start sending footer data (cwd, git branch, session name) to the webview
-		this.startGitBranchPoller();
+		this.footerManager.start({
+			getCwd: () => this.session!.sessionManager.getCwd(),
+			sessionName: this.session.sessionName,
+		});
 
 		return this.session;
 	}
 
-	/** Generate and apply a short session title from the first real exchange. */
-	private tryAutoSessionName(): boolean {
-		if (!this.session || this.session.sessionName) return false;
-
-		const messages = this.session.messages;
-		const firstUserMsg = messages.find((m) => m.role === "user");
-		const firstAssistantMsg = messages.find((m) => m.role === "assistant");
-
-		if (!firstUserMsg || !firstAssistantMsg) return false;
-
-		const userText = extractTextFromMessage(firstUserMsg);
-		const assistantText = extractTextFromMessage(firstAssistantMsg);
-
-		const name = generateSessionName(userText, assistantText);
-		if (name) {
-			this.logDebug("[PI] Auto-generated session name:", name);
-			this.session.setSessionName(name);
-			return true;
-		}
-
-		return false;
-	}
-
-	/** Generate and apply a session title from the first user message only.
-	 * Matches PI CLI behavior where the first user message becomes the session display name.
-	 */
-	private tryAutoSessionNameFromUserMessage(userMessage: {
-		role: string;
-		content: string | Array<{ type: string; text?: string }> | null;
-	}): boolean {
-		if (!this.session || this.session.sessionName) return false;
-
-		const userText = extractTextFromMessage(userMessage);
-		if (!userText) return false;
-
-		const name = generateSessionName(userText, "");
-		if (name) {
-			this.logDebug(
-				"[PI] Auto-generated session name from user message:",
-				name,
-			);
-			this.session.setSessionName(name);
-			return true;
-		}
-
-		return false;
-	}
+	// Auto-naming methods delegated to sessionListManager
 
 	async deleteSessions(sessionIds: string[]) {
 		const cwd =
@@ -852,7 +614,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				await this.newSession();
 			}
 
-			await this.refreshSessionList(true);
+			await this.sessionListManager.refreshSessionList(true);
 		} catch (error) {
 			this.logError("[PI] Failed to delete sessions:", error);
 			vscode.window.showErrorMessage(
@@ -972,10 +734,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async newSession() {
-		this._autoNamingTriggered = false;
+		this.sessionListManager.autoNamingTriggered = false;
 		// Dispose old session properly before creating a new one
-		this.stopStatusPoller();
-		this.stopGitBranchPoller();
+		this.extensionUIContext.stopStatusPoller();
+		this.footerManager.stop();
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
@@ -988,7 +750,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.sessionManager.newSession();
 		}
 		await this.createSession();
-		this.invalidateSessionListCache(); // New session created, invalidate cache
+		this.sessionListManager.invalidateSessionListCache(); // New session created, invalidate cache
 		this._onDidChangeTreeData.fire();
 		this.notifyWebview({
 			type: "session-updated",
@@ -1060,7 +822,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				}));
 
 			// Collect currently installed PI packages
-			const installedPkgs = await this.listPackages();
+			const installedPkgs = await this.packageManager.listPackages();
 
 			this.logDebug(
 				"[PI] sendSessionResources cwd:",
@@ -1118,14 +880,16 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async switchSession(sessionId: string) {
-		this._autoNamingTriggered = false;
+		this.sessionListManager.autoNamingTriggered = false;
 		// Invalidate cache to get fresh session list
-		this.invalidateSessionListCache();
+		this.sessionListManager.invalidateSessionListCache();
 		// Find the session info from the list (use full cache for path)
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		await this.listSessions(true); // force refresh (populates _sessionListFullCache)
-		const info = this._sessionListFullCache.find((s) => s.id === sessionId);
+		await this.sessionListManager.listSessions(true); // force refresh (populates _sessionListFullCache)
+		const info = this.sessionListManager.sessionListFullCache.find(
+			(s) => s.id === sessionId,
+		);
 		if (!info) {
 			this.logError(`[PI] Session not found: ${sessionId}`);
 			this.notifyWebview({
@@ -1139,8 +903,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		// Dispose old session
-		this.stopStatusPoller();
-		this.stopGitBranchPoller();
+		this.extensionUIContext.stopStatusPoller();
+		this.footerManager.stop();
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
@@ -1171,7 +935,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// Bind extension UI context so setStatus calls reach the webview.
 		// This also emits session_start to initialize extensions for this session.
-		await this.bindExtensionUI();
+		await this.extensionUIContext.bindExtensionUI();
 
 		this._onDidChangeTreeData.fire();
 
@@ -1199,11 +963,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		};
 	}
 
-	async setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void> {
+	async setToolConfig(config: {
+		toolPreset: string;
+		customTools?: string[];
+	}): Promise<void> {
 		const targetConfig = vscode.workspace.getConfiguration("pi-agent");
-		await targetConfig.update("toolPreset", config.toolPreset, vscode.ConfigurationTarget.Global);
+		await targetConfig.update(
+			"toolPreset",
+			config.toolPreset,
+			vscode.ConfigurationTarget.Global,
+		);
 		if (config.customTools !== undefined) {
-			await targetConfig.update("customTools", config.customTools, vscode.ConfigurationTarget.Global);
+			await targetConfig.update(
+				"customTools",
+				config.customTools,
+				vscode.ConfigurationTarget.Global,
+			);
 		}
 	}
 
@@ -1534,12 +1309,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	getPiCliVersion(): Promise<string | null> {
-		return this.resolvePiVersion();
+		return this.binaryService.getCliVersion();
 	}
 
 	/** Whether a usable pi binary was resolved (not just the fallback 'pi' name). */
 	isBinaryAvailable(): boolean {
-		return this.resolvedBinaryPath !== null;
+		return this.binaryService.isBinaryAvailable();
 	}
 
 	getThinkingLevel(): ThinkingLevel {
@@ -1554,133 +1329,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.favoriteModels;
 	}
 
-	/**
-	 * Get the set of model IDs known to the user's PI CLI.
-	 * Runs `pi --list-models` and parses the output.
-	 * Cached for the session lifetime; invalidated on auth changes.
-	 */
-	private async getCliModelIds(): Promise<Set<string>> {
-		if (this.cliModelIdsCache) return this.cliModelIdsCache;
-		if (!this.cliModelIdsPromise) {
-			this.cliModelIdsPromise = this._resolveCliModelIds()
-				.then((ids) => {
-					this.cliModelIdsCache = ids;
-					return ids;
-				})
-				.catch(() => {
-					this.cliModelIdsCache = new Set();
-					return this.cliModelIdsCache;
-				});
-		}
-		return this.cliModelIdsPromise;
-	}
-
-	private _resolveCliModelIds(): Promise<Set<string>> {
-		const binaryPath = this.resolvedBinaryPath || findPiBinary();
-		return execFileAsync(binaryPath, ["--list-models"])
-			.then(({ stdout, stderr }) => {
-				const output = (stderr || "") + "\n" + (stdout || "");
-				const models = new Set<string>();
-
-				for (const line of output.split("\n")) {
-					// Match: "provider  modelId  context  max-out  thinking  images"
-					const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
-					if (
-						match &&
-						match[1] !== "provider" &&
-						!match[0].startsWith("Warning")
-					) {
-						models.add(`${match[1]}/${match[2]}`);
-					}
-				}
-
-				return models;
-			})
-			.catch(() => {
-				this.logError(
-					"[PI] Failed to list CLI models - is 'pi' installed and on PATH?",
-				);
-				return new Set<string>();
-			});
-	}
-
-	/**
-	 * Sync favorites to PI CLI's settings.json (enabledModels).
-	 * Only writes patterns that the PI CLI actually knows about,
-	 * preventing warnings from version mismatches.
-	 */
-	private async syncFavoritesToSettings(): Promise<void> {
-		if (!this.settingsManager) return;
-
-		const cliModels = await this.getCliModelIds();
-
-		// If CLI not available or not yet resolved, skip sync
-		if (cliModels.size === 0) return;
-
-		// Only write patterns that the CLI actually knows about
-		const validPatterns = this.favoriteModels.filter((pattern) =>
-			cliModels.has(pattern),
-		);
-
-		this.settingsManager.setEnabledModels(validPatterns);
-		await this.settingsManager.flush();
-	}
-
-	/**
-	 * Merge PI CLI's scoped models into extension favorites.
-	 * Picks up models set outside the extension (e.g., via Ctrl+P in PI CLI).
-	 */
-	private async syncFromCliModels(): Promise<void> {
-		const cliModels = await this.getCliModelIds();
-		if (cliModels.size === 0) return;
-
-		const settingsModels = this.settingsManager?.getEnabledModels() || [];
-		if (settingsModels.length === 0) return;
-
-		// Add CLI models that the extension also knows about
-		const newModels = settingsModels.filter(
-			(pattern) =>
-				cliModels.has(pattern) &&
-				this.availableModels.some((m) => m.id === pattern) &&
-				!this.favoriteModels.includes(pattern),
-		);
-
-		if (newModels.length > 0) {
-			this.favoriteModels = [...this.favoriteModels, ...newModels];
-			await this.context.globalState.update(
-				"favoriteModels",
-				this.favoriteModels,
-			);
-			this.notifyWebview({
-				type: "favorites-updated",
-				data: { favorites: this.favoriteModels },
-			});
-		}
-	}
-
-	async toggleFavorite(
-		modelId: string,
-		isFavorite: boolean,
-	): Promise<string[]> {
-		if (isFavorite && !this.favoriteModels.includes(modelId)) {
-			// Guard: only add models that exist in the current registry
-			if (!this.availableModels.some((m) => m.id === modelId)) {
-				return this.favoriteModels;
-			}
-			this.favoriteModels = [...this.favoriteModels, modelId];
-		} else if (!isFavorite) {
-			this.favoriteModels = this.favoriteModels.filter((m) => m !== modelId);
-		}
-		await this.context.globalState.update(
-			"favoriteModels",
-			this.favoriteModels,
-		);
-
-		// Sync to PI CLI settings.json (validates against CLI model list)
-		await this.syncFavoritesToSettings();
-
-		return this.favoriteModels;
-	}
+	// Model methods delegated to modelRegistryHandler
 
 	async getProviderAuthData(): Promise<
 		Array<{
@@ -1734,7 +1383,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.authStorage) throw new Error("Auth storage not initialized");
 
 		this.authStorage.set(provider, { type: "api_key", key: apiKey });
-		await this.refreshAvailableModels();
+		await this.modelRegistryHandler.refreshAvailableModels();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
@@ -1748,66 +1397,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.authStorage) throw new Error("Auth storage not initialized");
 
 		this.authStorage.remove(provider);
-		await this.refreshAvailableModels();
-		this.cliModelIdsCache = null;
-		this.cliModelIdsPromise = null;
+		await this.modelRegistryHandler.refreshAvailableModels();
+		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
 		});
 	}
 
+	// Session list methods delegated to sessionListManager
+
 	async listSessions(forceRefresh = false): Promise<SessionItem[]> {
-		const now = Date.now();
-		// Return cached list if recent and not forced
-		if (
-			!forceRefresh &&
-			this._sessionListCache.length > 0 &&
-			now - this._sessionListCacheTime < this.SESSION_LIST_REFRESH_INTERVAL
-		) {
-			return this._sessionListCache;
-		}
-
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-		try {
-			const sessions = await SessionManager.list(cwd, this.config.sessionDir);
-			// Cache full info for internal use (includes file path)
-			this._sessionListFullCache = sessions.map((s) => ({
-				id: s.id,
-				label: s.name || s.firstMessage.slice(0, 60) || "Untitled",
-				timestamp: s.modified.getTime(),
-				messageCount: s.messageCount,
-				path: s.path,
-				name: s.name,
-				firstMessage: s.firstMessage,
-				cwd: s.cwd,
-			}));
-			// Cache webview-friendly version
-			this._sessionListCache = this._sessionListFullCache.map((s) => ({
-				id: s.id,
-				label: s.label,
-				timestamp: s.timestamp,
-				messageCount: s.messageCount,
-			}));
-			this._sessionListCacheTime = now;
-		} catch {
-			this._sessionListFullCache = [];
-			this._sessionListCache = [];
-		}
-		return this._sessionListCache;
+		return this.sessionListManager.listSessions(forceRefresh);
 	}
 
-	/** Invalidate the session list cache so next call re-reads from disk. */
 	invalidateSessionListCache(): void {
-		this._sessionListCache = [];
-		this._sessionListFullCache = [];
-		this._sessionListCacheTime = 0;
-	}
-
-	private async refreshSessionList(forceRefresh = false) {
-		await this.listSessions(forceRefresh);
-		this.notifyWebview({ type: "sessions-list", data: this._sessionListCache });
+		this.sessionListManager.invalidateSessionListCache();
 	}
 
 	private handleSessionEvent(event: AgentSessionEvent) {
@@ -1815,7 +1420,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// Refresh the session list when messages change (use cache to avoid disk I/O)
 		if (event.type === "message_end" || event.type === "agent_end") {
-			this.refreshSessionList(false);
+			this.sessionListManager.refreshSessionList(false);
 		}
 
 		// Push token stats on message/agent end
@@ -1837,9 +1442,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		if (event.type === "session_info_changed") {
-			this.refreshSessionList(true).catch((e) =>
-				this.logError("[PI] refreshSessionList in event handler failed:", e),
-			);
+			this.sessionListManager
+				.refreshSessionList(true)
+				.catch((e) =>
+					this.logError("[PI] refreshSessionList in event handler failed:", e),
+				);
 			this.notifyWebview({
 				type: "session-name-changed",
 				data: { name: event.name },
@@ -1848,7 +1455,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				this.logError("[PI] sendSessionResources in event handler failed:", e),
 			);
 			// Immediately push updated footer data (includes session name)
-			this.sendFooterData();
+			this.footerManager.sendFooterData(
+				this.session
+					? {
+							getCwd: () => this.session!.sessionManager.getCwd(),
+							sessionName: this.session!.sessionName,
+						}
+					: null,
+			);
 		}
 
 		// ── Session auto-naming flow ──────────────────
@@ -1857,20 +1471,21 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (
 			event.type === "message_start" &&
 			event.message?.role === "user" &&
-			!this._autoNamingTriggered &&
+			!this.sessionListManager.autoNamingTriggered &&
 			this.session &&
 			!this.session.sessionName
 		) {
 			this.logDebug(
 				"[PI] Auto-naming: first user message received, attempting to name session",
 			);
-			this._autoNamingTriggered = this.tryAutoSessionNameFromUserMessage(
-				event.message,
-			);
-			if (this._autoNamingTriggered) {
+			this.sessionListManager.autoNamingTriggered =
+				this.sessionListManager.tryAutoSessionNameFromUserMessage(
+					event.message,
+				);
+			if (this.sessionListManager.autoNamingTriggered) {
 				this.logDebug("[PI] Auto-naming: session named from user message");
-				this.invalidateSessionListCache(); // Force session list refresh
-				this.refreshSessionList(true);
+				this.sessionListManager.invalidateSessionListCache(); // Force session list refresh
+				this.sessionListManager.refreshSessionList(true);
 			}
 		}
 
@@ -1879,20 +1494,21 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (
 			event.type === "agent_end" &&
 			!event.willRetry &&
-			!this._autoNamingTriggered &&
+			!this.sessionListManager.autoNamingTriggered &&
 			this.session &&
 			!this.session.sessionName
 		) {
 			this.logDebug(
 				"[PI] Auto-naming: agent response complete, attempting to improve session name",
 			);
-			this._autoNamingTriggered = this.tryAutoSessionName();
-			if (this._autoNamingTriggered) {
+			this.sessionListManager.autoNamingTriggered =
+				this.sessionListManager.tryAutoSessionName();
+			if (this.sessionListManager.autoNamingTriggered) {
 				this.logDebug(
 					"[PI] Auto-naming: session name improved from assistant response",
 				);
-				this.invalidateSessionListCache(); // Force session list refresh
-				this.refreshSessionList(true);
+				this.sessionListManager.invalidateSessionListCache(); // Force session list refresh
+				this.sessionListManager.refreshSessionList(true);
 			}
 		}
 
@@ -2008,323 +1624,6 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
-	/**
-	 * Bind a custom ExtensionUIContext to the session's extension runner
-	 * so that ctx.ui.setStatus() calls from packages are forwarded to the webview.
-	 *
-	 * We set the UI context on the extension runner directly (not via bindExtensions)
-	 * because createAgentSession already initializes and binds the runner during
-	 * construction. Calling bindExtensions again would re-emit session_start and
-	 * re-discover resources. Instead, we replace the no-op UI context with our own
-	 * and also set it on the session's _extensionUIContext field so that reload()
-	 * preserves it.
-	 */
-	private async bindExtensionUI(): Promise<void> {
-		if (!this.session) return;
-
-		try {
-			const runner = this.session.extensionRunner;
-			if (!runner) {
-				this.logDebug(
-					"[PI] No extension runner found, skipping UI context binding",
-				);
-				return;
-			}
-
-			// Create a UI context that forwards setStatus calls to the webview
-			const uiContext = {
-				select: async () => undefined,
-				confirm: async () => false,
-				input: async () => undefined,
-				notify: (message: string, type?: string) => {
-					this.logDebug(`[PI] Extension notify: ${type || "info"}: ${message}`);
-					this.notifyWebview({
-						type: "extension-notify",
-						data: { message, type: type || "info" },
-					});
-				},
-				onTerminalInput: () => () => {},
-				setStatus: (key: string, text: string | undefined) => {
-					this.logDebug(
-						`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`,
-					);
-					if (text === undefined || text === null) {
-						this.extensionStatuses.delete(key);
-					} else {
-						this.extensionStatuses.set(key, text);
-					}
-					this.logDebug(`[PI] Extension setStatus: ${key} = ${text}`);
-					this.notifyWebview({
-						type: "extension-status",
-						data: { key, text: text ?? undefined },
-					});
-				},
-				setWorkingMessage: (message?: string) => {
-					if (message) {
-						this.notifyWebview({
-							type: "activity-start",
-							data: { key: "_working", text: message, activityType: "system" },
-						});
-					} else {
-						this.notifyWebview({
-							type: "activity-end",
-							data: { key: "_working" },
-						});
-					}
-				},
-				setWorkingVisible: () => {},
-				setWorkingIndicator: () => {},
-				setHiddenThinkingLabel: () => {},
-				setWidget: () => {},
-				setFooter: () => {},
-				setHeader: () => {},
-				setTitle: () => {},
-				custom: async <T>(
-					factory: (
-						tui: any,
-						theme: any,
-						keybindings: any,
-						done: (result: T) => void,
-					) => any,
-					options?: { overlay?: boolean },
-				): Promise<T> => {
-					const factoryName = factory.name || "";
-					const callerLine =
-						new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
-					this.logDebug(
-						`[PI] Extension custom UI (no TUI): factory=${factoryName}, caller=${callerLine}`,
-					);
-					void options;
-
-					// Call factory with no TUI context so extensions gracefully detect
-					// headless mode and call done() to complete initialization.
-					return new Promise<T>((resolve) => {
-						const done = (result: T) => resolve(result);
-						try {
-							const component = factory(undefined, undefined, undefined, done);
-							// Factory may return a Promise (async component factory).
-							// Resolution/failure handled via done() call.
-							if (component && typeof (component as any)?.then === "function") {
-								(component as Promise<any>).catch((e: unknown) => {
-									this.logDebug(
-										`[PI] Extension custom factory promise error: ${e}`,
-									);
-								});
-							}
-						} catch (e) {
-							this.logDebug(`[PI] Extension custom factory error: ${e}`);
-							resolve(undefined as unknown as T);
-						}
-					});
-				},
-				pasteToEditor: () => {},
-				setEditorText: () => {},
-				getEditorText: () => "",
-				editor: async () => undefined,
-				addAutocompleteProvider: () => {},
-				setEditorComponent: () => {},
-				getEditorComponent: () => undefined,
-				get theme() {
-					return undefined as unknown as import("@earendil-works/pi-coding-agent").ExtensionUIContext["theme"];
-				},
-				getAllThemes: () => [],
-				getTheme: () => undefined,
-				setTheme: () => ({ success: false, error: "UI not available" }),
-				getToolsExpanded: () => false,
-				setToolsExpanded: () => {},
-			};
-
-			// Set the UI context on the runner so extension setStatus calls reach us
-			runner.setUIContext(uiContext);
-
-			// Also set the internal _extensionUIContext field so session.reload() preserves it.
-			(this.session as any)._extensionUIContext = uiContext;
-
-			const extensionPaths = runner.getExtensionPaths?.() ?? [];
-			const extensionCount = extensionPaths.length;
-			this.logDebug(
-				`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`,
-			);
-			if (extensionCount > 0) {
-				this.logDebug("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
-			}
-
-			// Check if extensions have session_start handlers
-			const extensions = (runner as any).extensions ?? [];
-			this.logDebug(
-				`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`,
-			);
-			if (extensions.length > 0) {
-				const handlers = extensions.map((ext: any) => ({
-					path: ext.path,
-					hasSessionStart: ext.handlers?.has("session_start"),
-					handlerCount: ext.handlers?.get("session_start")?.length ?? 0,
-				}));
-				this.logDebug("[PiLot DIAGNOSTIC] Extension handlers:", handlers);
-			}
-
-			this.logDebug(
-				`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`,
-			);
-
-			// Re-apply bindings so the new UI context is used by the runner
-			(this.session as any)._applyExtensionBindings?.(runner);
-
-			// CRITICAL: Emit session_start to initialize extensions
-			// Without this, extensions never run their initialization handlers (LSP setup, indexing, etc.)
-			// and never call setStatus() to report their activity.
-			const sessionStartEvent = (this.session as any)._sessionStartEvent ?? {
-				type: "session_start" as const,
-				reason: "startup" as const,
-				cwd: this.session.sessionManager.getCwd(),
-				sessionPath: (this.session as any).sessionFile,
-			};
-
-			// Store it for future reload() calls
-			(this.session as any)._sessionStartEvent = sessionStartEvent;
-
-			this.logDebug(
-				"[PiLot DIAGNOSTIC] Emitting session_start event:",
-				sessionStartEvent,
-			);
-			this.logDebug("[PI] Emitting session_start to extensions");
-			await runner.emit(sessionStartEvent);
-			this.logDebug("[PiLot DIAGNOSTIC] session_start emitted successfully");
-
-			// Let extensions discover additional resources (skills, prompts, themes)
-			await (this.session as any).extendResourcesFromExtensions?.("startup");
-
-			this.logDebug(
-				`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.extensionStatuses.size}`,
-			);
-			if (this.extensionStatuses.size > 0) {
-				this.logDebug(
-					"[PiLot DIAGNOSTIC] Statuses:",
-					Object.fromEntries(this.extensionStatuses),
-				);
-			}
-
-			// ── Forward extension loading errors (from createAgentSession) ──────────
-			// Extensions that FAILED to load during createAgentSession never got to call
-			// setStatus() because the noOpUIContext was active. Their errors are stored in
-			// the resource loader's extensionsResult.errors array. Forward them now.
-			this.forwardExtensionLoadingErrors();
-
-			this.logDebug("[PI] Extensions initialized");
-
-			// Send any statuses that extensions may have already set during initialization
-			if (this.extensionStatuses.size > 0) {
-				this.logDebug(
-					"[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview",
-				);
-				this.notifyWebview({
-					type: "extension-statuses-full",
-					data: Object.fromEntries(this.extensionStatuses),
-				});
-			}
-
-			// Start polling extension statuses as a sync mechanism
-			this.startStatusPoller();
-		} catch (err) {
-			this.logError("[PI] Failed to bind extension UI context:", err);
-		}
-	}
-
-	/** Start polling extension statuses from the runner as a fallback/sync mechanism. */
-	private startStatusPoller(): void {
-		this.stopStatusPoller();
-		this.statusPoller = setInterval(() => {
-			this.pollExtensionStatuses();
-		}, 2000);
-	}
-
-	/** Stop the status poller. */
-	private stopStatusPoller(): void {
-		if (this.statusPoller !== undefined) {
-			clearInterval(this.statusPoller);
-			this.statusPoller = undefined;
-		}
-	}
-
-	/**
-	 * Poll the extension runner for all current extension statuses.
-	 * This syncs statuses in case setStatus was called before our UI context was attached
-	 * or by extensions that bypass the UI context.
-	 */
-	private pollExtensionStatuses(): void {
-		if (!this.session) return;
-
-		try {
-			const runner = this.session.extensionRunner;
-			if (!runner || !runner.hasUI()) return;
-
-			// The extension runner stores statuses via the FooterDataProvider.
-			// Since we can't access FooterDataProvider directly from the extension host,
-			// we rely on the setStatus forwarding from our UI context.
-			// This poller is a safety net — send the current full map.
-			if (this.extensionStatuses.size > 0) {
-				this.notifyWebview({
-					type: "extension-statuses-full",
-					data: Object.fromEntries(this.extensionStatuses),
-				});
-			}
-
-			// Also re-check the resource loader for extension loading errors.
-			// These are set once during session creation but may change on reload.
-			this.forwardExtensionLoadingErrors();
-		} catch {
-			// Silently ignore — session may be disposed
-		}
-	}
-
-	/**
-	 * Forward extension loading errors from the resource loader as extension statuses.
-	 *
-	 * During createAgentSession(), extensions that FAIL to load (e.g., native module ABI
-	 * mismatch) are caught by loadExtension() and stored in the resource loader's
-	 * extensionsResult.errors array. These errors never reach setStatus() because the
-	 * no-op UI context is active at that point.
-	 *
-	 * This method reads those errors and creates status entries so they appear in the
-	 * ActivityBar alongside normal extension statuses.
-	 */
-	private forwardExtensionLoadingErrors(): void {
-		if (!this.session) return;
-
-		try {
-			const rl = this.session.resourceLoader;
-			if (!rl) return;
-
-			const er = rl.getExtensions();
-			if (!er.errors || er.errors.length === 0) return;
-
-			for (const err of er.errors) {
-				if (!err.path || !err.error) continue;
-				const errKey = `ext:error:${err.path}`;
-				if (this.extensionStatuses.has(errKey)) continue;
-
-				const rawError = err.error as unknown;
-				const errorText =
-					typeof rawError === "string"
-						? rawError
-						: rawError instanceof Error
-							? rawError.message
-							: String(rawError);
-				// Truncate long load errors to first 200 chars
-				const displayText =
-					errorText.length > 200 ? errorText.slice(0, 200) + "…" : errorText;
-
-				this.extensionStatuses.set(errKey, displayText);
-				this.notifyWebview({
-					type: "extension-status",
-					data: { key: errKey, text: displayText },
-				});
-			}
-		} catch (e) {
-			this.logDebug("[PI] Failed to forward extension loading errors:", e);
-		}
-	}
-
 	private notifyWebview(message: { type: string; data?: unknown }) {
 		if (this.view) {
 			this.view.webview.postMessage(message);
@@ -2335,158 +1634,22 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.sessionResources.getProjectContext();
 	}
 
-	/** Enrich installed packages with description, version, types, and per-package resources from the resource loader. */
-	private enrichPackages(packages: InstalledPackage[]): EnrichedPackage[] {
-		const rl = this.session?.resourceLoader;
-		let skills: Skill[] = [];
-		let extensions: Extension[] = [];
-		let prompts: PromptTemplate[] = [];
-		if (rl) {
-			try {
-				skills = rl.getSkills().skills || [];
-			} catch {
-				skills = [];
-			}
-			try {
-				extensions = rl.getExtensions().extensions || [];
-			} catch {
-				extensions = [];
-			}
-			try {
-				prompts = rl.getPrompts().prompts || [];
-			} catch {
-				prompts = [];
-			}
-		}
+	// Package methods delegated to packageManager
 
-		return packages.map((pkg) => {
-			const manifest = readPackageManifest(pkg.path);
-
-			// Match resource sourceInfo.source to this package's source string
-			const srcLower = pkg.source.toLowerCase();
-			const matchesSource = (sourceName: string | undefined) =>
-				sourceName?.toLowerCase() === srcLower;
-
-			const pkgSkills = skills
-				.filter((s) => matchesSource(s.sourceInfo?.source))
-				.map((s) => ({
-					name: s.name || "",
-					description: s.description || "",
-				}));
-
-			const pkgExtensions = extensions
-				.filter((e) => matchesSource(e.sourceInfo?.source))
-				.map((e) => ({
-					path: e.path || "",
-					sourceName: e.sourceInfo?.source || null,
-				}));
-
-			const pkgPrompts = prompts
-				.filter((p) => matchesSource(p.sourceInfo?.source))
-				.map((p) => ({
-					name: p.name || "",
-					description: p.description || "",
-				}));
-
-			const types: string[] = [];
-			if (pkgExtensions.length > 0) types.push("extensions");
-			if (pkgSkills.length > 0) types.push("skills");
-			if (pkgPrompts.length > 0) types.push("prompts");
-
-			return {
-				...pkg,
-				description: manifest.description,
-				version: manifest.version,
-				types,
-				skills: pkgSkills,
-				extensions: pkgExtensions,
-				prompts: pkgPrompts,
-			};
-		});
-	}
-
-	// Package management methods using CLI
 	async listPackages(): Promise<EnrichedPackage[]> {
-		this.logDebug("[PI] listPackages called");
-		const configuredPackages = this.getConfiguredPackages();
-		if (configuredPackages.length > 0) {
-			this.logDebug(
-				"[PI] listPackages: found configured packages:",
-				configuredPackages,
-			);
-			return this.enrichPackages(configuredPackages);
-		}
-
-		return this.enrichPackages(await this.listPackagesFromCli());
+		return this.packageManager.listPackages();
 	}
 
-	private spawnPackageCommand(args: string[]): ChildProcess {
-		const binaryPath = this.resolvedBinaryPath || findPiBinary();
-		// Use shell to resolve via PATH on all platforms when binaryPath is a simple name
-		if (binaryPath === "pi" || !path.isAbsolute(binaryPath)) {
-			return spawn(binaryPath, args, { shell: true });
-		}
-		// On non-Windows, use shell for better output streaming
-		if (process.platform !== "win32") {
-			const shellCommand = getShellCommand(binaryPath, args);
-			if (shellCommand) {
-				return spawn(shellCommand.command, shellCommand.args);
-			}
-		}
-		return spawn(binaryPath, args);
+	async installPackage(source: string): Promise<void> {
+		await this.packageManager.installPackage(source);
 	}
 
-	private async runPackageCommand(args: string[]): Promise<void> {
-		return new Promise((resolve, reject) => {
-			// Send loading start
-			this.notifyWebview({ type: "loading", data: { loading: true } });
-
-			const proc = this.spawnPackageCommand(args);
-
-			let output = "";
-			proc.stdout?.on("data", (chunk) => {
-				output += chunk.toString();
-				this.notifyWebview({
-					type: "output",
-					data: { text: chunk.toString() },
-				});
-			});
-			proc.stderr?.on("data", (chunk) => {
-				output += chunk.toString();
-				this.notifyWebview({
-					type: "output",
-					data: { text: chunk.toString() },
-				});
-			});
-
-			proc.on("close", (code) => {
-				// Send loading end
-				this.notifyWebview({ type: "loading", data: { loading: false } });
-				if (code === 0) {
-					this.notifyWebview({ type: "packages-updated" });
-					resolve();
-				} else {
-					reject(new Error(output || `Command failed with code ${code}`));
-				}
-			});
-
-			proc.on("error", (err) => {
-				this.notifyWebview({ type: "loading", data: { loading: false } });
-				reject(err);
-			});
-		});
+	async uninstallPackage(source: string): Promise<void> {
+		await this.packageManager.uninstallPackage(source);
 	}
 
-	async installPackage(source: string) {
-		await this.runPackageCommand(["install", source]);
-	}
-
-	async uninstallPackage(source: string) {
-		await this.runPackageCommand(["remove", source]);
-	}
-
-	async updatePackages() {
-		await this.runPackageCommand(["update"]);
+	async updatePackages(): Promise<void> {
+		await this.packageManager.updatePackages();
 	}
 
 	async cycleModel() {
@@ -2598,8 +1761,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	dispose() {
-		this.stopStatusPoller();
-		this.stopGitBranchPoller();
+		this.extensionUIContext.stopStatusPoller();
+		this.footerManager.stop();
 		this.extensionStatuses.clear();
 		this._onDidChangeTreeData.dispose();
 		if (this.session) {
@@ -2609,109 +1772,4 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 }
 
-// ── Auto-naming helpers ──────────────────────────────────────────────────────
-
-/**
- * Extract text content from an AgentMessage, handling both string content
- * and structured content arrays (TextContent | ImageContent).
- */
-export function extractTextFromMessage(msg: {
-	role: string;
-	content: string | Array<{ type: string; text?: string }> | null;
-}): string {
-	if (!msg.content) return "";
-	if (typeof msg.content === "string") return msg.content;
-	return msg.content
-		.filter(
-			(c): c is { type: string; text: string } =>
-				c.type === "text" && typeof c.text === "string",
-		)
-		.map((c) => c.text)
-		.join(" ");
-}
-
-/**
- * Generate a concise, descriptive session name (≤60 chars) from the first
- * user and assistant messages in a conversation.
- *
- * Prioritises the assistant's first substantive line because it tends to
- * summarise the task more naturally. Falls back to the first user message.
- */
-export function generateSessionName(
-	userText: string,
-	assistantText: string,
-): string {
-	const clean = (text: string): string =>
-		text
-			.replace(/```[\s\S]*?```/g, "")
-			.replace(/`[^`]*`/g, "")
-			.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-			.replace(/^#+\s*/gm, "")
-			.replace(/[*_~>]/g, "")
-			.trim();
-
-	const capitalize = (s: string): string =>
-		s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-
-	const truncate = (s: string, max = 55): string => {
-		if (s.length <= max) return s;
-		const lastSpace = s.slice(0, max).lastIndexOf(" ");
-		const cut = lastSpace > 10 ? s.slice(0, lastSpace) : s.slice(0, max);
-		return capitalize(cut.trim());
-	};
-
-	const cleanAssistant = clean(assistantText);
-	const cleanUser = clean(userText);
-
-	// 1 — Try the assistant's first substantive line (best signal)
-	if (cleanAssistant) {
-		const lines = cleanAssistant
-			.split("\n")
-			.map((l) => l.trim())
-			.filter((l) => l.length > 5 && !l.startsWith("```"));
-
-		if (lines.length > 0) {
-			// Remove polite conversational prefixes
-			const stripped = lines[0]
-				.replace(
-					/^(I'?ll\s|Let me\s|I can\s|I will\s|I'm going to\s|Here's\s|Here is\s)/i,
-					"",
-				)
-				.trim();
-			const sentence = stripped.split(/[.!?\n]/)[0]?.trim() || stripped;
-			if (sentence.length > 3 && sentence.length < 60) {
-				return capitalize(sentence);
-			}
-			// Long sentence — take the first key phrase
-			const keyPhrase = truncate(sentence, 55);
-			if (keyPhrase.length < sentence.length) {
-				return keyPhrase + "…";
-			}
-			return keyPhrase;
-		}
-	}
-
-	// 2 — Fall back to the first user message
-	if (!cleanUser) return "";
-	if (cleanUser.length < 60) {
-		return capitalize(cleanUser);
-	}
-
-	// 3 — First sentence of user message
-	const firstSentence = cleanUser.split(/[.!?\n]/)[0]?.trim();
-	if (firstSentence) {
-		if (firstSentence.length < 60) {
-			return capitalize(firstSentence);
-		}
-		const truncated = truncate(firstSentence, 55);
-		return truncated.length < firstSentence.length
-			? truncated + "…"
-			: capitalize(truncated);
-	}
-
-	// 4 — Last resort: truncated user text
-	const truncated = truncate(cleanUser, 55);
-	return truncated.length < cleanUser.length
-		? truncated + "…"
-		: capitalize(truncated);
-}
+// Auto-naming helpers are now in session-manager.ts

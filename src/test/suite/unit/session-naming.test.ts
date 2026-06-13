@@ -2,7 +2,7 @@ import * as assert from "assert";
 import {
 	extractTextFromMessage,
 	generateSessionName,
-} from "../../../pi-agent-provider.js";
+} from "../../../session-manager.js";
 
 suite("Session naming helpers", () => {
 	test("extractTextFromMessage joins text blocks", () => {
