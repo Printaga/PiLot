@@ -819,11 +819,10 @@ import { tick } from "svelte";
         </div>
       {/if}
     {/if}
-  </div>
 
-  {#if showScrollBtn}
     <button
       class="scroll-bottom-btn"
+      class:visible={showScrollBtn}
       onclick={scrollToBottom}
       title="Scroll to bottom"
     >
@@ -838,7 +837,7 @@ import { tick } from "svelte";
         <polyline points="6 9 12 15 18 9" />
       </svg>
     </button>
-  {/if}
+  </div>
 
   <div
     class="input-container"
@@ -1877,24 +1876,33 @@ import { tick } from "svelte";
   }
 
   .scroll-bottom-btn {
-    position: absolute;
-    bottom: calc(var(--space-16) + var(--space-4));
+    position: sticky;
+    bottom: var(--space-3);
     left: 50%;
     transform: translateX(-50%);
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     background: var(--color-surface);
     border: 2px solid var(--color-primary);
     border-radius: 0;
     color: var(--color-primary);
     box-shadow: 4px 4px 0px rgba(0, 0, 0, 1);
     z-index: 15;
+    margin: 0 auto;
+    flex-shrink: 0;
     transition: all var(--transition-fast);
+    opacity: 0;
+    pointer-events: none;
+    align-self: center;
+  }
+  .scroll-bottom-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
   }
   .scroll-bottom-btn:hover {
     background: var(--color-primary);
     color: var(--color-text-inverse);
-    transform: translateX(-50%) translate(-2px, -2px);
+    transform: translateX(-50%) translateY(-2px);
     box-shadow: 6px 6px 0px rgba(0, 0, 0, 1);
   }
 </style>

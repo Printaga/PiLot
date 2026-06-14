@@ -2,7 +2,7 @@
   "name": "pilots-studio",
   "displayName": "PiLot Studio",
   "description": "A visual VS Code interface for the Pi AI coding agent. Run and manage Pi CLI workflows directly inside your editor.",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "publisher": "PrintagaPublishingLLC",
   "license": "Apache-2.0",
   "icon": "media/icon.png",

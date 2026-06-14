@@ -9,6 +9,9 @@
     sourceType: "local" | "package" | "built-in";
   }
 
+  // Props — sessionResources passed from parent App.svelte
+  let { sessionResources = null }: { sessionResources?: any } = $props();
+
   // State
   let skills = $state<SkillInfo[]>([]);
   let isLoading = $state(false);
@@ -54,6 +57,25 @@
       isLoading = false;
     }, 2000);
   }
+
+  // Apply skills from sessionResources prop (initial load + updates from parent)
+  function applySessionResources(data: any) {
+    if (data?.skills) {
+      skills = data.skills.map((s: any) => ({
+        name: s.name,
+        description: s.description || "",
+        sourceName: s.sourceName || null,
+        path: s.path || "",
+        sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
+      }));
+      isLoading = false;
+    }
+  }
+
+  // React to prop changes — when parent updates sessionResources, apply them
+  $effect(() => {
+    applySessionResources(sessionResources);
+  });
 
   function removeSkillPackage(skill: SkillInfo) {
     if (skill.sourceName) {
@@ -106,7 +128,7 @@
     expandedSkill = expandedSkill === skill.name ? null : skill.name;
   }
 
-  // Handle messages from extension
+  // Handle messages from extension (fallback for mid-session updates)
   $effect(() => {
     const vscode = getVsCodeApi();
     if (!vscode) return;

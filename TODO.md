@@ -1,5 +1,4 @@
 - Support for opening config files
-- GUI skill management
 - GUI rules management
 - GUI fork support
 - GUI MCP support

@@ -1266,7 +1266,7 @@ case "provider-auth":
       {:else if activeTab === "packages"}
         <PiPackagesPanel />
       {:else if activeTab === "skills"}
-        <SkillsPanel />
+        <SkillsPanel {sessionResources} />
       {:else}
         <SettingsPanel
           {autoContext}

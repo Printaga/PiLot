@@ -2,11 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [2.1.0] - Unreleased
 
 ### Added
 
 - Add dedicated Skills tab in the PiLot Studio sidebar for managing PI CLI skills
+- Add scroll to bottom button in the chat window for quick access
 
 ### Changed
 
