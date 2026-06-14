@@ -6,6 +6,8 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
+- Add dedicated Skills tab in the PiLot Studio sidebar for managing PI CLI skills
+
 ### Changed
 
 - Refactored PiAgentProvider (2719 → 1779 lines) by extracting 6 modules: BinaryService, FooterManager, ExtensionUIContext, ModelRegistryHandler, PackageManager, SessionListManager

@@ -851,6 +851,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					skills: skills.map((s: any) => ({
 						name: s.name,
 						description: s.description,
+						sourceName: s.sourceInfo?.name || null,
+						path: s.path || "",
+						sourceType: s.sourceInfo
+							? "package"
+							: s.path?.includes("/.pi/")
+								? "local"
+								: "built-in",
 					})),
 					skillCount: skills.length,
 					extensions: extensions.map((e: any) => ({
@@ -1650,6 +1657,81 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async updatePackages(): Promise<void> {
 		await this.packageManager.updatePackages();
+	}
+
+	// Skill methods
+
+	async getAllSkills(): Promise<
+		Array<{
+			name: string;
+			description: string;
+			sourceName: string | null;
+			path: string;
+			sourceType: string;
+		}>
+	> {
+		if (!this.session) return [];
+		try {
+			const rl = this.session.resourceLoader;
+			if (!rl) return [];
+			const sr = rl.getSkills();
+			const skills = sr.skills || [];
+			return skills.map((s: any) => ({
+				name: s.name,
+				description: s.description || "",
+				sourceName: s.sourceInfo?.name || null,
+				path: s.path || "",
+				sourceType: s.sourceInfo
+					? "package"
+					: s.path?.includes("/.pi/")
+						? "local"
+						: "built-in",
+			}));
+		} catch {
+			return [];
+		}
+	}
+
+	sendSkillsList(): Promise<void> {
+		return this.getAllSkills().then((skills) => {
+			this.notifyWebview({
+				type: "skills-list",
+				data: { skills },
+			});
+		});
+	}
+
+	getSkillDiscovery(): boolean {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		return !config.get<boolean>("disableSkillDiscovery", false);
+	}
+
+	setSkillDiscovery(enabled: boolean): void {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		config
+			.update(
+				"disableSkillDiscovery",
+				!enabled,
+				vscode.ConfigurationTarget.Global,
+			)
+			.then(() => {
+				this.reloadSessionResources();
+			});
+	}
+
+	async setExtraSkillPaths(paths: string[]): Promise<void> {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		await config.update(
+			"extraSkills",
+			paths,
+			vscode.ConfigurationTarget.Global,
+		);
+		await this.reloadSessionResources();
+	}
+
+	getExtraSkillPaths(): string[] {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		return config.get<string[]>("extraSkills", []);
 	}
 
 	async cycleModel() {

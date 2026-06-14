@@ -4,8 +4,9 @@
   import ModelSelector from "./components/ModelSelector.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import ToolsPanel from "./components/ToolsPanel.svelte";
-  import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
-  import ProviderSettings from "./components/ProviderSettings.svelte";
+import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
+import SkillsPanel from "./components/SkillsPanel.svelte";
+import ProviderSettings from "./components/ProviderSettings.svelte";
   import Header from "./components/Header.svelte";
   import Toast from "./components/Toast.svelte";
   import OnboardingTour from "./components/OnboardingTour.svelte";
@@ -17,7 +18,7 @@
     Model,
   } from "./types/index";
 
-  let activeTab = $state<
+let activeTab = $state<
     | "chat"
     | "sessions"
     | "models"
@@ -25,7 +26,8 @@
     | "tools"
     | "settings"
     | "packages"
-  >("chat");
+    | "skills"
+>("chat");
   let messages = $state<Message[]>([]);
   let isStreaming = $state(false);
   let draftInputText = $state("");
@@ -178,15 +180,19 @@ let isListening = $state(false);
           activeTab = "tools";
           e.preventDefault();
           break;
-        case "6":
-          activeTab = "packages";
-          e.preventDefault();
-          break;
-        case "7":
-          activeTab = "settings";
-          e.preventDefault();
-          break;
-      }
+		case "6":
+			activeTab = "packages";
+			e.preventDefault();
+			break;
+		case "7":
+			activeTab = "skills";
+			e.preventDefault();
+			break;
+		case "8":
+			activeTab = "settings";
+			e.preventDefault();
+			break;
+		}
     }
 
     window.addEventListener("keydown", handleKeydown);
@@ -1165,13 +1171,32 @@ case "provider-auth":
             />
           </svg>
         </button>
+
+        <button
+          onclick={() => (activeTab = "skills")}
+          class:active={activeTab === "skills"}
+          title="Skills (7)"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+            />
+          </svg>
+        </button>
       </div>
 
       <div class="nav-footer">
         <button
           onclick={() => (activeTab = "settings")}
           class:active={activeTab === "settings"}
-          title="Preferences (7)"
+          title="Preferences (8)"
         >
           <svg
             width="18"
@@ -1240,6 +1265,8 @@ case "provider-auth":
         <ToolsPanel toolPreset={toolPreset} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel />
+      {:else if activeTab === "skills"}
+        <SkillsPanel />
       {:else}
         <SettingsPanel
           {autoContext}

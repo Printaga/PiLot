@@ -92,5 +92,22 @@ export interface ProviderApi {
 	deleteSessions(sessionIds: string[]): Promise<void>;
 	editMessage(index: number, text: string): Promise<void>;
 	getSettings(): Promise<{ toolPreset: string; customTools: string[] }>;
-	setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void>;
+	setToolConfig(config: {
+		toolPreset: string;
+		customTools?: string[];
+	}): Promise<void>;
+	getAllSkills(): Promise<
+		Array<{
+			name: string;
+			description: string;
+			sourceName: string | null;
+			path: string;
+			sourceType: string;
+		}>
+	>;
+	sendSkillsList(): Promise<void>;
+	getSkillDiscovery(): boolean;
+	setSkillDiscovery(enabled: boolean): void;
+	setExtraSkillPaths(paths: string[]): Promise<void>;
+	getExtraSkillPaths(): string[];
 }

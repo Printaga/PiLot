@@ -292,6 +292,40 @@ export class MessageHandler {
 					await this.provider.sendSessionResources();
 					break;
 
+				case "getSkills":
+					await this.provider.sendSkillsList();
+					break;
+
+				case "getSkillDiscovery": {
+					const enabled = this.provider.getSkillDiscovery();
+					this.provider.webview?.postMessage({
+						type: "skill-discovery-changed",
+						data: { enabled },
+					});
+					result = enabled;
+					break;
+				}
+
+				case "setSkillDiscovery":
+					this.provider.setSkillDiscovery(message.data.enabled);
+					result = { success: true };
+					break;
+
+				case "setExtraSkillPaths":
+					await this.provider.setExtraSkillPaths(message.data.paths);
+					result = { success: true };
+					break;
+
+				case "getExtraSkillPaths": {
+					const paths = this.provider.getExtraSkillPaths();
+					this.provider.webview?.postMessage({
+						type: "extra-skill-paths",
+						data: { paths },
+					});
+					result = paths;
+					break;
+				}
+
 				case "getAutoCompactionStatus":
 					result = this.provider.getAutoCompactionEnabled();
 					break;
@@ -530,7 +564,10 @@ export class MessageHandler {
 					try {
 						await this.provider.setToolConfig(message.data);
 						result = { success: true };
-						this.sendSettingsResponse({ toolPreset: message.data.toolPreset, customTools: message.data.customTools });
+						this.sendSettingsResponse({
+							toolPreset: message.data.toolPreset,
+							customTools: message.data.customTools,
+						});
 					} catch (error) {
 						this.provider.webview?.postMessage({
 							type: "error",
