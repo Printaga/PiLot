@@ -4,21 +4,28 @@ import * as fsSync from "node:fs";
 import { execFileAsync } from "./utils/shell.js";
 import { findPiBinary, resolvePiBinary } from "./pi-binary.js";
 
+export interface BinaryServiceDeps {
+	logDebug: (msg: string, ...details: unknown[]) => void;
+	logError: (msg: string, error?: unknown) => void;
+}
+
 export class BinaryService {
 	private resolvedBinaryPath: string | null = null;
 	private cachedVersion: string | null = null;
 	private pathResolved = false;
+
+	constructor(private readonly deps: BinaryServiceDeps) {}
 
 	resolveAtStartup(): void {
 		if (this.pathResolved) return;
 		this.resolvedBinaryPath = resolvePiBinary();
 		this.pathResolved = true;
 		if (this.resolvedBinaryPath) {
-			this.log(`Resolved pi binary: ${this.resolvedBinaryPath}`);
+			this.deps.logDebug(`Resolved pi binary: ${this.resolvedBinaryPath}`);
 		} else {
 			const msg =
 				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.";
-			this.logError(msg);
+			this.deps.logError(msg);
 			vscode.window.showErrorMessage(msg);
 		}
 	}
@@ -46,7 +53,7 @@ export class BinaryService {
 			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
 			if (result.code === 0 && versionOutput) {
 				this.cachedVersion = versionOutput;
-				this.log(`Resolved PI CLI version: ${this.cachedVersion}`);
+				this.deps.logDebug(`Resolved PI CLI version: ${this.cachedVersion}`);
 				return this.cachedVersion;
 			}
 		} catch {
@@ -107,13 +114,5 @@ export class BinaryService {
 		} catch {
 			return null;
 		}
-	}
-
-	private log(msg: string): void {
-		console.log(msg);
-	}
-
-	private logError(msg: string): void {
-		console.error(msg);
 	}
 }

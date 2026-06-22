@@ -81,7 +81,7 @@ export class PiAgentProvider
 	private modelRegistry?: ModelRegistry;
 	private sessionManager?: SessionManager;
 	private settingsManager?: SettingsManager;
-	private binaryService = new BinaryService();
+	private binaryService!: BinaryService;
 	private footerManager!: FooterManager;
 	private extensionUIContext!: ExtensionUIContext;
 	private modelRegistryHandler!: ModelRegistryHandler;
@@ -114,6 +114,10 @@ export class PiAgentProvider
 	) {
 		this.config = config;
 		this.logChannel = vscode.window.createOutputChannel("PiLot Studio");
+		this.binaryService = new BinaryService({
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+		});
 		this.messageHandler = new MessageHandler(this);
 		this.footerManager = new FooterManager(this.binaryService, (msg) =>
 			this.notifyWebview(msg),
