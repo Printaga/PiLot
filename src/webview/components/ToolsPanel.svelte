@@ -33,11 +33,6 @@
 
 
 	onMount(() => {
-		// Request session resources to sync
-		const vscode = (window as any).vscode;
-		if (vscode?.postMessage) {
-			vscode.postMessage({ type: 'getSessionResources' });
-		}
 		// Read current tool preset from VS Code settings
 		fetchToolPreset();
 	});

@@ -27,7 +27,10 @@ export function shellQuote(arg: string): string {
 }
 
 /** Build a shell command object for spawning pi via shell (Unix only). */
-export function getShellCommand(binaryPath: string, args: string[]): { command: string; args: string[] } | null {
+export function getShellCommand(
+	binaryPath: string,
+	args: string[],
+): { command: string; args: string[] } | null {
 	if (process.platform === "win32") {
 		return null;
 	}
@@ -39,23 +42,51 @@ export function getShellCommand(binaryPath: string, args: string[]): { command: 
 	return { command: shell, args: ["-lc", command] };
 }
 
-/** Execute a command via execFile with shell: true and return a CommandResult promise */
+/** Execute a command via execFile with shell: true and return a CommandResult promise.
+ * Times out after the specified duration (default 15s) to prevent indefinite hangs. */
 export function execFileAsync(
 	command: string,
 	args: string[],
+	timeoutMs = 15_000,
 ): Promise<CommandResult> {
 	return new Promise((resolve) => {
-		execFile(command, args, { shell: true }, (error, stdout, stderr) => {
+		let settled = false;
+		const child = execFile(
+			command,
+			args,
+			{ shell: true },
+			(error, stdout, stderr) => {
+				if (settled) return;
+				settled = true;
+				resolve({
+					code:
+						error && "code" in error && typeof error.code === "number"
+							? error.code
+							: error
+								? 1
+								: 0,
+					stdout: stdout || "",
+					stderr: stderr || "",
+				});
+			},
+		);
+
+		const timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			try {
+				child.kill();
+			} catch {
+				/* already dead */
+			}
 			resolve({
-				code:
-					error && "code" in error && typeof error.code === "number"
-						? error.code
-						: error
-							? 1
-							: 0,
-				stdout: stdout || "",
-				stderr: stderr || "",
+				code: 1,
+				stdout: "",
+				stderr: `Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`,
 			});
-		});
+		}, timeoutMs);
+
+		// Clear timer if command finishes before timeout
+		child.on?.("close", () => clearTimeout(timer));
 	});
 }

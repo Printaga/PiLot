@@ -825,8 +825,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					version: ext.packageJSON?.version || "",
 				}));
 
-			// Collect currently installed PI packages
-			const installedPkgs = await this.packageManager.listPackages();
+			// Collect currently installed PI packages (with timeout to prevent blocking)
+			let installedPkgs: any[] = [];
+			try {
+				installedPkgs = await Promise.race([
+					this.packageManager.listPackages(),
+					new Promise<any[]>((resolve) =>
+						setTimeout(() => resolve([]), 15_000),
+					),
+				]);
+			} catch {
+				this.logError(
+					"[PI] sendSessionResources listPackages failed, using empty list",
+				);
+			}
 
 			this.logDebug(
 				"[PI] sendSessionResources cwd:",
