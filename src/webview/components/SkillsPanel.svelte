@@ -20,6 +20,8 @@
   let outputText = $state("");
   let expandedSkill = $state<string | null>(null);
   let skillDiscoveryEnabled = $state(true);
+  let extraSkillPaths = $state<string[]>([]);
+  let newSkillPath = $state('');
 
   // Derived: filtered installed skills
   let filteredSkills = $derived(
@@ -96,6 +98,19 @@
     });
   }
 
+  function addSkillPath() {
+    const trimmed = newSkillPath.trim();
+    if (!trimmed || extraSkillPaths.includes(trimmed)) return;
+    extraSkillPaths = [...extraSkillPaths, trimmed];
+    newSkillPath = '';
+    sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
+  }
+
+  function removeSkillPath(index: number) {
+    extraSkillPaths = extraSkillPaths.filter((_, i) => i !== index);
+    sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
+  }
+
   function sourceTypeBadge(type: string): string {
     switch (type) {
       case "local":
@@ -160,6 +175,9 @@
       if (type === "skill-discovery-changed") {
         skillDiscoveryEnabled = data?.enabled !== false;
       }
+      if (type === 'extra-skill-paths') {
+        extraSkillPaths = data?.paths || [];
+      }
       if (type === "loading") {
         showLoadingOverlay = data?.loading;
         if (!data?.loading) {
@@ -180,6 +198,7 @@
     sendMessage({ type: "getSkills" });
     sendMessage({ type: "getSessionResources" });
     sendMessage({ type: "getSkillDiscovery" });
+    sendMessage({ type: 'getExtraSkillPaths' });
   });
 </script>
 
@@ -233,7 +252,7 @@
           <p class="empty-desc">
             Skills provide specialized agent instructions. Install a PI package
             that contains skills via the <strong>Packages</strong> tab, or add
-            skill paths in <strong>Settings</strong>.
+            skill paths below.
           </p>
         {:else}
           <p class="empty-title">No skills match "{searchQuery}"</p>
@@ -297,9 +316,36 @@
   <div class="footer">
     <p class="footer-hint">
       Install skill packages via the <strong>Packages</strong> tab, or
-      configure extra skill paths in <strong>Settings</strong>.
+      configure extra skill paths below.
     </p>
   </div>
+
+  <section class="skill-paths-section">
+    <h4>Skill Paths</h4>
+    <p class="section-desc">Additional local skill directories (paths to folders containing SKILL.md files)</p>
+
+    <div class="skill-paths-list">
+      {#each extraSkillPaths as path, i}
+        <div class="skill-path-item">
+          <span class="skill-path-text">{path}</span>
+          <button class="remove-path-btn" onclick={() => removeSkillPath(i)} title="Remove path">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      {/each}
+    </div>
+    <div class="add-path-form">
+      <input
+        type="text"
+        placeholder="/path/to/skill/directory"
+        bind:value={newSkillPath}
+        onkeydown={(e) => e.key === 'Enter' && addSkillPath()}
+      />
+      <button class="add-path-btn" onclick={addSkillPath} disabled={!newSkillPath.trim()}>Add</button>
+    </div>
+  </section>
 </div>
 
 {#if showLoadingOverlay}
@@ -605,6 +651,96 @@
     color: var(--color-text-muted);
     line-height: 1.4;
     margin: 0;
+  }
+
+  .skill-paths-section {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .skill-paths-section h4 {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .section-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin: 0 0 var(--space-1) 0;
+  }
+
+  .skill-paths-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .skill-path-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .skill-path-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text);
+    word-break: break-all;
+  }
+
+  .remove-path-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    opacity: 0.4;
+    background: none;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .remove-path-btn:hover {
+    opacity: 1;
+    color: var(--color-error);
+    background: oklch(from var(--color-error) l c h / 0.1);
+  }
+
+  .add-path-form {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .add-path-form input {
+    flex: 1;
+    font-size: var(--text-xs);
+  }
+
+  .add-path-btn {
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-primary);
+    color: var(--color-text-inverse);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .add-path-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
   }
 
   .loading-overlay {

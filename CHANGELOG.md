@@ -22,6 +22,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Fixed
 
 - Fixed BinaryService.log() using user-facing notifications instead of console logging
+- Fixed non-functional types filter for available packages
 - Added missing `getSettings` and `setToolConfig` message handlers in MessageHandler
 - Added missing `getSettings()` and `setToolConfig()` methods to PiAgentProvider for VS Code configuration integration
 - Fixed forkSession message to pass `fromNodeId` instead of `sessionId` parameter

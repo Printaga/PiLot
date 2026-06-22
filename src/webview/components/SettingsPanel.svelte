@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import HelpTooltip from './HelpTooltip.svelte';
 
 	interface Props {
@@ -12,33 +11,7 @@
 
 	let { autoContext, appVersion, thinkingLevel, onAutoContextChange, onThinkingLevelChange }: Props = $props();
 
-	let extraSkillPaths = $state<string[]>([]);
-	let newSkillPath = $state('');
-
 	const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-
-	function getVsCodeApi() {
-		const existing = (window as any).vscode;
-		if (existing?.postMessage) return existing;
-		return null;
-	}
-
-	function sendMessage(msg: any) {
-		getVsCodeApi()?.postMessage(msg);
-	}
-
-	function addSkillPath() {
-		const trimmed = newSkillPath.trim();
-		if (!trimmed || extraSkillPaths.includes(trimmed)) return;
-		extraSkillPaths = [...extraSkillPaths, trimmed];
-		newSkillPath = '';
-		sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
-	}
-
-	function removeSkillPath(index: number) {
-		extraSkillPaths = extraSkillPaths.filter((_, i) => i !== index);
-		sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
-	}
 
 	function handleThinkingLevelChange(level: string) {
 		onThinkingLevelChange(level);
@@ -53,18 +26,7 @@
 		window.dispatchEvent(new CustomEvent('show-tour'));
 	}
 
-	onMount(() => {
-		sendMessage({ type: 'getExtraSkillPaths' });
 
-		function handleMessage(event: MessageEvent) {
-			const { type, data } = event.data;
-			if (type === 'extra-skill-paths') {
-				extraSkillPaths = data?.paths || [];
-			}
-		}
-		window.addEventListener('message', handleMessage);
-		return () => window.removeEventListener('message', handleMessage);
-	});
 </script>
 
 <div class="settings-panel">
@@ -138,36 +100,6 @@
 						</span>
 					</button>
 				{/each}
-			</div>
-		</section>
-
-		<section class="settings-section">
-			<h4>Skill Paths</h4>
-			<div class="setting-header-row">
-				<p class="section-description">Additional local skill directories to load (paths to folders containing SKILL.md files)</p>
-				<HelpTooltip text="Add local skill paths here. Each path should point to a directory containing a SKILL.md file. Changes take effect after session reload." title="Extra Skill Paths" />
-			</div>
-
-			<div class="skill-paths-list">
-				{#each extraSkillPaths as path, i}
-					<div class="skill-path-item">
-						<span class="skill-path-text">{path}</span>
-						<button class="remove-path-btn" onclick={() => removeSkillPath(i)} title="Remove path">
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-								<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-							</svg>
-					</button>
-				</div>
-			{/each}
-			</div>
-			<div class="add-path-form">
-				<input
-					type="text"
-					placeholder="/path/to/skill/directory"
-					bind:value={newSkillPath}
-					onkeydown={(e) => e.key === 'Enter' && addSkillPath()}
-				/>
-				<button class="add-btn" onclick={addSkillPath} disabled={!newSkillPath.trim()}>Add</button>
 			</div>
 		</section>
 
@@ -378,34 +310,6 @@
 	.thinking-option.selected { border-color: var(--color-primary); background: color-mix(in oklch, var(--color-primary) 10%, transparent); }
 	.level-name { font-weight: 500; font-size: var(--text-sm); text-transform: capitalize; }
 	.level-description { font-size: var(--text-xs); color: var(--color-text-muted); }
-
-	.skill-paths-list { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-2); }
-
-	.skill-path-item {
-		display: flex; justify-content: space-between; align-items: center;
-		padding: var(--space-2) var(--space-3); background: var(--color-surface);
-		border: 1px solid var(--color-border); border-radius: var(--radius-md);
-	}
-
-	.skill-path-text { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text); word-break: break-all; }
-
-	.remove-path-btn {
-		width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-		border-radius: var(--radius-sm); color: var(--color-text-muted); opacity: 0.4; background: none; border: none; cursor: pointer;
-	}
-
-	.remove-path-btn:hover { opacity: 1; color: var(--color-error); background: oklch(from var(--color-error) l c h / 0.1); }
-
-	.add-path-form { display: flex; gap: var(--space-2); }
-
-	.add-path-form input { flex: 1; font-size: var(--text-xs); }
-
-	.add-btn {
-		padding: var(--space-2) var(--space-3); background: var(--color-primary); color: var(--color-text-inverse);
-		border: none; border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 600; cursor: pointer;
-	}
-
-	.add-btn:hover:not(:disabled) { filter: brightness(1.1); }
 
 	.shortcut-list { display: flex; flex-direction: column; gap: var(--space-1); }
 

@@ -103,7 +103,17 @@
     return parts.join(" · ");
   }
 
-async function fetchMarketplacePackages() {
+// Extract types from a package's full manifest (pi field)
+  function extractPiTypes(manifest: any): string[] {
+    const types: string[] = [];
+    if (manifest.pi?.extensions?.length) types.push("extensions");
+    if (manifest.pi?.skills?.length) types.push("skills");
+    if (manifest.pi?.prompts?.length) types.push("prompts");
+    if (manifest.pi?.themes?.length) types.push("themes");
+    return types.length > 0 ? types : [];
+  }
+
+  async function fetchMarketplacePackages() {
     marketplaceLoading = true;
     marketplaceError = null;
     try {
@@ -111,28 +121,45 @@ async function fetchMarketplacePackages() {
         "https://registry.npmjs.org/-/v1/search?text=keywords:pi-package&size=250",
       );
       const data = await res.json();
-      const packages = (data.objects || []).map((o: any) => {
-        // Detect all available types
-        const types: string[] = [];
-        if (o.package.pi?.extensions?.length) types.push("extensions");
-        if (o.package.pi?.skills?.length) types.push("skills");
-        if (o.package.pi?.prompts?.length) types.push("prompts");
-        if (o.package.pi?.themes?.length) types.push("themes");
+      const searchResults: any[] = data.objects || [];
 
-        return {
-          name: o.package.name,
-          description: o.package.description || "",
-          version: o.package.version || "",
-          publisher:
-            o.package.publisher?.username || o.package.author?.name || "",
-          monthlyDownloads: o.downloads?.monthly || 0,
-          flagged: false,
-          types: types.length > 0 ? types : ["unknown"],
-          updated: o.package.date || "",
-        } as MarketplacePackage;
-      });
+      // Build initial packages with unknown types from search results
+      const packages: MarketplacePackage[] = searchResults.map((o: any) => ({
+        name: o.package.name,
+        description: o.package.description || "",
+        version: o.package.version || "",
+        publisher:
+          o.package.publisher?.username || o.package.author?.name || "",
+        monthlyDownloads: o.downloads?.monthly || 0,
+        flagged: false,
+        types: ["unknown"],
+        updated: o.package.date || "",
+      }));
 
       marketplacePackages = packages;
+
+      // Fetch full manifests in batches to extract actual pi types.
+      // The npm search API does not include the pi object —
+      // only the full package manifest has extensions/skills/prompts/themes.
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < packages.length; i += BATCH_SIZE) {
+        const batch = packages.slice(i, i + BATCH_SIZE);
+        const manifests = await Promise.all(
+          batch.map((pkg) =>
+            fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`)
+              .then((r) => r.json())
+              .catch(() => ({}))
+          ),
+        );
+        for (let j = 0; j < batch.length; j++) {
+          const types = extractPiTypes(manifests[j]);
+          if (types.length > 0) {
+            batch[j].types = types;
+          }
+        }
+        // Trigger reactivity after each batch
+        marketplacePackages = [...marketplacePackages];
+      }
     } catch (e) {
       console.error("Failed to fetch marketplace packages:", e);
       marketplaceError = e instanceof Error ? e.message : String(e);
