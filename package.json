@@ -52,31 +52,6 @@
     "pi developer",
     "pi coding cli"
   ],
-  "activationEvents": [
-    "onCommand:pi-agent.openPanel",
-    "onView:piAgentChat",
-    "onCommand:pi-agent.newSession",
-    "onCommand:pi-agent.switchModel",
-    "onCommand:pi-agent.cycleModel",
-    "onCommand:pi-agent.cycleThinkingLevel",
-    "onCommand:pi-agent.focusInput",
-    "onCommand:pi-agent.editLastMessage",
-    "onCommand:pi-agent.openSettings",
-    "onCommand:pi-agent.openCurrentSessionInEditor",
-    "onCommand:pi-agent.newChatInEditor",
-    "onCommand:pi-agent.toggleVoiceCapture",
-    "onCommand:pi-agent.addFileToChat",
-    "onCommand:pi-agent.attachFile",
-    "onCommand:pi-agent.listResources",
-    "onCommand:pi-agent.installResource",
-    "onCommand:pi-agent.removeResource",
-    "onCommand:pi-agent.updateResources",
-    "onCommand:pi-agent.manageResources",
-    "onCommand:pi-agent.showDiagnosticsLog",
-    "onCommand:pi-agent.checkForUpdates",
-    "onCommand:pi-agent.exportDiagnosticsLog",
-    "onCommand:pi-agent.rebuildNativeAddons"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Printaga/PiLot"
