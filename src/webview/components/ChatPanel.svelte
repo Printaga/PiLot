@@ -183,12 +183,7 @@ import { tick } from "svelte";
   );
   const skillsTitle = $derived(
     resources.skills.length > 0
-      ? resources.skills
-          .map(
-            (s, i) =>
-              `${i + 1}. ${s.name}${s.description ? ` — ${s.description}` : ""}`,
-          )
-          .join("\n")
+      ? resources.skills.map((s, i) => `${i + 1}. ${s.name}`).join("\n")
       : "No skills loaded",
   );
   const promptsTitle = $derived(
@@ -1236,6 +1231,8 @@ import { tick } from "svelte";
     padding: var(--space-1) var(--space-4);
     background: oklch(from var(--color-primary) l c h / 0.03);
     border-bottom: 1px solid oklch(from var(--color-border) l c h / 0.15);
+    position: relative;
+    z-index: 10;
   }
   .resources-header {
     font-size: 9px;

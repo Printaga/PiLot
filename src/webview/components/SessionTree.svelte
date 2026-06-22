@@ -155,8 +155,9 @@ function forkSession(id: string) {
 <div
   class="session-panel"
   onkeydown={handleKeydown}
-  role="list"
+  role="listbox"
   aria-label="Sessions"
+  aria-activedescendant={selectedNodeId ? `session-${selectedNodeId}` : undefined}
   tabindex="0"
 >
   <div class="session-header">
@@ -292,6 +293,8 @@ function forkSession(id: string) {
           class:active={activeSessionId === session.id}
           class:selected={selectedNodeId === session.id}
           class:selection-active={selectionMode}
+          aria-selected={selectedNodeId === session.id}
+          tabindex="-1"
           onclick={() => {
             if (selectionMode) {
               toggleSessionSelection(session.id);
@@ -309,8 +312,7 @@ function forkSession(id: string) {
             }
             if (e.key === "Delete" && e.ctrlKey) forkSession(session.id);
           }}
-          role="button"
-          tabindex="0"
+          role="option"
         >
           {#if selectionMode}
             <button

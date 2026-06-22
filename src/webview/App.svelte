@@ -1065,7 +1065,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "chat")}
           class:active={activeTab === "chat"}
-          title="Conversation (1)"
+          title="Conversation"
         >
           <svg
             width="18"
@@ -1084,7 +1084,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "sessions")}
           class:active={activeTab === "sessions"}
-          title="History (2)"
+          title="History"
         >
           <svg
             width="18"
@@ -1101,7 +1101,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "models")}
           class:active={activeTab === "models"}
-          title="Models (3)"
+          title="Models"
         >
           <svg
             width="18"
@@ -1120,7 +1120,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "providers")}
           class:active={activeTab === "providers"}
-          title="Provider Settings (4)"
+          title="Provider Settings"
         >
           <svg
             width="18"
@@ -1137,7 +1137,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "tools")}
           class:active={activeTab === "tools"}
-          title="Capabilities (5)"
+          title="Capabilities"
         >
           <svg
             width="18"
@@ -1156,7 +1156,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "packages")}
           class:active={activeTab === "packages"}
-          title="Packages (6)"
+          title="Packages"
         >
           <svg
             width="18"
@@ -1175,7 +1175,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "skills")}
           class:active={activeTab === "skills"}
-          title="Skills (7)"
+          title="Skills"
         >
           <svg
             width="18"
@@ -1196,7 +1196,7 @@ case "provider-auth":
         <button
           onclick={() => (activeTab = "settings")}
           class:active={activeTab === "settings"}
-          title="Preferences (8)"
+          title="Preferences"
         >
           <svg
             width="18"

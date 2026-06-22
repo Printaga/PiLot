@@ -6,7 +6,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
-- Add dedicated Skills tab in the PiLot Studio sidebar for managing PI CLI skills
+- Add dedicated Skills tab in the PiLot Studio sidebar for viewing PI CLI skills
 - Add scroll to bottom button in the chat window for quick access
 
 ### Changed
@@ -23,6 +23,8 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - Fixed BinaryService.log() using user-facing notifications instead of console logging
 - Fixed non-functional types filter for available packages
+- Fixed missing ARIA listbox pattern implementation
+- Fixed truncated skill tooltip in context section.
 - Added missing `getSettings` and `setToolConfig` message handlers in MessageHandler
 - Added missing `getSettings()` and `setToolConfig()` methods to PiAgentProvider for VS Code configuration integration
 - Fixed forkSession message to pass `fromNodeId` instead of `sessionId` parameter
