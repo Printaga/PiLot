@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount } from "svelte";
+
 	interface ToolDef {
 		name: string;
 		description: string;
@@ -31,28 +32,29 @@
 	let customToolsInput = $state('');
 	let isSynced = $state(false);
 
-
+	// Request initial settings on mount if parent hasn't passed a preset yet.
 	onMount(() => {
-		// Read current tool preset from VS Code settings
-		fetchToolPreset();
+		if (propPreset === null) {
+			const vscode = (window as any).vscode;
+			if (vscode?.postMessage) {
+				vscode.postMessage({ type: "getSettings" });
+			}
+		}
 	});
 
 	// Update internal state when prop changes
 	$effect(() => {
-		if (propPreset !== null) {
-			toolPreset = propPreset;
-			applyPreset(propPreset, false);
-			isSynced = true;
+		try {
+			if (propPreset !== null) {
+				toolPreset = propPreset;
+				applyPreset(propPreset, false);
+				isSynced = true;
+			}
+		} catch (e) {
+			console.error("[ToolsPanel] effect error:", e);
 		}
 	});
 
-	function fetchToolPreset() {
-		// Communicate with extension through VS Code API
-		const vscode = (window as any).vscode;
-		if (vscode?.postMessage) {
-			vscode.postMessage({ type: 'getSettings' });
-		}
-	}
 
 	function sendToolUpdate(msg: any) {
 		const vscode = (window as any).vscode;

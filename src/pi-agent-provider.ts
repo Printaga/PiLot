@@ -613,6 +613,16 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			);
 
 			if (this.session && sessionIds.includes(this.session.sessionId)) {
+				// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
+				// can kill their child processes before the runner is invalidated.
+				await this.session.extensionRunner
+					.emit({
+						type: "session_shutdown",
+						reason: "new",
+					})
+					.catch((e) => {
+						this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+					});
 				this.session.dispose();
 				this.session = undefined;
 				await this.newSession();
@@ -745,6 +755,17 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
+			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
+			// can kill their child processes before the runner is invalidated.
+			// Without this, lean-ctx processes accumulate across session switches.
+			await this.session.extensionRunner
+				.emit({
+					type: "session_shutdown",
+					reason: "new",
+				})
+				.catch((e) => {
+					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+				});
 			this.session.dispose();
 			this.session = undefined as any;
 		}
@@ -931,6 +952,16 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
+			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
+			// can kill their child processes before the runner is invalidated.
+			await this.session.extensionRunner
+				.emit({
+					type: "session_shutdown",
+					reason: "new",
+				})
+				.catch((e) => {
+					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+				});
 			this.session.dispose();
 			this.session = undefined;
 		}
@@ -1864,7 +1895,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.extensionStatuses.clear();
 		this._onDidChangeTreeData.dispose();
 		if (this.session) {
-			this.session.dispose();
+			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
+			// can kill their child processes before the runner is invalidated.
+			// Fire-and-forget via IIFE: vscode.Disposable requires synchronous dispose().
+			void (async () => {
+				try {
+					await this.session!.extensionRunner.emit({
+						type: "session_shutdown",
+						reason: "quit",
+					});
+				} catch (e) {
+					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+				}
+				this.session!.dispose();
+			})();
 		}
 		this.voiceManager.dispose();
 	}
