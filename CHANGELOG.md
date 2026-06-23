@@ -24,6 +24,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Fixed BinaryService using console.log/console.error instead of proper logging infrastructure; now accepts logDebug/logError callbacks like all other services
 - Fixed non-functional types filter for available packages
 - Fixed missing ARIA listbox pattern implementation
+- Clean up child processes on session shutdown
 - Fixed truncated skill tooltip in context section.
 - Added missing `getSettings` and `setToolConfig` message handlers in MessageHandler
 - Added missing `getSettings()` and `setToolConfig()` methods to PiAgentProvider for VS Code configuration integration

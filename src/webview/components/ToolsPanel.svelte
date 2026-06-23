@@ -5,7 +5,7 @@
 		name: string;
 		description: string;
 		enabled: boolean;
-		category: 'builtin';
+		category: 'builtin' | 'custom';
 		source?: string;
 	}
 
@@ -30,7 +30,9 @@
 	let activeTab = $state<'tools' | 'presets'>('tools');
 	let toolPreset = $state<string>('default');
 	let customToolsInput = $state('');
-	let isSynced = $state(false);
+
+	// Derive sync state from prop presence — no effect, no write, no re-render cycle.
+	const isSynced = $derived(propPreset !== null);
 
 	// Request initial settings on mount if parent hasn't passed a preset yet.
 	onMount(() => {
@@ -42,17 +44,12 @@
 		}
 	});
 
-	// Update internal state when prop changes
+	// Apply external preset changes. Only runs when propPreset actually differs
+	// from local toolPreset, so we never thrash on parent rerenders.
 	$effect(() => {
-		try {
-			if (propPreset !== null) {
-				toolPreset = propPreset;
-				applyPreset(propPreset, false);
-				isSynced = true;
-			}
-		} catch (e) {
-			console.error("[ToolsPanel] effect error:", e);
-		}
+		if (propPreset === null) return;
+		if (propPreset === toolPreset) return;
+		applyPreset(propPreset, false);
 	});
 
 
@@ -64,8 +61,9 @@
 	}
 
 	function toggleTool(index: number) {
-		tools[index].enabled = !tools[index].enabled;
-		tools = [...tools];
+		tools = tools.map((t, i) =>
+			i === index ? { ...t, enabled: !t.enabled } : t
+		);
 		notifyToolChange();
 	}
 
@@ -93,10 +91,10 @@
 				}));
 				break;
 			case 'custom':
-				// Keep current state
+				// Keep current state; force reactivity for downstream consumers
+				tools = [...tools];
 				break;
 		}
-		tools = [...tools];
 		if (notify) {
 			notifyToolChange();
 		}
@@ -109,7 +107,7 @@
 			name,
 			description: `Custom tool: ${name}`,
 			enabled: true,
-			category: 'builtin'
+			category: 'custom'
 		}];
 		customToolsInput = '';
 		notifyToolChange();
