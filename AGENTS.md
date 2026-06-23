@@ -14,7 +14,7 @@
 
 - Build requires both webview and extension: `pnpm run build`
 - Tests require compilation first: `pnpm test` runs `compile && node ./dist-tsc/test/runTest.js`
-- Lint: `pnpm run lint` (ESLint on src/**/*.ts)
+- Lint: `pnpm run lint` (ESLint on src/\*_/_.ts)
 
 ## Tech Stack
 
@@ -34,6 +34,12 @@
 - `README.md` — product usage, setup, and high-level development notes
 - `CHANGELOG.md` — released changes
 
+## Related Docs
+
+- `README.md` — user-facing setup, configuration, troubleshooting, and development commands
+- `media/voice/README.md` — platform notes for bundled local dictation helpers and runtime dependencies
+- `skill-management-gui.md` — implementation plan for the skills management UI; treat as planning context, not source of truth
+
 ## Conventions
 
 - Keep VS Code settings and PI CLI/TUI settings synchronized through `src/pi-agent-provider.ts`.
@@ -47,6 +53,11 @@
 - No branch naming, commit convention, or PR template is documented in-repo.
 - Follow the user's instructions and existing history instead of inventing a workflow.
 
+## Agent Platforms
+
+- `AGENTS.md` is the only checked-in agent instruction file in this repo.
+- No `.github/copilot-instructions.md`, `.github/instructions/`, `.claude/`, or `.cursor/` files are present right now.
+
 ## Boundaries
 
 - ✅ Always: Refactor files under `src/`, improve the Svelte UI under `src/webview/`, and add focused lint/test coverage when it meaningfully reduces risk.
@@ -56,11 +67,13 @@
 ## Architecture & Key Patterns
 
 ### Extension ↔ Webview Communication
+
 - All messages from extension host → webview go through `PiAgentProvider.notifyWebview({ type, data })` which calls `view.webview.postMessage()`.
 - All messages from webview → extension host go through `window.vscode.postMessage({ type, data })` and are handled by `MessageHandler.handle()`.
 - When adding new message types, add both the send side in `pi-agent-provider.ts` and the receive side in `App.svelte`'s `handleVSCodeMessage` switch.
 
 ### PI SDK Integration (AgentSession & Extensions)
+
 - The VS Code extension uses `createAgentSession()` from `@earendil-works/pi-coding-agent` which creates its own `ExtensionRunner` internally during construction.
 - The runner starts with a `noOpUIContext` — all `ctx.ui.setStatus()`, `notify()`, `setWorkingMessage()` etc. calls from PI packages are silently discarded unless we replace it.
 - **Never call `session.bindExtensions()` after construction** — it re-emits `session_start` and re-discovers resources, causing double-initialization. Instead, use `runner.setUIContext()` directly and set `(session as any)._extensionUIContext` to persist across `session.reload()`.
@@ -68,6 +81,7 @@
 - The `AgentSessionEvent` types (`tool_execution_start/end`, `compaction_start/end`, `auto_retry_start/end`, etc.) are defined in `@earendil-works/pi-agent-core` and re-exported through `pi-coding-agent`.
 
 ### Activity / Package Status Bar
+
 - The PI TUI shows package activity via a `FooterDataProvider` that aggregates extension statuses from `ctx.ui.setStatus(key, text)`, git branch, token stats, and model info.
 - In the VS Code extension, we replicate this with:
   - **Extension statuses** — forwarded from our custom `ExtensionUIContext.setStatus()` implementation to the webview as `extension-status` messages.
@@ -77,6 +91,7 @@
 - Tool execution descriptions include arg previews (file paths, commands, patterns) when available.
 
 ### Webview State Management
+
 - Svelte 5 runes (`$state`, `$derived`, `$effect`) are used throughout — no stores.
 - State flows: `App.svelte` owns top-level state → passes as props → child components emit events via callbacks.
 - Message handling centralized in `App.svelte`'s `handleVSCodeMessage` which dispatches to state updates.
