@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { type ProviderApi } from "./protocol/types.js";
 
 export class MessageHandler {
@@ -53,7 +56,7 @@ export class MessageHandler {
 					}
 					break;
 
-				case "exportSession":
+				case "exportSession": {
 					try {
 						const format = message.data?.format ?? "html";
 						const cmd =
@@ -84,6 +87,7 @@ export class MessageHandler {
 						});
 					}
 					break;
+				}
 
 				case "switchSession":
 					try {
@@ -368,7 +372,7 @@ export class MessageHandler {
 					this.sendPackagesList(result);
 					break;
 
-				case "installPackage":
+				case "installPackage": {
 					try {
 						await this.provider.installPackage(message.data.source);
 						result = { success: true };
@@ -386,8 +390,9 @@ export class MessageHandler {
 						throw error;
 					}
 					break;
+				}
 
-				case "uninstallPackage":
+				case "uninstallPackage": {
 					try {
 						await this.provider.uninstallPackage(message.data.source);
 						result = { success: true };
@@ -405,13 +410,14 @@ export class MessageHandler {
 						throw error;
 					}
 					break;
+				}
 
 				case "checkForUpdates":
 					await vscode.commands.executeCommand("pi-agent.checkForUpdates");
 					result = { success: true };
 					break;
 
-				case "updateResources":
+				case "updateResources": {
 					try {
 						await this.provider.updatePackages();
 						result = { success: true };
@@ -429,6 +435,7 @@ export class MessageHandler {
 						throw error;
 					}
 					break;
+				}
 
 				case "openFileAttachmentDialog":
 					{
@@ -536,6 +543,118 @@ export class MessageHandler {
 							},
 						});
 						throw error;
+					}
+					break;
+
+				case "open-in-editor":
+					{
+						const openContent = message.data?.content ?? "";
+						const openLang = message.data?.language ?? "plaintext";
+						if (openContent) {
+							const doc = await vscode.workspace.openTextDocument({
+								language: openLang,
+								content: openContent,
+							});
+							await vscode.window.showTextDocument(doc);
+						}
+						result = { success: true };
+					}
+					break;
+
+				case "apply-code":
+					{
+						const editor = vscode.window.activeTextEditor;
+						if (!editor) {
+							vscode.window.showWarningMessage(
+								"No active editor to apply code to.",
+							);
+							result = { success: false, error: "No active editor" };
+							break;
+						}
+						const applyCode = message.data?.code ?? "";
+						if (!applyCode) {
+							result = { success: false, error: "No code provided" };
+							break;
+						}
+						const selection = editor.selection;
+						const hasSelection = !selection.isEmpty;
+						await editor.edit((editBuilder) => {
+							if (hasSelection) {
+								editBuilder.replace(selection, applyCode);
+							} else {
+								editBuilder.insert(selection.active, applyCode);
+							}
+						});
+						vscode.window.showInformationMessage(
+							hasSelection
+								? "Code replaced selection."
+								: "Code inserted at cursor.",
+						);
+						result = { success: true };
+					}
+					break;
+
+				case "preview-diff":
+					{
+						const editor = vscode.window.activeTextEditor;
+						if (!editor) {
+							vscode.window.showWarningMessage(
+								"No active editor to diff against.",
+							);
+							result = { success: false, error: "No active editor" };
+							break;
+						}
+						const diffCode = message.data?.code ?? "";
+						if (!diffCode) {
+							result = { success: false, error: "No code provided" };
+							break;
+						}
+						const doc = editor.document;
+						const sel = editor.selection;
+						const originalText = doc.getText();
+						let modifiedText: string;
+						if (!sel.isEmpty) {
+							modifiedText =
+								originalText.slice(0, doc.offsetAt(sel.start)) +
+								diffCode +
+								originalText.slice(doc.offsetAt(sel.end));
+						} else {
+							const cursorOffset = doc.offsetAt(sel.active);
+							modifiedText =
+								originalText.slice(0, cursorOffset) +
+								diffCode +
+								originalText.slice(cursorOffset);
+						}
+						const tempDir = path.join(os.tmpdir(), "pilot-diff-preview");
+						await vscode.workspace.fs.createDirectory(vscode.Uri.file(tempDir));
+						const baseName = path.basename(doc.fileName);
+						const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+						const modifiedUri = vscode.Uri.file(
+							path.join(tempDir, `modified-${uniqueSuffix}-${baseName}`),
+						);
+						await vscode.workspace.fs.writeFile(
+							modifiedUri,
+							Buffer.from(modifiedText, "utf-8"),
+						);
+						await vscode.commands.executeCommand(
+							"vscode.diff",
+							doc.uri,
+							modifiedUri,
+							`Preview: ${baseName}`,
+						);
+						result = { success: true };
+						// Clean up temp file after brief delay
+						setTimeout(() => {
+							try {
+								fs.unlinkSync(modifiedUri.fsPath);
+								const remaining = fs
+									.readdirSync(tempDir)
+									.filter((f) => f !== "." && f !== "..");
+								if (remaining.length === 0) fs.rmdirSync(tempDir);
+							} catch {
+								/* ignore cleanup errors */
+							}
+						}, 5000);
 					}
 					break;
 

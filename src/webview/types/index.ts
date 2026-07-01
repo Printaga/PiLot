@@ -3,8 +3,8 @@
 /** Image content block in a message */
 export interface ImageContent {
 	type: "image";
-	data: string;       // base64-encoded image data
-	mimeType: string;   // e.g. "image/png"
+	data: string; // base64-encoded image data
+	mimeType: string; // e.g. "image/png"
 	name?: string;
 }
 
@@ -36,7 +36,7 @@ export interface Message {
 
 /** Model definition sent from extension to webview */
 export interface Model {
-	id: string;        // "provider/id"
+	id: string; // "provider/id"
 	provider: string;
 	name: string;
 }
@@ -85,7 +85,13 @@ export interface VoiceModelDef {
 }
 
 /** Thinking level enumeration */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh";
 
 /** Pi agent configuration */
 export interface PiAgentConfig {

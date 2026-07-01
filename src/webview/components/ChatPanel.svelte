@@ -150,6 +150,11 @@ import { tick } from "svelte";
   let showScrollBtn = $state(false);
   let userScrolledUp = false;
 
+  // Chat search state
+  let searchQuery = $state("");
+  let showSearch = $state(false);
+  let currentSearchIdx = $state(0);
+
   // Message editing state (Feature 7)
   let editingMessageIndex = $state<number | null>(null);
   let editText = $state("");
@@ -350,6 +355,12 @@ import { tick } from "svelte";
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      e.preventDefault();
+      showSearch = !showSearch;
+      if (!showSearch) searchQuery = "";
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (showAutocomplete && filteredFiles.length > 0) {
@@ -358,9 +369,16 @@ import { tick } from "svelte";
       }
       handleSubmit();
     }
-    if (e.key === "Escape" && showAutocomplete) {
-      e.preventDefault();
-      closeAutocomplete();
+    if (e.key === "Escape") {
+      if (showSearch) {
+        showSearch = false;
+        searchQuery = "";
+        return;
+      }
+      if (showAutocomplete) {
+        e.preventDefault();
+        closeAutocomplete();
+      }
     }
     if (showAutocomplete) {
       if (e.key === "ArrowDown") {
@@ -371,6 +389,40 @@ import { tick } from "svelte";
         e.preventDefault();
         selectedIndex = Math.max(selectedIndex - 1, 0);
       }
+    }
+  }
+
+  const searchResults = $derived.by(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return messages
+      .map((m, i) => ({ index: i, message: m }))
+      .filter(({ message }) => message.content.toLowerCase().includes(q));
+  });
+
+  // Reset search nav index when query changes
+  $effect(() => {
+    searchQuery;
+    currentSearchIdx = 0;
+  });
+
+  function goToNextMatch() {
+    if (searchResults.length <= 1) return;
+    currentSearchIdx = (currentSearchIdx + 1) % searchResults.length;
+    scrollToMatch(searchResults[currentSearchIdx].index);
+  }
+
+  function goToPrevMatch() {
+    if (searchResults.length <= 1) return;
+    currentSearchIdx = (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
+    scrollToMatch(searchResults[currentSearchIdx].index);
+  }
+
+  function scrollToMatch(msgIndex: number) {
+    if (!messagesContainer) return;
+    const el = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
@@ -599,6 +651,31 @@ import { tick } from "svelte";
     bind:this={messagesContainer}
     onscroll={handleMessagesScroll}
   >
+    {#if showSearch}
+      <div class="search-bar">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          type="text"
+          placeholder="Search messages... (Ctrl+F)"
+          bind:value={searchQuery}
+          class="search-input"
+        />
+        {#if searchResults.length > 0}
+          <button class="search-nav" onclick={goToPrevMatch} aria-label="Previous match" disabled={searchResults.length <= 1}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="search-count">{currentSearchIdx + 1}/{searchResults.length}</span>
+          <button class="search-nav" onclick={goToNextMatch} aria-label="Next match" disabled={searchResults.length <= 1}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        {:else}
+          <span class="search-count">0 matches</span>
+        {/if}
+        <button class="search-close" onclick={() => { showSearch = false; searchQuery = ""; }} aria-label="Close search">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    {/if}
     {#if messages.length === 0}
       <div class="empty-state">
         <div class="hero-graphic">
@@ -740,6 +817,37 @@ import { tick } from "svelte";
               </svg>
               Architecture
             </button>
+            <button
+              onclick={() => onSend("Help me debug this issue")}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+              </svg>
+              Debug Issue
+            </button>
+            <button
+              onclick={() => onSend("Write tests for the main functionality")}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="9 11 12 14 22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+              Write Tests
+            </button>
           </div>
         </div>
       </div>
@@ -752,7 +860,7 @@ import { tick } from "svelte";
 
       {#each visibleMessages as message, i (i)}
         <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
-          <MessageBubble {message} />
+          <MessageBubble {message} searchQuery={showSearch ? searchQuery : ""} />
 
         </div>
       {/each}
@@ -1258,6 +1366,73 @@ import { tick } from "svelte";
     gap: var(--space-5);
     scrollbar-gutter: stable;
     scroll-behavior: smooth;
+  }
+
+  .messages :global(.search-bar) {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: 0;
+    margin-bottom: var(--space-2);
+    flex-shrink: 0;
+  }
+  .messages :global(.search-bar svg) {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+  }
+  .messages :global(.search-input) {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--color-text);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    outline: none;
+  }
+  .messages :global(.search-count) {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+  .messages :global(.search-close) {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .messages :global(.search-close:hover) {
+    color: var(--color-primary);
+  }
+  .messages :global(.search-nav) {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .messages :global(.search-nav:hover) {
+    color: var(--color-primary);
+  }
+  .messages :global(.search-nav:disabled) {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .messages :global(.search-highlight) {
+    background: oklch(from var(--color-warning) l c h / 0.3);
+    color: var(--color-text);
+    padding: 0 1px;
+    border-radius: 2px;
   }
 
   .empty-state {

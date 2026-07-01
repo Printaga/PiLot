@@ -9,13 +9,23 @@
 
   interface Props {
     message: Message;
+    searchQuery?: string;
   }
 
-  let { message }: Props = $props();
+  let { message, searchQuery = "" }: Props = $props();
+
+  let searchRegex = $derived.by(() => {
+    if (!searchQuery.trim()) return undefined;
+    const q = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(${q})`, "gi");
+  });
 
   let thinkingExpanded = $state(false);
   let toolExpanded: Record<string, boolean> = $state({});
   let lightboxImage = $state<string | null>(null);
+  let copiedCode = $state(false);
+  let copiedMessage = $state(false);
+  let showAbsoluteTime = $state(false);
 
   function openLightbox(dataUrl: string) {
     lightboxImage = dataUrl;
@@ -23,6 +33,43 @@
 
   function closeLightbox() {
     lightboxImage = null;
+  }
+
+  function copyCode(code: string) {
+    navigator.clipboard.writeText(code);
+    copiedCode = true;
+    setTimeout(() => (copiedCode = false), 1500);
+  }
+
+  function applyCode(code: string) {
+    (window as any).vscode?.postMessage({
+      type: "apply-code",
+      data: { code },
+    });
+  }
+
+  function previewDiff(code: string) {
+    (window as any).vscode?.postMessage({
+      type: "preview-diff",
+      data: { code },
+    });
+  }
+
+  function copyMessage() {
+    navigator.clipboard.writeText(message.content);
+    copiedMessage = true;
+    setTimeout(() => (copiedMessage = false), 1500);
+  }
+
+  function openInEditor(code: string, language: string) {
+    (window as any).vscode?.postMessage({
+      type: "open-in-editor",
+      data: { content: code, language },
+    });
+  }
+
+  function toggleTimeFormat() {
+    showAbsoluteTime = !showAbsoluteTime;
   }
 
   function getImageDataUrl(img: ImageContent): string {
@@ -33,6 +80,10 @@
     const date = new Date(timestamp);
     const now = Date.now();
     const diffMin = Math.floor((now - timestamp) / 60000);
+    if (showAbsoluteTime) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
+        " " + date.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
     if (diffMin < 1) return "now";
     if (diffMin < 60) return `${diffMin}m`;
     const diffHr = Math.floor(diffMin / 60);
@@ -122,6 +173,7 @@
   };
   const defaultToolIconPath =
     "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z";
+  const clipboardSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
   function escapeHtml(text: string): string {
     return text
@@ -131,10 +183,10 @@
   }
 
   /** Render a markdown string to HTML. Handles the rich formatting the PI agent outputs. */
-  function renderMarkdown(md: string): string {
+  function renderMarkdown(md: string, searchRegex?: RegExp): string {
     // Split out fenced code blocks first (they must not be processed)
     const codeBlocks: string[] = [];
-    let processed = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    let processed = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
       codeBlocks.push(
         `<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`,
       );
@@ -159,8 +211,9 @@
       let headerMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
         const level = headerMatch[1].length;
+        const slug = headerMatch[2].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
         htmlParts.push(
-          `<h${level} class="md-h">${renderInline(headerMatch[2])}</h${level}>`,
+          `<h${level} class="md-h" id="${slug}">${renderInline(headerMatch[2], searchRegex)}</h${level}>`,
         );
         continue;
       }
@@ -170,7 +223,7 @@
         const lines = trimmed.split("\n");
         const quoteText = lines.map((l) => l.replace(/^> ?/, "")).join("<br>");
         htmlParts.push(
-          `<blockquote class="md-quote">${renderInline(quoteText)}</blockquote>`,
+          `<blockquote class="md-quote">${renderInline(quoteText, searchRegex)}</blockquote>`,
         );
         continue;
       }
@@ -180,7 +233,7 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^[-*+]\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""))}</li>`);
+          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`);
         htmlParts.push(`<ul class="md-ul">${items.join("")}</ul>`);
         continue;
       }
@@ -190,13 +243,34 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^\d+\.\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""))}</li>`);
+          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`);
         htmlParts.push(`<ol class="md-ol">${items.join("")}</ol>`);
         continue;
       }
 
+      // Table
+      if (trimmed.includes("|") && /^\|?\s*[-:]+/.test(trimmed.split("\n")[1] || "")) {
+        const rows = trimmed.split("\n").filter(l => l.includes("|"));
+        if (rows.length >= 2) {
+          const headerCells = rows[0].split("|").map(c => c.trim()).filter(Boolean);
+          const bodyRows = rows.slice(2);
+          let tableHtml = '<table class="md-table"><thead><tr>';
+          for (const cell of headerCells) tableHtml += `<th>${renderInline(cell, searchRegex)}</th>`;
+          tableHtml += '</tr></thead><tbody>';
+          for (const row of bodyRows) {
+            const cells = row.split("|").map(c => c.trim()).filter(Boolean);
+            tableHtml += '<tr>';
+            for (const cell of cells) tableHtml += `<td>${renderInline(cell, searchRegex)}</td>`;
+            tableHtml += '</tr>';
+          }
+          tableHtml += '</tbody></table>';
+          htmlParts.push(tableHtml);
+          continue;
+        }
+      }
+
       // Regular paragraph
-      htmlParts.push(`<p class="md-p">${renderInline(trimmed)}</p>`);
+      htmlParts.push(`<p class="md-p">${renderInline(trimmed, searchRegex)}</p>`);
     }
 
     let html = htmlParts.join("");
@@ -209,9 +283,13 @@
   }
 
   /** Render inline markdown: bold, italic, code, links, line breaks */
-  function renderInline(text: string): string {
+  function renderInline(text: string, searchRegex?: RegExp): string {
     // Escape HTML first
     let html = escapeHtml(text);
+    // Search highlight — apply after escapeHtml so <mark> tags aren't double-escaped
+    if (searchRegex) {
+      html = html.replace(searchRegex, '<mark class="search-highlight">$1</mark>');
+    }
     // Inline code (backticks) — must process before bold/italic
     html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
     // Bold + italic
@@ -375,7 +453,17 @@
       </span>
       <span class="role-name">{message.role}</span>
     </div>
-    <span class="message-time">{formatTimestamp(message.timestamp)}</span>
+    <div class="message-actions">
+      {#if message.role === "assistant" && !message.isStreaming}
+        <button class="copy-msg-btn" onclick={copyMessage} title="Copy message">
+          {@html clipboardSvg}
+          {#if copiedMessage}<span class="copy-check">✓</span>{/if}
+        </button>
+      {/if}
+      <button class="time-toggle" onclick={toggleTimeFormat} title="Toggle timestamp format">
+        <span class="message-time">{formatTimestamp(message.timestamp)}</span>
+      </button>
+    </div>
   </div>
 
   <div class="message-content">
@@ -575,7 +663,7 @@
           {/if}
           {#each parseContent(message.content) as part}
             {#if typeof part === "string"}
-              {@html renderMarkdown(part)}
+              {@html renderMarkdown(part, searchRegex)}
             {:else if part.isMermaid}
               <div class="mermaid-container">
                 <pre class="mermaid">{part.code}</pre>
@@ -583,7 +671,24 @@
               </div>
             {:else}
               <div class="code-block-wrapper">
-                <span class="code-lang">{part.language}</span>
+                <div class="code-header">
+                  <span class="code-lang">{part.language}</span>
+                  <div class="code-actions">
+                    <button class="code-action-btn" onclick={() => applyCode(part.code)} title="Apply to active editor">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    </button>
+                    <button class="code-action-btn" onclick={() => previewDiff(part.code)} title="Preview diff">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="8" height="16"/><rect x="14" y="4" width="8" height="16"/></svg>
+                    </button>
+                    <button class="code-action-btn" onclick={() => openInEditor(part.code, part.language)} title="Open in Editor">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    </button>
+                    <button class="code-action-btn" onclick={() => copyCode(part.code)} title="Copy code">
+                      {@html clipboardSvg}
+                      {#if copiedCode}<span class="copy-check">✓</span>{/if}
+                    </button>
+                  </div>
+                </div>
                 <pre class="language-{part.language}"><code>{part.code}</code
                   ></pre>
               </div>
@@ -1087,20 +1192,71 @@
     overflow: hidden;
     border: 1px solid var(--color-border);
   }
+  .code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 6px;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+  }
   .code-lang {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 2px 8px;
     font-family: var(--font-display);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
     color: var(--color-text-muted);
-    background: var(--color-surface);
-    border-left: 1px solid var(--color-border);
-    border-bottom: 1px solid var(--color-border);
-    z-index: 1;
+  }
+  .code-actions {
+    display: flex;
+    gap: 2px;
+  }
+  .code-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 9px;
+  }
+  .code-action-btn:hover {
+    color: var(--color-primary);
+    border-color: var(--color-border);
+    background: var(--color-surface-2);
+  }
+  .copy-check {
+    color: var(--color-success);
+    font-weight: 700;
+  }
+
+  .message-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .message-bubble:hover .message-actions {
+    opacity: 1;
+  }
+  .copy-msg-btn, .time-toggle {
+    display: flex;
+    align-items: center;
+    padding: 2px 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0;
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+  .copy-msg-btn:hover, .time-toggle:hover {
+    color: var(--color-primary);
+    border-color: var(--color-border);
+    background: var(--color-surface-2);
   }
 
   :global(.message-content pre) {
@@ -1116,7 +1272,30 @@
     color: var(--color-text);
   }
   .code-block-wrapper :global(pre) {
-    padding-top: var(--space-5);
+    padding-top: var(--space-2);
+  }
+
+  :global(.md-table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.5em 0;
+    font-size: 0.9em;
+  }
+  :global(.md-table th),
+  :global(.md-table td) {
+    padding: 0.3em 0.6em;
+    border: 1px solid var(--color-border);
+    text-align: left;
+  }
+  :global(.md-table th) {
+    background: var(--color-surface-2);
+    font-weight: 700;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  :global(.md-table tr:hover td) {
+    background: oklch(from var(--color-surface-2) l c h / 0.5);
   }
 
   .content-spacer {
