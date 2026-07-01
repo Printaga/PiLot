@@ -3,7 +3,6 @@
 - GUI fork support
 - GUI MCP support
 - Edit message support
-- Copy message support
 - Slash command support
 - Oauth authentication
 - More settings exposed in GUI

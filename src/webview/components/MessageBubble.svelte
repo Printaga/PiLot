@@ -118,7 +118,8 @@
   function parseContent(content: string): Array<string | CodeBlock> {
     const parts: Array<string | CodeBlock> = [];
     let lastIndex = 0;
-    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    // Match full info strings (e.g. ```ts /path/file.ts or ```python)
+    const codeBlockRegex = /```([^\n]*)\n([\s\S]*?)```/g;
 
     let match;
     while ((match = codeBlockRegex.exec(content)) !== null) {
@@ -128,7 +129,7 @@
       parts.push({
         language: match[1] || "text",
         code: match[2],
-        isMermaid: (match[1] || "") === "mermaid",
+        isMermaid: (match[1] || "").startsWith("mermaid"),
       });
       lastIndex = match.index + match[0].length;
     }
@@ -186,7 +187,8 @@
   function renderMarkdown(md: string, searchRegex?: RegExp): string {
     // Split out fenced code blocks first (they must not be processed)
     const codeBlocks: string[] = [];
-    let processed = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _lang, code) => {
+    // Match full info strings (same pattern as parseContent)
+    let processed = md.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
       codeBlocks.push(
         `<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`,
       );
@@ -212,8 +214,11 @@
       if (headerMatch) {
         const level = headerMatch[1].length;
         const slug = headerMatch[2].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+        const headerText = renderInline(headerMatch[2], searchRegex);
+        // Anchor link pill that appears on hover — copies #slug to clipboard
+        const anchorHtml = `<a class="md-header-anchor" href="#${slug}" onclick="event.preventDefault();navigator.clipboard.writeText(location.href.replace(/#.*/,'')+'#${slug}');this.nextElementSibling?.classList.add('anchor-copied');setTimeout(()=>this.nextElementSibling?.classList.remove('anchor-copied'),1500)" title="Copy link to this section">#</a><span class="anchor-copy-toast">Copied!</span>`;
         htmlParts.push(
-          `<h${level} class="md-h" id="${slug}">${renderInline(headerMatch[2], searchRegex)}</h${level}>`,
+          `<h${level} class="md-h" id="${slug}">${anchorHtml}${headerText}</h${level}>`,
         );
         continue;
       }
@@ -301,7 +306,14 @@
     // Links [text](url)
     html = html.replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>',
+      (_, text, url) => {
+        if (url.startsWith("#")) {
+          // Fragment link — scroll to matching header inside this message bubble
+          const slug = url.slice(1);
+          return `<a class="md-link md-fragment-link" href="${escapeHtml(url)}" onclick="event.preventDefault();const t=this.closest('.message-content')?.querySelector('[id=&quot;${escapeHtml(slug)}&quot;]');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});" rel="noopener">${escapeHtml(text)}</a>`;
+        }
+        return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+      },
     );
     // Line breaks (single newlines within paragraphs)
     html = html.replace(/\n/g, "<br>");
@@ -454,7 +466,7 @@
       <span class="role-name">{message.role}</span>
     </div>
     <div class="message-actions">
-      {#if message.role === "assistant" && !message.isStreaming}
+      {#if (message.role === "assistant" || message.role === "user") && !message.isStreaming}
         <button class="copy-msg-btn" onclick={copyMessage} title="Copy message">
           {@html clipboardSvg}
           {#if copiedMessage}<span class="copy-check">✓</span>{/if}
@@ -1353,9 +1365,42 @@
     line-height: 1.35;
     margin: 1em 0 0.4em;
     color: var(--color-text);
+    position: relative;
   }
   :global(.md-h:first-child) {
     margin-top: 0;
+  }
+  :global(.md-header-anchor) {
+    position: absolute;
+    left: -1.2em;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    font-size: 0.85em;
+    font-weight: 400;
+    transition: opacity var(--transition-fast);
+  }
+  :global(.md-h:hover .md-header-anchor) {
+    opacity: 1;
+  }
+  :global(.md-header-anchor:hover) {
+    color: var(--color-primary);
+  }
+  :global(.anchor-copy-toast) {
+    position: absolute;
+    left: -3em;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--color-success);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-fast);
+  }
+  :global(.anchor-copy-toast.anchor-copied) {
+    opacity: 1;
   }
   :global(h1.md-h) {
     font-size: 1.35em;

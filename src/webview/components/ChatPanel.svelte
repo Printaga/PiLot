@@ -354,11 +354,19 @@ import { tick } from "svelte";
     }
   }
 
+  function focusSearchInput() {
+    requestAnimationFrame(() => {
+      const si = messagesContainer?.querySelector<HTMLInputElement>(".search-input");
+      si?.focus();
+    });
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "f") {
       e.preventDefault();
       showSearch = !showSearch;
       if (!showSearch) searchQuery = "";
+      if (showSearch) focusSearchInput();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -392,6 +400,17 @@ import { tick } from "svelte";
     }
   }
 
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Ignore keydowns from the textarea (handled by handleKeydown)
+    if (e.target === textareaEl) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+      e.preventDefault();
+      showSearch = !showSearch;
+      if (!showSearch) searchQuery = "";
+      if (showSearch) focusSearchInput();
+    }
+  }
+
   const searchResults = $derived.by(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
@@ -420,6 +439,17 @@ import { tick } from "svelte";
 
   function scrollToMatch(msgIndex: number) {
     if (!messagesContainer) return;
+    // Auto-expand visible range if target message is hidden
+    if (msgIndex < messages.length - visibleMessageCount) {
+      visibleMessageCount = messages.length - msgIndex + 10;
+      // Wait for Svelte to render the newly visible messages before scrolling
+      requestAnimationFrame(() => {
+        if (!messagesContainer) return;
+        const el2 = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
+        if (el2) el2.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      return;
+    }
     const el = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -576,7 +606,8 @@ import { tick } from "svelte";
   }
 </script>
 
-<div class="chat-panel">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="chat-panel" onkeydown={handleGlobalKeydown} role="application">
   {#if hasSessionResources}
     <div class="resources-info">
       <span class="resources-header">CONTEXT</span>
