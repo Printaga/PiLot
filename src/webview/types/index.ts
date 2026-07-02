@@ -30,6 +30,8 @@ export interface Message {
 	thinking?: string;
 	images?: ImageContent[];
 	timestamp: number;
+	entryId?: string;
+	parentId?: string | null;
 	isStreaming?: boolean;
 	toolCalls?: ToolCallMessage[];
 }

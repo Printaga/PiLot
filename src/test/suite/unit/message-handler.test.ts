@@ -368,8 +368,11 @@ suite("MessageHandler", () => {
 
 	test("forkSession success", async () => {
 		provider.forkSession = () => Promise.resolve();
-		const result = await handler.handle({ type: "forkSession", data: { fromNodeId: "node-1" } });
-		assert.deepStrictEqual(provider.calls.forkSession[0], ["node-1"]);
+		const result = await handler.handle({
+			type: "forkSession",
+			data: { entryId: "entry-1" },
+		});
+		assert.deepStrictEqual(provider.calls.forkSession[0], ["entry-1"]);
 		assert.strictEqual(result.success, true);
 	});
 
@@ -378,7 +381,10 @@ suite("MessageHandler", () => {
 		provider.forkSession = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "forkSession", data: { fromNodeId: "node-1" } });
+			await handler.handle({
+				type: "forkSession",
+				data: { entryId: "entry-1" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}

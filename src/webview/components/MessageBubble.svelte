@@ -10,9 +10,10 @@
   interface Props {
     message: Message;
     searchQuery?: string;
+    onForkMessage?: (entryId: string) => void;
   }
 
-  let { message, searchQuery = "" }: Props = $props();
+  let { message, searchQuery = "", onForkMessage = () => {} }: Props = $props();
 
   let searchRegex = $derived.by(() => {
     if (!searchQuery.trim()) return undefined;
@@ -72,6 +73,12 @@
     showAbsoluteTime = !showAbsoluteTime;
   }
 
+  function forkMessage() {
+    if (message.entryId) {
+      onForkMessage(message.entryId);
+    }
+  }
+
   function getImageDataUrl(img: ImageContent): string {
     return `data:${img.mimeType};base64,${img.data}`;
   }
@@ -81,8 +88,11 @@
     const now = Date.now();
     const diffMin = Math.floor((now - timestamp) / 60000);
     if (showAbsoluteTime) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
-        " " + date.toLocaleDateString([], { month: "short", day: "numeric" });
+      return (
+        date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
+        " " +
+        date.toLocaleDateString([], { month: "short", day: "numeric" })
+      );
     }
     if (diffMin < 1) return "now";
     if (diffMin < 60) return `${diffMin}m`;
@@ -188,12 +198,15 @@
     // Split out fenced code blocks first (they must not be processed)
     const codeBlocks: string[] = [];
     // Match full info strings (same pattern as parseContent)
-    let processed = md.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
-      codeBlocks.push(
-        `<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`,
-      );
-      return `\x00CODE${codeBlocks.length - 1}\x00`;
-    });
+    let processed = md.replace(
+      /```([^\n]*)\n([\s\S]*?)```/g,
+      (_, _lang, code) => {
+        codeBlocks.push(
+          `<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`,
+        );
+        return `\x00CODE${codeBlocks.length - 1}\x00`;
+      },
+    );
 
     // Split into paragraphs (double newlines)
     const paragraphs = processed.split(/\n\n+/);
@@ -213,7 +226,10 @@
       let headerMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
         const level = headerMatch[1].length;
-        const slug = headerMatch[2].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+        const slug = headerMatch[2]
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "");
         const headerText = renderInline(headerMatch[2], searchRegex);
         // Anchor link pill that appears on hover — copies #slug to clipboard
         const anchorHtml = `<a class="md-header-anchor" href="#${slug}" onclick="event.preventDefault();navigator.clipboard.writeText(location.href.replace(/#.*/,'')+'#${slug}');this.nextElementSibling?.classList.add('anchor-copied');setTimeout(()=>this.nextElementSibling?.classList.remove('anchor-copied'),1500)" title="Copy link to this section">#</a><span class="anchor-copy-toast">Copied!</span>`;
@@ -238,7 +254,10 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^[-*+]\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`);
+          .map(
+            (l) =>
+              `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`,
+          );
         htmlParts.push(`<ul class="md-ul">${items.join("")}</ul>`);
         continue;
       }
@@ -248,34 +267,50 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^\d+\.\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`);
+          .map(
+            (l) =>
+              `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`,
+          );
         htmlParts.push(`<ol class="md-ol">${items.join("")}</ol>`);
         continue;
       }
 
       // Table
-      if (trimmed.includes("|") && /^\|?\s*[-:]+/.test(trimmed.split("\n")[1] || "")) {
-        const rows = trimmed.split("\n").filter(l => l.includes("|"));
+      if (
+        trimmed.includes("|") &&
+        /^\|?\s*[-:]+/.test(trimmed.split("\n")[1] || "")
+      ) {
+        const rows = trimmed.split("\n").filter((l) => l.includes("|"));
         if (rows.length >= 2) {
-          const headerCells = rows[0].split("|").map(c => c.trim()).filter(Boolean);
+          const headerCells = rows[0]
+            .split("|")
+            .map((c) => c.trim())
+            .filter(Boolean);
           const bodyRows = rows.slice(2);
           let tableHtml = '<table class="md-table"><thead><tr>';
-          for (const cell of headerCells) tableHtml += `<th>${renderInline(cell, searchRegex)}</th>`;
-          tableHtml += '</tr></thead><tbody>';
+          for (const cell of headerCells)
+            tableHtml += `<th>${renderInline(cell, searchRegex)}</th>`;
+          tableHtml += "</tr></thead><tbody>";
           for (const row of bodyRows) {
-            const cells = row.split("|").map(c => c.trim()).filter(Boolean);
-            tableHtml += '<tr>';
-            for (const cell of cells) tableHtml += `<td>${renderInline(cell, searchRegex)}</td>`;
-            tableHtml += '</tr>';
+            const cells = row
+              .split("|")
+              .map((c) => c.trim())
+              .filter(Boolean);
+            tableHtml += "<tr>";
+            for (const cell of cells)
+              tableHtml += `<td>${renderInline(cell, searchRegex)}</td>`;
+            tableHtml += "</tr>";
           }
-          tableHtml += '</tbody></table>';
+          tableHtml += "</tbody></table>";
           htmlParts.push(tableHtml);
           continue;
         }
       }
 
       // Regular paragraph
-      htmlParts.push(`<p class="md-p">${renderInline(trimmed, searchRegex)}</p>`);
+      htmlParts.push(
+        `<p class="md-p">${renderInline(trimmed, searchRegex)}</p>`,
+      );
     }
 
     let html = htmlParts.join("");
@@ -293,7 +328,10 @@
     let html = escapeHtml(text);
     // Search highlight — apply after escapeHtml so <mark> tags aren't double-escaped
     if (searchRegex) {
-      html = html.replace(searchRegex, '<mark class="search-highlight">$1</mark>');
+      html = html.replace(
+        searchRegex,
+        '<mark class="search-highlight">$1</mark>',
+      );
     }
     // Inline code (backticks) — must process before bold/italic
     html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
@@ -304,17 +342,14 @@
     // Italic
     html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
     // Links [text](url)
-    html = html.replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_, text, url) => {
-        if (url.startsWith("#")) {
-          // Fragment link — scroll to matching header inside this message bubble
-          const slug = url.slice(1);
-          return `<a class="md-link md-fragment-link" href="${escapeHtml(url)}" onclick="event.preventDefault();const t=this.closest('.message-content')?.querySelector('[id=&quot;${escapeHtml(slug)}&quot;]');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});" rel="noopener">${escapeHtml(text)}</a>`;
-        }
-        return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
-      },
-    );
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+      if (url.startsWith("#")) {
+        // Fragment link — scroll to matching header inside this message bubble
+        const slug = url.slice(1);
+        return `<a class="md-link md-fragment-link" href="${escapeHtml(url)}" onclick="event.preventDefault();const t=this.closest('.message-content')?.querySelector('[id=&quot;${escapeHtml(slug)}&quot;]');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});" rel="noopener">${escapeHtml(text)}</a>`;
+      }
+      return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+    });
     // Line breaks (single newlines within paragraphs)
     html = html.replace(/\n/g, "<br>");
     return html;
@@ -472,7 +507,30 @@
           {#if copiedMessage}<span class="copy-check">✓</span>{/if}
         </button>
       {/if}
-      <button class="time-toggle" onclick={toggleTimeFormat} title="Toggle timestamp format">
+      {#if message.role === "user" && message.entryId && !message.isStreaming}
+        <button
+          class="copy-msg-btn"
+          onclick={forkMessage}
+          title="Fork here: start a new branch from this user message"
+          aria-label="Fork here: start a new branch from this user message"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M7 18V6l5 4 5-4v12" />
+          </svg>
+        </button>
+      {/if}
+      <button
+        class="time-toggle"
+        onclick={toggleTimeFormat}
+        title="Toggle timestamp format"
+      >
         <span class="message-time">{formatTimestamp(message.timestamp)}</span>
       </button>
     </div>
@@ -686,16 +744,68 @@
                 <div class="code-header">
                   <span class="code-lang">{part.language}</span>
                   <div class="code-actions">
-                    <button class="code-action-btn" onclick={() => applyCode(part.code)} title="Apply to active editor">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    <button
+                      class="code-action-btn"
+                      onclick={() => applyCode(part.code)}
+                      title="Apply to active editor"
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><polyline points="20 6 9 17 4 12" /></svg
+                      >
                     </button>
-                    <button class="code-action-btn" onclick={() => previewDiff(part.code)} title="Preview diff">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="8" height="16"/><rect x="14" y="4" width="8" height="16"/></svg>
+                    <button
+                      class="code-action-btn"
+                      onclick={() => previewDiff(part.code)}
+                      title="Preview diff"
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><rect x="2" y="4" width="8" height="16" /><rect
+                          x="14"
+                          y="4"
+                          width="8"
+                          height="16"
+                        /></svg
+                      >
                     </button>
-                    <button class="code-action-btn" onclick={() => openInEditor(part.code, part.language)} title="Open in Editor">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    <button
+                      class="code-action-btn"
+                      onclick={() => openInEditor(part.code, part.language)}
+                      title="Open in Editor"
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><path
+                          d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                        /><polyline points="15 3 21 3 21 9" /><line
+                          x1="10"
+                          y1="14"
+                          x2="21"
+                          y2="3"
+                        /></svg
+                      >
                     </button>
-                    <button class="code-action-btn" onclick={() => copyCode(part.code)} title="Copy code">
+                    <button
+                      class="code-action-btn"
+                      onclick={() => copyCode(part.code)}
+                      title="Copy code"
+                    >
                       {@html clipboardSvg}
                       {#if copiedCode}<span class="copy-check">✓</span>{/if}
                     </button>
@@ -1255,7 +1365,8 @@
   .message-bubble:hover .message-actions {
     opacity: 1;
   }
-  .copy-msg-btn, .time-toggle {
+  .copy-msg-btn,
+  .time-toggle {
     display: flex;
     align-items: center;
     padding: 2px 4px;
@@ -1265,7 +1376,8 @@
     color: var(--color-text-muted);
     cursor: pointer;
   }
-  .copy-msg-btn:hover, .time-toggle:hover {
+  .copy-msg-btn:hover,
+  .time-toggle:hover {
     color: var(--color-primary);
     border-color: var(--color-border);
     background: var(--color-surface-2);

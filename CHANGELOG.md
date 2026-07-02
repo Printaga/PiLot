@@ -10,6 +10,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - "Preview Diff" button on code blocks — opens VS Code diff editor with proposed changes
 - Code block copy button with clipboard feedback
 - Message-level copy button for assistant responses
+- Add support for forking sessions from existing ones
 - Chat search (Ctrl+F) to highlight matching text in messages
 - Markdown table rendering
 - "Open in Editor" button for code blocks

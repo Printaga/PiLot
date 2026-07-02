@@ -1,6 +1,6 @@
 <script lang="ts">
   import MessageBubble from "./MessageBubble.svelte";
-import { tick } from "svelte";
+  import { tick } from "svelte";
   import VoiceCapture from "./VoiceCapture.svelte";
   import ContextIndicator from "./ContextIndicator.svelte";
   import ResourceBadge from "./ResourceBadge.svelte";
@@ -76,6 +76,7 @@ import { tick } from "svelte";
     onToggleVoice?: () => void;
     isListening?: boolean;
     inputText?: string;
+    inputImages?: ImageContent[];
     tokensIn?: number;
     tokensOut?: number;
     tokensTotal?: number;
@@ -87,15 +88,19 @@ import { tick } from "svelte";
     autoCompaction?: boolean;
     onCompact?: () => void;
     onEditMessage?: (index: number, newText: string) => void;
+    onForkMessage?: (entryId: string) => void;
     onShowExport?: () => void;
     onShowPromptTemplates?: () => void;
     previousResourceCount?: Record<string, number>;
-    activityStatuses?: Record<string, { text: string; type: "extension" | "tool" | "system"; timestamp: number }>;
-	footerCwd?: string;
-	footerGitBranch?: string | null;
-	footerSessionName?: string | null;
-	isBinaryAvailable?: boolean;
-	piCliVersion?: string | null;
+    activityStatuses?: Record<
+      string,
+      { text: string; type: "extension" | "tool" | "system"; timestamp: number }
+    >;
+    footerCwd?: string;
+    footerGitBranch?: string | null;
+    footerSessionName?: string | null;
+    isBinaryAvailable?: boolean;
+    piCliVersion?: string | null;
   }
 
   let {
@@ -109,6 +114,7 @@ import { tick } from "svelte";
     onToggleVoice = () => {},
     isListening = false,
     inputText = $bindable(""),
+    inputImages = $bindable([] as ImageContent[]),
     tokensIn = 0,
     tokensOut = 0,
     tokensTotal = 0,
@@ -119,15 +125,16 @@ import { tick } from "svelte";
     autoCompaction = true,
     onCompact = () => {},
     onEditMessage = () => {},
+    onForkMessage = () => {},
     onShowExport = () => {},
     onShowPromptTemplates = () => {},
     previousResourceCount = {},
     activityStatuses = {},
     footerCwd = "",
-	footerGitBranch = null,
-	footerSessionName = null,
-	isBinaryAvailable = false,
-	piCliVersion = null,
+    footerGitBranch = null,
+    footerSessionName = null,
+    isBinaryAvailable = false,
+    piCliVersion = null,
   }: Props = $props();
 
   // Show setup guidance only when PI binary is not available and no messages exist
@@ -139,7 +146,6 @@ import { tick } from "svelte";
   let transcriptWindowSize = $state(100);
   let visibleMessageCount = $state(100);
   let files = $state<string[]>([]);
-  let images = $state<ImageContent[]>([]);
   let isDragging = $state(false);
   let showAutocomplete = $state(false);
   let autocompleteQuery = $state("");
@@ -168,8 +174,6 @@ import { tick } from "svelte";
       });
     }
   });
-
-
 
   const resources = $derived(sessionResources ?? emptySessionResources);
   const hasSessionResources = $derived(
@@ -224,7 +228,6 @@ import { tick } from "svelte";
       .filter((f) => f.toLowerCase().includes(autocompleteQuery.toLowerCase()))
       .slice(0, 20),
   );
-
 
   // Auto-scroll logic
   $effect(() => {
@@ -306,11 +309,11 @@ import { tick } from "svelte";
 
   function handleSubmit() {
     const text = inputText.trim();
-    const hasImages = images.length > 0;
+    const hasImages = inputImages.length > 0;
     if (!text && !hasImages) return;
 
-    const imagesToSend = hasImages ? [...images] : undefined;
-    images = [];
+    const imagesToSend = hasImages ? [...inputImages] : undefined;
+    inputImages = [];
     onSend(text, imagesToSend);
     inputText = "";
     visibleMessageCount = transcriptWindowSize;
@@ -329,7 +332,6 @@ import { tick } from "svelte";
       });
     }
   }
-
 
   function cancelEdit() {
     editingMessageIndex = null;
@@ -356,7 +358,8 @@ import { tick } from "svelte";
 
   function focusSearchInput() {
     requestAnimationFrame(() => {
-      const si = messagesContainer?.querySelector<HTMLInputElement>(".search-input");
+      const si =
+        messagesContainer?.querySelector<HTMLInputElement>(".search-input");
       si?.focus();
     });
   }
@@ -433,7 +436,8 @@ import { tick } from "svelte";
 
   function goToPrevMatch() {
     if (searchResults.length <= 1) return;
-    currentSearchIdx = (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
+    currentSearchIdx =
+      (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
   }
 
@@ -445,12 +449,16 @@ import { tick } from "svelte";
       // Wait for Svelte to render the newly visible messages before scrolling
       requestAnimationFrame(() => {
         if (!messagesContainer) return;
-        const el2 = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
+        const el2 = messagesContainer.querySelector(
+          `[data-msg-index="${msgIndex}"]`,
+        );
         if (el2) el2.scrollIntoView({ behavior: "smooth", block: "center" });
       });
       return;
     }
-    const el = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
+    const el = messagesContainer.querySelector(
+      `[data-msg-index="${msgIndex}"]`,
+    );
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -533,8 +541,8 @@ import { tick } from "svelte";
       const data = reader.result as string;
       const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
       if (base64Match) {
-        images = [
-          ...images,
+        inputImages = [
+          ...inputImages,
           {
             type: "image",
             data: base64Match[2],
@@ -548,7 +556,7 @@ import { tick } from "svelte";
   }
 
   function removeImage(index: number) {
-    images = images.filter((_, i) => i !== index);
+    inputImages = inputImages.filter((_, i) => i !== index);
   }
   function getImageDataUrl(img: ImageContent): string {
     return `data:${img.mimeType};base64,${img.data}`;
@@ -684,7 +692,20 @@ import { tick } from "svelte";
   >
     {#if showSearch}
       <div class="search-bar">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          ><circle cx="11" cy="11" r="8" /><line
+            x1="21"
+            y1="21"
+            x2="16.65"
+            y2="16.65"
+          /></svg
+        >
         <input
           type="text"
           placeholder="Search messages... (Ctrl+F)"
@@ -692,18 +713,64 @@ import { tick } from "svelte";
           class="search-input"
         />
         {#if searchResults.length > 0}
-          <button class="search-nav" onclick={goToPrevMatch} aria-label="Previous match" disabled={searchResults.length <= 1}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="15 18 9 12 15 6"/></svg>
+          <button
+            class="search-nav"
+            onclick={goToPrevMatch}
+            aria-label="Previous match"
+            disabled={searchResults.length <= 1}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="3"><polyline points="15 18 9 12 15 6" /></svg
+            >
           </button>
-          <span class="search-count">{currentSearchIdx + 1}/{searchResults.length}</span>
-          <button class="search-nav" onclick={goToNextMatch} aria-label="Next match" disabled={searchResults.length <= 1}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="search-count"
+            >{currentSearchIdx + 1}/{searchResults.length}</span
+          >
+          <button
+            class="search-nav"
+            onclick={goToNextMatch}
+            aria-label="Next match"
+            disabled={searchResults.length <= 1}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="3"><polyline points="9 18 15 12 9 6" /></svg
+            >
           </button>
         {:else}
           <span class="search-count">0 matches</span>
         {/if}
-        <button class="search-close" onclick={() => { showSearch = false; searchQuery = ""; }} aria-label="Close search">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button
+          class="search-close"
+          onclick={() => {
+            showSearch = false;
+            searchQuery = "";
+          }}
+          aria-label="Close search"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            ><line x1="18" y1="6" x2="6" y2="18" /><line
+              x1="6"
+              y1="6"
+              x2="18"
+              y2="18"
+            /></svg
+          >
         </button>
       </div>
     {/if}
@@ -736,51 +803,51 @@ import { tick } from "svelte";
         </p>
 
         {#if showSetupCard}
-        <div class="setup-card">
-          <div class="setup-header">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+          <div class="setup-card">
+            <div class="setup-header">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>Getting Started</span>
+              <HelpTooltip
+                text="This extension requires the PI CLI. Install it globally with npm and ensure the 'pi' command is on your PATH."
+                title="Setup Help"
               />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            <span>Getting Started</span>
-            <HelpTooltip
-              text="This extension requires the PI CLI. Install it globally with npm and ensure the 'pi' command is on your PATH."
-              title="Setup Help"
-            />
+            </div>
+            <button
+              class="setup-code"
+              onclick={() =>
+                navigator.clipboard.writeText(
+                  "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+                )}
+            >
+              <span class="code-prompt">$</span> npm install -g --ignore-scripts
+              @earendil-works/pi-coding-agent
+              <svg
+                class="copy-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                />
+              </svg>
+            </button>
           </div>
-          <button
-            class="setup-code"
-            onclick={() =>
-              navigator.clipboard.writeText(
-                "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
-              )}
-          >
-            <span class="code-prompt">$</span> npm install -g --ignore-scripts
-            @earendil-works/pi-coding-agent
-            <svg
-              class="copy-icon"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              />
-            </svg>
-          </button>
-        </div>
         {/if}
 
         {#if mediaKofi}
@@ -848,9 +915,7 @@ import { tick } from "svelte";
               </svg>
               Architecture
             </button>
-            <button
-              onclick={() => onSend("Help me debug this issue")}
-            >
+            <button onclick={() => onSend("Help me debug this issue")}>
               <svg
                 width="14"
                 height="14"
@@ -859,7 +924,9 @@ import { tick } from "svelte";
                 stroke="currentColor"
                 stroke-width="2"
               >
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                <path
+                  d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                />
               </svg>
               Debug Issue
             </button>
@@ -875,7 +942,9 @@ import { tick } from "svelte";
                 stroke-width="2"
               >
                 <polyline points="9 11 12 14 22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                <path
+                  d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                />
               </svg>
               Write Tests
             </button>
@@ -891,8 +960,11 @@ import { tick } from "svelte";
 
       {#each visibleMessages as message, i (i)}
         <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
-          <MessageBubble {message} searchQuery={showSearch ? searchQuery : ""} />
-
+          <MessageBubble
+            {message}
+            searchQuery={showSearch ? searchQuery : ""}
+            {onForkMessage}
+          />
         </div>
       {/each}
 
@@ -981,9 +1053,9 @@ import { tick } from "svelte";
     ondragleave={handleDragLeave}
     ondrop={handleDrop}
   >
-    {#if images.length > 0}
+    {#if inputImages.length > 0}
       <div class="image-preview-bar">
-        {#each images as img, i}
+        {#each inputImages as img, i}
           <div class="image-preview-item">
             <img
               src={getImageDataUrl(img)}
@@ -1127,7 +1199,7 @@ import { tick } from "svelte";
       <button
         class="send-btn"
         onclick={handleSubmit}
-        disabled={!inputText.trim() && images.length === 0}
+        disabled={!inputText.trim() && inputImages.length === 0}
         title="Send (Enter)"
       >
         <svg
@@ -1169,7 +1241,6 @@ import { tick } from "svelte";
         {/each}
       </div>
     {/if}
-
   </div>
 
   <div class="status-bar">
@@ -1575,7 +1646,6 @@ import { tick } from "svelte";
     border-bottom-color: var(--color-primary);
   }
 
-
   .setup-card {
     background: oklch(from var(--color-surface) l c h / 0.6);
     border: 1px solid oklch(from var(--color-border) l c h / 0.25);
@@ -1692,8 +1762,6 @@ import { tick } from "svelte";
     display: flex;
     flex-direction: column;
   }
-
-
 
   /* ── Edit message overlay ───────────────── */
   .edit-message-overlay {
@@ -2011,8 +2079,6 @@ import { tick } from "svelte";
     font-size: 10px;
     user-select: none;
   }
-
-
 
   .autocomplete-dropdown {
     position: absolute;

@@ -17,6 +17,23 @@ suite('Message Serializer', () => {
 			assert.strictEqual(result[0]!.timestamp, 1000);
 		});
 
+		test('preserves entry ids when serializing session entries', () => {
+			const messages = [
+				{
+					type: 'message',
+					id: 'entry-1',
+					parentId: null,
+					timestamp: '2024-12-03T14:00:01.000Z',
+					message: { role: 'user', content: 'hello from history' },
+				},
+			];
+			const result = serializeMessages(messages as any);
+			assert.strictEqual(result.length, 1);
+			assert.strictEqual(result[0]!.entryId, 'entry-1');
+			assert.strictEqual(result[0]!.parentId, null);
+			assert.strictEqual(result[0]!.content, 'hello from history');
+		});
+
 		test('serializes user message with images', () => {
 			const messages = [
 				{

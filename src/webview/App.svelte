@@ -4,21 +4,17 @@
   import ModelSelector from "./components/ModelSelector.svelte";
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import ToolsPanel from "./components/ToolsPanel.svelte";
-import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
-import SkillsPanel from "./components/SkillsPanel.svelte";
-import ProviderSettings from "./components/ProviderSettings.svelte";
+  import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
+  import SkillsPanel from "./components/SkillsPanel.svelte";
+  import ProviderSettings from "./components/ProviderSettings.svelte";
   import Header from "./components/Header.svelte";
   import Toast from "./components/Toast.svelte";
   import OnboardingTour from "./components/OnboardingTour.svelte";
   import ExportDialog from "./components/ExportDialog.svelte";
   import PromptTemplates from "./components/PromptTemplates.svelte";
-  import type {
-    ImageContent,
-    Message,
-    Model,
-  } from "./types/index";
+  import type { ImageContent, Message, Model } from "./types/index";
 
-let activeTab = $state<
+  let activeTab = $state<
     | "chat"
     | "sessions"
     | "models"
@@ -27,10 +23,11 @@ let activeTab = $state<
     | "settings"
     | "packages"
     | "skills"
->("chat");
+  >("chat");
   let messages = $state<Message[]>([]);
   let isStreaming = $state(false);
   let draftInputText = $state("");
+  let draftInputImages = $state<ImageContent[]>([]);
   let models = $state<Model[]>([]);
   let isInitialized = $state(false);
   let currentModel = $state<string | null>(null);
@@ -54,13 +51,13 @@ let activeTab = $state<
       status: string;
     }>
   >([]);
-let isListening = $state(false);
-	let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(
-		new Map(),
-	);
-	let toolPreset = $state<string | null>(null);
+  let isListening = $state(false);
+  let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(
+    new Map(),
+  );
+  let toolPreset = $state<string | null>(null);
 
-	// Update notification state
+  // Update notification state
   let hasUpdates = $state(false);
   let piUpdateAvailable = $state<string | null>(null);
   let packageUpdateCount = $state(0);
@@ -180,19 +177,19 @@ let isListening = $state(false);
           activeTab = "tools";
           e.preventDefault();
           break;
-		case "6":
-			activeTab = "packages";
-			e.preventDefault();
-			break;
-		case "7":
-			activeTab = "skills";
-			e.preventDefault();
-			break;
-		case "8":
-			activeTab = "settings";
-			e.preventDefault();
-			break;
-		}
+        case "6":
+          activeTab = "packages";
+          e.preventDefault();
+          break;
+        case "7":
+          activeTab = "skills";
+          e.preventDefault();
+          break;
+        case "8":
+          activeTab = "settings";
+          e.preventDefault();
+          break;
+      }
     }
 
     window.addEventListener("keydown", handleKeydown);
@@ -240,6 +237,14 @@ let isListening = $state(false);
         break;
       case "session-history":
         messages = data.messages || [];
+        draftInputText = "";
+        draftInputImages = [];
+        maybeShowForkHint(messages);
+        activeTab = "chat";
+        break;
+      case "fork-input-restored":
+        draftInputText = data?.text || "";
+        draftInputImages = Array.isArray(data?.images) ? data.images : [];
         activeTab = "chat";
         break;
       case "models-updated":
@@ -292,15 +297,15 @@ let isListening = $state(false);
         autoCompaction = data.enabled;
         break;
 
-case "provider-auth":
-			providers = data || [];
-			break;
+      case "provider-auth":
+        providers = data || [];
+        break;
 
-		case "settings-response":
-			toolPreset = data?.toolPreset ?? null;
-			break;
+      case "settings-response":
+        toolPreset = data?.toolPreset ?? null;
+        break;
 
-		case "switchTab":
+      case "switchTab":
         if (data?.tab) {
           activeTab = data.tab;
         }
@@ -455,7 +460,8 @@ case "provider-auth":
         // Footer data from extension host (cwd, git branch, session name)
         if (data.cwd) footerCwd = data.cwd;
         if (data.gitBranch !== undefined) footerGitBranch = data.gitBranch;
-        if (data.sessionName !== undefined) footerSessionName = data.sessionName;
+        if (data.sessionName !== undefined)
+          footerSessionName = data.sessionName;
         break;
       }
 
@@ -923,6 +929,27 @@ case "provider-auth":
     }
   }
 
+  function maybeShowForkHint(currentMessages: any[]) {
+    try {
+      const hasSeenHint = localStorage.getItem("pilots-seen-fork-hint");
+      if (hasSeenHint) return;
+
+      const hasForkableUserMessage = currentMessages.some(
+        (message) => message?.role === "user" && message?.entryId,
+      );
+      if (!hasForkableUserMessage) return;
+
+      localStorage.setItem("pilots-seen-fork-hint", "true");
+      showToast({
+        type: "info",
+        title: "New fork shortcut",
+        message:
+          "Hover any user message and click the fork icon to branch from that point.",
+        duration: 5500,
+      });
+    } catch {}
+  }
+
   async function handleSendPrompt(text: string, images?: ImageContent[]) {
     const newMsg: Message = {
       role: "user",
@@ -951,8 +978,16 @@ case "provider-auth":
     });
   }
 
+  function handleForkMessage(entryId: string) {
+    sendMessage({
+      type: "forkSession",
+      data: { entryId },
+    });
+  }
+
   function handleInsertPromptTemplate(text: string) {
     draftInputText = text;
+    draftInputImages = [];
     showPromptTemplates = false;
     activeTab = "chat";
   }
@@ -1185,9 +1220,7 @@ case "provider-auth":
             stroke="currentColor"
             stroke-width="2"
           >
-            <path
-              d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-            />
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
           </svg>
         </button>
       </div>
@@ -1229,6 +1262,7 @@ case "provider-auth":
           {isListening}
           onToggleVoice={handleToggleVoice}
           bind:inputText={draftInputText}
+          bind:inputImages={draftInputImages}
           {tokensIn}
           {tokensOut}
           {tokensTotal}
@@ -1240,13 +1274,14 @@ case "provider-auth":
           onCompact={handleCompact}
           {editRequestIndex}
           onEditMessage={handleEditMessage}
+          onForkMessage={handleForkMessage}
           onShowExport={() => (showExport = true)}
           onShowPromptTemplates={() => (showPromptTemplates = true)}
           {previousResourceCount}
           {activityStatuses}
-          footerCwd={footerCwd}
-          footerGitBranch={footerGitBranch}
-          footerSessionName={footerSessionName}
+          {footerCwd}
+          {footerGitBranch}
+          {footerSessionName}
         />
       {:else if activeTab === "sessions"}
         <SessionTree />
@@ -1262,7 +1297,7 @@ case "provider-auth":
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />
       {:else if activeTab === "tools"}
-        <ToolsPanel toolPreset={toolPreset} />
+        <ToolsPanel {toolPreset} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel />
       {:else if activeTab === "skills"}

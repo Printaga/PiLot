@@ -1,6 +1,5 @@
 - Support for opening config files
 - GUI rules management
-- GUI fork support
 - GUI MCP support
 - Edit message support
 - Slash command support

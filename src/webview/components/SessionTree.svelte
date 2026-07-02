@@ -123,10 +123,6 @@
     selectedSessionIds = new Set();
   }
 
-function forkSession(id: string) {
-		sendMessage({ type: "forkSession", data: { fromNodeId: id } });
-	}
-
   function deleteSession(id: string) {
     sendMessage({
       type: "deleteSessions",
@@ -157,7 +153,9 @@ function forkSession(id: string) {
   onkeydown={handleKeydown}
   role="listbox"
   aria-label="Sessions"
-  aria-activedescendant={selectedNodeId ? `session-${selectedNodeId}` : undefined}
+  aria-activedescendant={selectedNodeId
+    ? `session-${selectedNodeId}`
+    : undefined}
   tabindex="0"
 >
   <div class="session-header">
@@ -188,54 +186,55 @@ function forkSession(id: string) {
       </div>
     </div>
 
-  <div class="selection-bar">
-    <button
-      class="selection-toggle"
-      class:active={selectionMode}
-      onclick={toggleSelectionMode}
-    >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        {#if selectionMode}
-          <path d="M8 12l3 3 5-6" />
-        {/if}
-      </svg>
-      <span>Select</span>
-    </button>
-    {#if !selectionMode && selectedNodeId}
+    <div class="selection-bar">
       <button
-        class="selection-action danger"
-        onclick={() => deleteSession(selectedNodeId!)}
+        class="selection-toggle"
+        class:active={selectionMode}
+        onclick={toggleSelectionMode}
       >
-        Delete
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          {#if selectionMode}
+            <path d="M8 12l3 3 5-6" />
+          {/if}
+        </svg>
+        <span>Select</span>
       </button>
-    {/if}
-    {#if selectionMode && selectedSessionIds.size > 0}
-      <span class="selection-count">{selectedSessionIds.size} selected</span>
-      <button
-        class="selection-action"
-        onclick={() => selectAllSessions(sessions.map((session) => session.id))}
-      >
-        Select all
-      </button>
-      <button
-        class="selection-action danger"
-        onclick={deleteSelectedSessions}
-      >
-        Delete selected
-      </button>
-      <button class="selection-action" onclick={clearSelection}>
-        Clear
-      </button>
-    {/if}
-  </div>
+      {#if !selectionMode && selectedNodeId}
+        <button
+          class="selection-action danger"
+          onclick={() => deleteSession(selectedNodeId!)}
+        >
+          Delete
+        </button>
+      {/if}
+      {#if selectionMode && selectedSessionIds.size > 0}
+        <span class="selection-count">{selectedSessionIds.size} selected</span>
+        <button
+          class="selection-action"
+          onclick={() =>
+            selectAllSessions(sessions.map((session) => session.id))}
+        >
+          Select all
+        </button>
+        <button
+          class="selection-action danger"
+          onclick={deleteSelectedSessions}
+        >
+          Delete selected
+        </button>
+        <button class="selection-action" onclick={clearSelection}>
+          Clear
+        </button>
+      {/if}
+    </div>
 
     <div class="search-bar">
       <svg
@@ -310,7 +309,6 @@ function forkSession(id: string) {
                 selectSession(session.id);
               }
             }
-            if (e.key === "Delete" && e.ctrlKey) forkSession(session.id);
           }}
           role="option"
         >
@@ -378,7 +376,7 @@ function forkSession(id: string) {
       <span class="footer-info"
         >{sessions.length} session{sessions.length !== 1 ? "s" : ""}</span
       >
-      <span class="footer-hint">Ctrl+Click to fork</span>
+      <span class="footer-hint">Use the chat transcript to fork</span>
     {/if}
   </div>
 </div>

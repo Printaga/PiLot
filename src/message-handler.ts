@@ -660,7 +660,9 @@ export class MessageHandler {
 
 				case "forkSession":
 					try {
-						await this.provider.forkSession(message.data.fromNodeId);
+						await this.provider.forkSession(
+							message.data.entryId ?? message.data.fromNodeId,
+						);
 						result = { success: true };
 					} catch (error) {
 						this.provider.webview?.postMessage({

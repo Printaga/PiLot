@@ -3,7 +3,8 @@ import * as vscode from "vscode";
 import {
 	type AuthStorage,
 	type ModelRegistry,
-	type SessionManager,
+	SessionManager,
+	type SessionManager as SessionManagerType,
 	type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
@@ -27,6 +28,7 @@ import {
 	createMockSettingsManager,
 	createMockSessionManager,
 } from "../../mocks/pi-sdk-mocks.js";
+import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,13 +84,15 @@ function setupPiSdkMocks() {
 	savedGetAgentDir = piAgentProviderInternals.getAgentDir;
 	piAgentProviderInternals.getAgentDir = () => "/fake/agent-dir";
 	savedCreateAuthStorage = piAgentProviderInternals.createAuthStorage;
-	piAgentProviderInternals.createAuthStorage = () => ({} as AuthStorage);
+	piAgentProviderInternals.createAuthStorage = () => ({}) as AuthStorage;
 	savedCreateModelRegistry = piAgentProviderInternals.createModelRegistry;
-	piAgentProviderInternals.createModelRegistry = () => ({} as ModelRegistry);
+	piAgentProviderInternals.createModelRegistry = () => ({}) as ModelRegistry;
 	savedCreateSettingsManager = piAgentProviderInternals.createSettingsManager;
-	piAgentProviderInternals.createSettingsManager = () => ({} as SettingsManager);
+	piAgentProviderInternals.createSettingsManager = () =>
+		({}) as SettingsManager;
 	savedCreateSessionManager = piAgentProviderInternals.createSessionManager;
-	piAgentProviderInternals.createSessionManager = () => ({} as SessionManager);
+	piAgentProviderInternals.createSessionManager = () =>
+		({}) as SessionManagerType;
 }
 
 function restorePiSdkMocks() {
@@ -105,16 +109,16 @@ function restorePiSdkMocks() {
 		piAgentProviderInternals.createModelRegistry = savedCreateModelRegistry;
 	}
 	if (savedCreateSettingsManager !== undefined) {
-		piAgentProviderInternals.createSettingsManager =
-			savedCreateSettingsManager;
+		piAgentProviderInternals.createSettingsManager = savedCreateSettingsManager;
 	}
 	if (savedCreateSessionManager !== undefined) {
-		piAgentProviderInternals.createSessionManager =
-			savedCreateSessionManager;
+		piAgentProviderInternals.createSessionManager = savedCreateSessionManager;
 	}
 }
 
-function createTestConfig(overrides: Partial<PiAgentConfig> = {}): PiAgentConfig {
+function createTestConfig(
+	overrides: Partial<PiAgentConfig> = {},
+): PiAgentConfig {
 	return {
 		defaultModel: "openai/gpt-4o-mini",
 		defaultProvider: "openai",
@@ -154,7 +158,9 @@ function buildProvider(
 	const provider = new PiAgentProvider(mockCtx as any, config);
 	provider.resolveWebviewView(view);
 
-	const mockBinary = createMockBinaryService({ getCliVersion: async () => "0.1.0" });
+	const mockBinary = createMockBinaryService({
+		getCliVersion: async () => "0.1.0",
+	});
 	(provider as any).binaryService = {
 		...mockBinary,
 		resolveAtStartup: () => {},
@@ -164,7 +170,9 @@ function buildProvider(
 
 	(provider as any).authStorage = createMockAuthStorage();
 	(provider as any).modelRegistry = createMockModelRegistry();
-	(provider as any).sessionManager = createMockSessionManager(options.cwd || "/fake/workspace");
+	(provider as any).sessionManager = createMockSessionManager(
+		options.cwd || "/fake/workspace",
+	);
 	(provider as any).settingsManager = createMockSettingsManager();
 	(provider as any).modelRegistryHandler = new ModelRegistryHandler({
 		getModelRegistry: () => (provider as any).modelRegistry,
@@ -191,16 +199,22 @@ function buildProvider(
 	(provider as any).sessionListManager = new SessionListManager({
 		config,
 		getSession: () => (provider as any).session,
-		setSession: (s: any) => { (provider as any).session = s; },
+		setSession: (s: any) => {
+			(provider as any).session = s;
+		},
 		getSessionManager: () => (provider as any).sessionManager,
-		setSessionManager: (m: any) => { (provider as any).sessionManager = m; },
+		setSessionManager: (m: any) => {
+			(provider as any).sessionManager = m;
+		},
 		getAuthStorage: () => (provider as any).authStorage,
 		getModelRegistry: () => (provider as any).modelRegistry,
 		getSettingsManager: () => (provider as any).settingsManager,
 		notifyWebview: (msg: any) => provider["notifyWebview"](msg),
 		logDebug: (..._args: any[]) => {},
 		logError: (..._args: any[]) => {},
-		onSessionDeleted: async () => { await provider["newSession"](); },
+		onSessionDeleted: async () => {
+			await provider["newSession"]();
+		},
 	});
 
 	(provider as any).voiceManager = {
@@ -291,8 +305,14 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual((provider as any).isInitialized, true);
 			assert.ok((provider as any).authStorage, "authStorage should be set");
 			assert.ok((provider as any).modelRegistry, "modelRegistry should be set");
-			assert.ok((provider as any).settingsManager, "settingsManager should be set");
-			assert.ok((provider as any).sessionManager, "sessionManager should be set");
+			assert.ok(
+				(provider as any).settingsManager,
+				"settingsManager should be set",
+			);
+			assert.ok(
+				(provider as any).sessionManager,
+				"sessionManager should be set",
+			);
 		});
 
 		test("restores currentModelId from settings then globalState", async () => {
@@ -346,7 +366,9 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
+			const opts = await (provider as any).buildSessionOptions(
+				"/fake/workspace",
+			);
 			assert.strictEqual(opts.noTools, "all");
 			assert.strictEqual(opts.tools, undefined);
 		});
@@ -361,7 +383,9 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
+			const opts = await (provider as any).buildSessionOptions(
+				"/fake/workspace",
+			);
 			assert.strictEqual(opts.noTools, undefined);
 			assert.strictEqual(opts.tools, undefined);
 		});
@@ -433,14 +457,18 @@ suite("PiAgentProvider", () => {
 			const footerStopCalls: string[] = [];
 			(provider as any).footerManager = {
 				start: () => {},
-				stop: () => { footerStopCalls.push("stop"); },
+				stop: () => {
+					footerStopCalls.push("stop");
+				},
 				sendFooterData: () => {},
 				dispose: () => {},
 			} as any;
 
 			const eventCalls: any[] = [];
 			(provider as any)._onDidChangeTreeData = {
-				fire: () => { eventCalls.push("treeData"); },
+				fire: () => {
+					eventCalls.push("treeData");
+				},
 			} as any;
 
 			const messages: any[] = [];
@@ -612,9 +640,7 @@ suite("PiAgentProvider", () => {
 			const messages: any[] = [];
 			const mockSession = createSessionMock({
 				sessionId: "session-1",
-				messages: [
-					{ role: "user", content: "original", timestamp: 1 },
-				],
+				messages: [{ role: "user", content: "original", timestamp: 1 }],
 			});
 			(provider as any).notifyWebview = (msg: any) => {
 				messages.push(msg);
@@ -624,7 +650,9 @@ suite("PiAgentProvider", () => {
 
 			await provider["editMessage"](0, "updated text");
 
-			const historyMsg = messages.find((m: any) => m.type === "session-history");
+			const historyMsg = messages.find(
+				(m: any) => m.type === "session-history",
+			);
 			assert.ok(historyMsg, "session-history should be broadcast");
 		});
 	});
@@ -690,7 +718,10 @@ suite("PiAgentProvider", () => {
 
 			await provider["removeAuth"]("openai");
 
-			assert.ok(removeCalls.includes("openai"), "authStorage.remove should be called");
+			assert.ok(
+				removeCalls.includes("openai"),
+				"authStorage.remove should be called",
+			);
 			assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
 		});
 	});
@@ -699,7 +730,9 @@ suite("PiAgentProvider", () => {
 		test("handles invalid session id gracefully", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).sessionManager = createMockSessionManager("/fake") as any;
+			(provider as any).sessionManager = createMockSessionManager(
+				"/fake",
+			) as any;
 
 			const mockListManager = {
 				invalidateSessionListCache: () => {},
@@ -725,7 +758,9 @@ suite("PiAgentProvider", () => {
 		test("returns early when no session IDs provided", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).sessionManager = createMockSessionManager("/fake") as any;
+			(provider as any).sessionManager = createMockSessionManager(
+				"/fake",
+			) as any;
 
 			const mockListManager = {
 				invalidateSessionListCache: () => {},
@@ -737,6 +772,54 @@ suite("PiAgentProvider", () => {
 
 			await provider["deleteSessions"]([]);
 			assert.ok(true, "should handle empty sessionIds");
+		});
+
+		test("surfaces delete failures instead of silently succeeding", async () => {
+			resetVscodeMocks();
+			const provider = buildProvider();
+			const originalListSessions = piAgentProviderInternals.listSessions;
+			const originalUnlinkFile = piAgentProviderInternals.unlinkFile;
+			const mockSession = createSessionMock({ sessionId: "session-1" });
+			(provider as any).session = mockSession as any;
+
+			let refreshed = false;
+			let createdReplacementSession = false;
+			(provider as any).sessionListManager = {
+				refreshSessionList: async () => {
+					refreshed = true;
+				},
+			} as any;
+			(provider as any).newSession = async () => {
+				createdReplacementSession = true;
+			};
+
+			const errorCalls: string[] = [];
+			(vscode.window.showErrorMessage as any) = async (msg: string) => {
+				errorCalls.push(msg);
+				return "Mock";
+			};
+
+			piAgentProviderInternals.listSessions = (async () => [
+				{ id: "session-1", path: "/fake/.pi/sessions/session-1.jsonl" },
+			]) as any;
+			piAgentProviderInternals.unlinkFile = async () => {
+				throw new Error("permission denied");
+			};
+
+			try {
+				await provider["deleteSessions"](["session-1"]);
+				assert.fail("expected deleteSessions to throw");
+			} catch (error) {
+				assert.match(String(error), /Failed to delete sessions: session-1/);
+			} finally {
+				piAgentProviderInternals.listSessions = originalListSessions;
+				piAgentProviderInternals.unlinkFile = originalUnlinkFile;
+			}
+
+			assert.strictEqual(createdReplacementSession, false);
+			assert.strictEqual((provider as any).session, mockSession);
+			assert.strictEqual(refreshed, true);
+			assert.ok(errorCalls.some((msg) => msg.includes("session-1")));
 		});
 	});
 
@@ -792,7 +875,9 @@ suite("PiAgentProvider", () => {
 		test("session_info_changed refreshes resources and sends name change", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).session = createSessionMock({ sessionName: "new name" }) as any;
+			(provider as any).session = createSessionMock({
+				sessionName: "new name",
+			}) as any;
 
 			const refreshCalls: any[] = [];
 			const mockListManager = {
@@ -834,7 +919,9 @@ suite("PiAgentProvider", () => {
 				args: { file_path: "/fake/file.ts" },
 			} as any);
 
-			const activityMsg = messages.find((m: any) => m.type === "activity-start");
+			const activityMsg = messages.find(
+				(m: any) => m.type === "activity-start",
+			);
 			assert.ok(activityMsg, "activity-start should be emitted");
 			assert.ok(
 				activityMsg.data.text.includes("read"),
@@ -863,7 +950,10 @@ suite("PiAgentProvider", () => {
 		test("message_start triggers auto-naming when conditions met", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			const mockSession = createSessionMock({ sessionName: null, messages: [] });
+			const mockSession = createSessionMock({
+				sessionName: null,
+				messages: [],
+			});
 			(provider as any).session = mockSession as any;
 
 			let autoNamingTriggered = false;
@@ -908,10 +998,10 @@ suite("PiAgentProvider", () => {
 			);
 			assert.ok(successStart, "success compaction should show success text");
 
-			await (provider["handleSessionEvent"]({
+			await provider["handleSessionEvent"]({
 				type: "compaction_end",
 				errorMessage: "db locked",
-			} as any));
+			} as any);
 
 			const errorStart = messages.find(
 				(m: any) =>
@@ -920,10 +1010,10 @@ suite("PiAgentProvider", () => {
 			);
 			assert.ok(errorStart, "error compaction should show error text");
 
-			await (provider["handleSessionEvent"]({
+			await provider["handleSessionEvent"]({
 				type: "compaction_end",
 				aborted: true,
-			} as any));
+			} as any);
 
 			const abortedStart = messages.find(
 				(m: any) =>
@@ -941,13 +1031,18 @@ suite("PiAgentProvider", () => {
 			const stopCalls: string[] = [];
 			(provider as any).footerManager = {
 				start: () => {},
-				stop: () => { stopCalls.push("stop"); },
+				stop: () => {
+					stopCalls.push("stop");
+				},
 				sendFooterData: () => {},
 				dispose: () => {},
 			} as any;
 
 			provider.dispose();
-			assert.ok(stopCalls.includes("stop"), "footerManager.stop should be called");
+			assert.ok(
+				stopCalls.includes("stop"),
+				"footerManager.stop should be called",
+			);
 		});
 	});
 
@@ -1007,10 +1102,15 @@ suite("PiAgentProvider", () => {
 	suite("updateConfig", () => {
 		test("updates config object", () => {
 			const provider = buildProvider();
-			const newConfig = createTestConfig({ defaultModel: "anthropic/claude-3" });
+			const newConfig = createTestConfig({
+				defaultModel: "anthropic/claude-3",
+			});
 			provider["updateConfig"](newConfig);
 
-			assert.strictEqual((provider as any).config.defaultModel, "anthropic/claude-3");
+			assert.strictEqual(
+				(provider as any).config.defaultModel,
+				"anthropic/claude-3",
+			);
 		});
 	});
 
@@ -1023,7 +1123,9 @@ suite("PiAgentProvider", () => {
 			};
 
 			provider["sendUpdatesToWebview"]("0.2.0", 3);
-			const updateMsg = messages.find((m: any) => m.type === "updates-available");
+			const updateMsg = messages.find(
+				(m: any) => m.type === "updates-available",
+			);
 			assert.ok(updateMsg);
 			assert.strictEqual(updateMsg.data.piVersion, "0.2.0");
 			assert.strictEqual(updateMsg.data.packageCount, 3);
@@ -1037,58 +1139,225 @@ suite("PiAgentProvider", () => {
 			};
 
 			provider["sendUpdatesToWebview"](null, 0);
-			const clearedMsg = messages.find((m: any) => m.type === "updates-cleared");
+			const clearedMsg = messages.find(
+				(m: any) => m.type === "updates-cleared",
+			);
 			assert.ok(clearedMsg, "updates-cleared should be sent");
 		});
 	});
 
-	suite("getSettings / setToolConfig / getExtensionVersion / getThinkingLevel", () => {
-		test("returns settings from config", async () => {
-			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
-				get: (key: string, def: any) => {
-					if (key === "toolPreset") return "custom";
-					if (key === "customTools") return ["bash", "edit"];
-					return def;
-				},
-				update: async () => {},
+	suite(
+		"getSettings / setToolConfig / getExtensionVersion / getThinkingLevel",
+		() => {
+			test("returns settings from config", async () => {
+				(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+					get: (key: string, def: any) => {
+						if (key === "toolPreset") return "custom";
+						if (key === "customTools") return ["bash", "edit"];
+						return def;
+					},
+					update: async () => {},
+				});
+
+				const provider = buildProvider();
+				const settings = await provider["getSettings"]();
+				assert.strictEqual(settings.toolPreset, "custom");
+				assert.deepStrictEqual(settings.customTools, ["bash", "edit"]);
 			});
 
-			const provider = buildProvider();
-			const settings = await provider["getSettings"]();
-			assert.strictEqual(settings.toolPreset, "custom");
-			assert.deepStrictEqual(settings.customTools, ["bash", "edit"]);
-		});
+			test("gets thinking level from settings manager or config", () => {
+				const provider = buildProvider();
+				(provider as any).settingsManager = {
+					getDefaultThinkingLevel: () => "high",
+				} as any;
 
-		test("gets thinking level from settings manager or config", () => {
-			const provider = buildProvider();
-			(provider as any).settingsManager = {
-				getDefaultThinkingLevel: () => "high",
-			} as any;
+				assert.strictEqual(provider["getThinkingLevel"](), "high");
 
-			assert.strictEqual(provider["getThinkingLevel"](), "high");
-
-			(provider as any).settingsManager = {
-				getDefaultThinkingLevel: () => null,
-			} as any;
-			assert.strictEqual(provider["getThinkingLevel"](), "medium");
-		});
-	});
+				(provider as any).settingsManager = {
+					getDefaultThinkingLevel: () => null,
+				} as any;
+				assert.strictEqual(provider["getThinkingLevel"](), "medium");
+			});
+		},
+	);
 
 	suite("forkSession", () => {
-		test("navigates tree when session exists", async () => {
+		test("forks before the selected user entry, restarts footer updates, and restores its prompt", async () => {
 			const provider = buildProvider();
-			const navigateCalls: string[] = [];
+
+			const currentSessionManager = {
+				getSessionId: () => "session-1",
+				getCwd: () => "/fake/workspace",
+				getSessionDir: () => "/fake/.pi/sessions",
+				getSessionFile: () => "/fake/.pi/sessions/original.jsonl",
+				getPath: () => [
+					{
+						type: "message",
+						id: "user-entry",
+						parentId: "assistant-parent",
+						message: { role: "user", content: "Original prompt" },
+					},
+				],
+				getEntry: (id: string) =>
+					id === "user-entry"
+						? {
+								type: "message",
+								id: "user-entry",
+								parentId: "assistant-parent",
+								message: {
+									role: "user",
+									content: [
+										{ type: "text", text: "Original prompt" },
+										{
+											type: "image",
+											data: "abc123",
+											mimeType: "image/png",
+											name: "diagram.png",
+										},
+									],
+								},
+							}
+						: undefined,
+			};
+
+			const tempManager = {
+				createBranchedSession: (leafId: string) => {
+					assert.strictEqual(leafId, "assistant-parent");
+					return "/fake/.pi/sessions/forked.jsonl";
+				},
+			};
+
+			const forkedManager = {
+				getCwd: () => "/fake/workspace",
+				getSessionDir: () => "/fake/.pi/sessions",
+				getSessionFile: () => "/fake/.pi/sessions/forked.jsonl",
+				getPath: () => [],
+			};
+
+			const openCalls: string[] = [];
+			const originalOpen = SessionManager.open;
+			(SessionManager as any).open = (path: string) => {
+				openCalls.push(path);
+				if (path === "/fake/.pi/sessions/original.jsonl") {
+					return tempManager;
+				}
+				return forkedManager;
+			};
+
+			const extensionRunner = {
+				emit: async () => {},
+			};
+			const newSession = createSessionMock({
+				sessionId: "forked-session",
+			});
+			newSession.extensionRunner = extensionRunner as any;
+
 			const mockSession = createSessionMock({
 				sessionId: "session-1",
 			});
-			(mockSession as any).navigateTree = (nodeId: string) => {
-				navigateCalls.push(nodeId);
-			};
+			(mockSession as any).sessionManager = currentSessionManager;
 			(provider as any).session = mockSession as any;
 			(provider as any)._onDidChangeTreeData = { fire: () => {} } as any;
+			(provider as any).extensionUIContext = {
+				stopStatusPoller: () => {},
+				bindExtensionUI: async () => {},
+			} as any;
+			const footerStartCalls: Array<{
+				cwd: string;
+				sessionName: string | null;
+			}> = [];
+			(provider as any).footerManager = {
+				start: (config: { getCwd: () => string; sessionName: string | null }) => {
+					footerStartCalls.push({
+						cwd: config.getCwd(),
+						sessionName: config.sessionName,
+					});
+				},
+				stop: () => {},
+			} as any;
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (msg: any) => {
+				webviewMessages.push(msg);
+			};
 
+			const originalCreate = piAgentProviderInternals.createAgentSession;
+			piAgentProviderInternals.createAgentSession = (async (opts: any) => {
+				assert.ok(opts.sessionManager, "sessionManager must be provided");
+				return { session: newSession, extensionsResult: {} as any };
+			}) as any;
+
+			await provider["forkSession"]("user-entry");
+
+			assert.strictEqual(openCalls.length, 2);
+			assert.ok(openCalls[1].includes("forked.jsonl"));
+			assert.strictEqual((provider as any).session!.sessionId, "forked-session");
+			assert.ok(
+				webviewMessages.some(
+					(msg: any) =>
+						msg.type === "fork-input-restored" &&
+						msg.data?.text === "Original prompt" &&
+						msg.data?.images?.[0]?.name === "diagram.png",
+				),
+				"forked prompt should be restored into the input",
+			);
+			assert.deepStrictEqual(footerStartCalls, [
+				{ cwd: "/fake/workspace", sessionName: null },
+			]);
+
+			(SessionManager as any).open = originalOpen;
+			piAgentProviderInternals.createAgentSession = originalCreate;
+		});
+
+		test("is no-op when no session exists", async () => {
+			const provider = buildProvider();
 			await provider["forkSession"]("node-1");
-			assert.ok(navigateCalls.includes("node-1"), "navigateTree should be called");
+			assert.ok(true);
+		});
+
+		test("rejects forking from a non-user entry", async () => {
+			const provider = buildProvider();
+
+			const currentSessionManager = {
+				getCwd: () => "/fake/workspace",
+				getSessionDir: () => "/fake/.pi/sessions",
+				getSessionFile: () => "/fake/.pi/sessions/original.jsonl",
+				getPath: () => [
+					{
+						type: "message",
+						id: "assistant-entry",
+						parentId: "user-entry",
+						message: { role: "assistant", content: "Nope" },
+					},
+				],
+				getEntry: (id: string) =>
+					id === "assistant-entry"
+						? {
+								type: "message",
+								id: "assistant-entry",
+								parentId: "user-entry",
+								message: { role: "assistant", content: "Nope" },
+							}
+						: undefined,
+			};
+
+			const mockSession = createSessionMock({ sessionId: "session-1" });
+			(mockSession as any).sessionManager = currentSessionManager;
+			(provider as any).session = mockSession as any;
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (msg: any) => {
+				webviewMessages.push(msg);
+			};
+
+			await provider["forkSession"]("assistant-entry");
+
+			assert.ok(
+				webviewMessages.some(
+					(msg: any) =>
+						msg.type === "error" &&
+						String(msg.data?.message || "").includes("user message"),
+				),
+				"expected an error when trying to fork from a non-user entry",
+			);
 		});
 	});
 
@@ -1111,7 +1380,10 @@ suite("PiAgentProvider", () => {
 		test("returns settingsManager", () => {
 			const provider = buildProvider();
 			(provider as any).settingsManager = { foo: "bar" } as any;
-			assert.strictEqual((provider as any).settingsManager, provider["getSettingsManager"]());
+			assert.strictEqual(
+				(provider as any).settingsManager,
+				provider["getSettingsManager"](),
+			);
 		});
 
 		test("returns undefined when not set", () => {
@@ -1204,7 +1476,9 @@ suite("PiAgentProvider", () => {
 					text.replace("@file:", "/resolved/path"),
 			} as any;
 
-			const result = await (provider as any).resolveFileMentions("@file:/fake/file.ts hello");
+			const result = await (provider as any).resolveFileMentions(
+				"@file:/fake/file.ts hello",
+			);
 			assert.ok(result.includes("/resolved/path"));
 		});
 	});

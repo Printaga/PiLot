@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
 import { VoiceManager } from "./voice-manager.js";
-import { type ThinkingLevel } from "./webview/types/index.js";
+import { type ImageContent, type ThinkingLevel } from "./webview/types/index.js";
 
 import {
 	checkBetterSqlite3,
@@ -48,6 +48,9 @@ const THINKING_LEVELS: ReadonlySet<string> = new Set([
 export const piAgentProviderInternals = {
 	createAgentSession,
 	getAgentDir,
+	unlinkFile: (path: string) => fs.unlink(path),
+	listSessions: (cwd: string, sessionDir?: string) =>
+		SessionManager.list(cwd, sessionDir),
 	createAuthStorage: () => AuthStorage.create(),
 	createModelRegistry: (authStorage: AuthStorage) =>
 		ModelRegistry.create(authStorage),
@@ -588,12 +591,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Bind extension UI context so package setStatus() calls reach the webview.
 		// This also emits session_start to initialize extensions (LSP, indexing, etc.)
 		await this.extensionUIContext.bindExtensionUI();
-
-		// Start sending footer data (cwd, git branch, session name) to the webview
-		this.footerManager.start({
-			getCwd: () => this.session!.sessionManager.getCwd(),
-			sessionName: this.session.sessionName,
-		});
+		this.startFooterForSession(this.session);
 
 		return this.session;
 	}
@@ -604,25 +602,28 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
-			const allSessions = await SessionManager.list(
+			const allSessions = await piAgentProviderInternals.listSessions(
 				cwd,
 				this.config.sessionDir,
 			);
-			await Promise.all(
-				sessionIds.map(async (sessionId) => {
-					try {
-						const targetSessionInfo = allSessions.find(
-							(s) => s.id === sessionId,
-						);
-						if (targetSessionInfo) {
-							await fs.unlink(targetSessionInfo.path);
-						}
-					} catch (error) {
-						this.logError(`[PI] Failed to delete session ${sessionId}:`, error);
-						throw error;
-					}
-				}),
-			);
+			const failedSessionIds: string[] = [];
+			for (const sessionId of sessionIds) {
+				const targetSessionInfo = allSessions.find((s) => s.id === sessionId);
+				if (!targetSessionInfo) continue;
+				try {
+					await piAgentProviderInternals.unlinkFile(targetSessionInfo.path);
+				} catch (error) {
+					this.logError(`[PI] Failed to delete session ${sessionId}:`, error);
+					failedSessionIds.push(sessionId);
+				}
+			}
+
+			if (failedSessionIds.length > 0) {
+				await this.sessionListManager.refreshSessionList(true);
+				throw new Error(
+					`Failed to delete sessions: ${failedSessionIds.join(", ")}`,
+				);
+			}
 
 			if (this.session && sessionIds.includes(this.session.sessionId)) {
 				// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
@@ -1022,11 +1023,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Bind extension UI context so setStatus calls reach the webview.
 		// This also emits session_start to initialize extensions for this session.
 		await this.extensionUIContext.bindExtensionUI();
+		this.startFooterForSession(this.session);
 
 		this._onDidChangeTreeData.fire();
 
 		// Send session ID + message history to webview
-		const messages = this.serializeMessages(session.messages);
+		const messages = this.getSerializedSessionMessages(session);
 		this.notifyWebview({
 			type: "session-history",
 			data: { sessionId: this.session.sessionId, messages },
@@ -1034,11 +1036,151 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		await this.sendSessionResources();
 	}
 
-	async forkSession(fromNodeId?: string) {
-		if (this.session) {
-			await this.session.navigateTree(fromNodeId || this.session.sessionId);
+	async forkSession(entryId?: string) {
+		if (!this.session) return;
+
+		const sm = this.session.sessionManager;
+		const currentSessionFile = sm.getSessionFile();
+		if (!currentSessionFile) {
+			this.logError("[PI] Cannot fork: session has no file (in-memory only)");
+			return;
 		}
+
+		const cwd = sm.getCwd();
+		const sessionDir = sm.getSessionDir();
+		let selectedPrompt:
+			| { text: string; images?: ImageContent[] }
+			| undefined;
+		let forkedManager: SessionManager | undefined;
+
+		try {
+			if (entryId) {
+				const targetEntry = this.getSessionEntry(sm, entryId);
+				if (
+					!targetEntry ||
+					targetEntry.type !== "message" ||
+					targetEntry.message?.role !== "user"
+				) {
+					this.notifyWebview({
+						type: "error",
+						data: {
+							message: "Forking is only available from a user message.",
+							timestamp: Date.now(),
+						},
+					});
+					return;
+				}
+
+				selectedPrompt = {
+					text: this.extractUserMessageText(targetEntry.message),
+					images: this.extractUserMessageImages(targetEntry.message),
+				};
+				if (targetEntry.parentId) {
+					const tempManager = SessionManager.open(
+						currentSessionFile,
+						sessionDir,
+						cwd,
+					);
+					const newSessionFile = tempManager.createBranchedSession(
+						targetEntry.parentId,
+					);
+					if (!newSessionFile) {
+						this.logError("[PI] Fork failed: session not persisted");
+						return;
+					}
+					forkedManager = SessionManager.open(newSessionFile, sessionDir, cwd);
+				} else {
+					// Forking before the first user message creates a blank session with
+					// the selected prompt restored into the editor, matching CLI behavior.
+					forkedManager = SessionManager.create(cwd, sessionDir, {
+						parentSession: currentSessionFile,
+					});
+				}
+			} else {
+				const tempManager = SessionManager.open(currentSessionFile, sessionDir, cwd);
+				const leafId = tempManager.getLeafId();
+				if (!leafId) {
+					this.logError("[PI] Fork failed: source session has no entries");
+					return;
+				}
+				const newSessionFile = tempManager.createBranchedSession(leafId);
+				if (!newSessionFile) {
+					this.logError("[PI] Fork failed: session not persisted");
+					return;
+				}
+				forkedManager = SessionManager.open(newSessionFile, sessionDir, cwd);
+			}
+		} catch (error) {
+			this.logError("[PI] Fork failed:", error);
+			this.notifyWebview({
+				type: "error",
+				data: {
+					message: `Failed to fork session: ${error instanceof Error ? error.message : String(error)}`,
+					timestamp: Date.now(),
+				},
+			});
+			return;
+		}
+		if (!forkedManager) {
+			this.logError("[PI] Fork failed: session not persisted");
+			return;
+		}
+
+		// Shut down old session
+		this.extensionUIContext.stopStatusPoller();
+		this.footerManager.stop();
+		this.extensionStatuses.clear();
+		this.notifyWebview({ type: "extension-statuses-clear" });
+
+		if (this.session) {
+			await this.session.extensionRunner
+				.emit({
+					type: "session_shutdown",
+					reason: "new",
+				})
+				.catch((e) => {
+					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+				});
+			this.session.dispose();
+			this.session = undefined;
+		}
+
+		// Build session options from VS Code configuration
+		const sessionOpts = await this.buildSessionOptions(cwd);
+
+		const { session } = await piAgentProviderInternals.createAgentSession({
+			...sessionOpts,
+			sessionManager: forkedManager,
+			authStorage: this.authStorage,
+			modelRegistry: this.modelRegistry,
+		});
+
+		this.sessionManager = forkedManager;
+		this.session = session;
+		this.session.subscribe(this.handleSessionEvent.bind(this));
+
+		// Bind extension UI so setStatus calls reach the webview
+		await this.extensionUIContext.bindExtensionUI();
+		this.startFooterForSession(this.session);
+
 		this._onDidChangeTreeData.fire();
+
+		// Send session ID + message history to webview
+		const messages = this.getSerializedSessionMessages(session);
+		this.notifyWebview({
+			type: "session-history",
+			data: { sessionId: session.sessionId, messages },
+		});
+		if (selectedPrompt !== undefined) {
+			this.notifyWebview({
+				type: "fork-input-restored",
+				data: {
+					text: selectedPrompt.text,
+					images: selectedPrompt.images,
+				},
+			});
+		}
+		await this.sendSessionResources();
 	}
 
 	async getSettings(): Promise<{ toolPreset: string; customTools: string[] }> {
@@ -1281,7 +1423,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			}
 
 			// Broadcast updated messages to the webview
-			const serialized = serializeMessages(this.session.messages);
+			const serialized = this.getSerializedSessionMessages(this.session);
 			this.notifyWebview({
 				type: "session-history",
 				data: { sessionId: this.session.sessionId, messages: serialized },
@@ -1700,6 +1842,67 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return serializeMessages(messages);
 	}
 
+	private getSerializedSessionMessages(session: AgentSession) {
+		const sessionManager = session.sessionManager as any;
+		const pathEntries = sessionManager?.getPath?.();
+		if (Array.isArray(pathEntries) && pathEntries.length > 0) {
+			return this.serializeMessages(pathEntries);
+		}
+		return this.serializeMessages(session.messages);
+	}
+
+	private getSessionEntry(sessionManager: any, entryId: string): any | undefined {
+		if (typeof sessionManager?.getEntry === "function") {
+			return sessionManager.getEntry(entryId);
+		}
+		const pathEntries = sessionManager?.getPath?.();
+		if (Array.isArray(pathEntries)) {
+			return pathEntries.find((entry: any) => entry?.id === entryId);
+		}
+		return undefined;
+	}
+
+	private extractUserMessageText(message: any): string {
+		if (typeof message?.content === "string") {
+			return message.content;
+		}
+		if (Array.isArray(message?.content)) {
+			return message.content
+				.filter((part: any) => part?.type === "text")
+				.map((part: any) => part?.text || "")
+				.join("\n");
+		}
+		return "";
+	}
+
+	private extractUserMessageImages(message: any): ImageContent[] | undefined {
+		if (!Array.isArray(message?.content)) {
+			return undefined;
+		}
+		const images = message.content
+			.filter(
+				(part: any) =>
+					part?.type === "image" &&
+					typeof part?.data === "string" &&
+					typeof part?.mimeType === "string",
+			)
+			.map((part: any) => ({
+				type: "image" as const,
+				data: part.data,
+				mimeType: part.mimeType,
+				name: typeof part.name === "string" ? part.name : undefined,
+			}));
+		return images.length > 0 ? images : undefined;
+	}
+
+	private startFooterForSession(session?: AgentSession): void {
+		if (!session) return;
+		this.footerManager.start({
+			getCwd: () => session.sessionManager.getCwd(),
+			sessionName: session.sessionName,
+		});
+	}
+
 	private sendSessionStats() {
 		const stats = this.getSessionStats();
 		if (stats) {
@@ -1890,7 +2093,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		panel.webview.html = await this.getWebviewContent(panel.webview);
 
 		// Show session history in the editor
-		const messages = this.serializeMessages(this.session.messages);
+		const messages = this.getSerializedSessionMessages(this.session);
 		panel.webview.postMessage({
 			type: "session-history",
 			data: { sessionId: this.session.sessionId, messages },
