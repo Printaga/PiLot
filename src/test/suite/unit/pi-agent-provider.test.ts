@@ -1021,6 +1021,76 @@ suite("PiAgentProvider", () => {
 			);
 			assert.ok(abortedStart, "aborted compaction should show aborted text");
 		});
+
+		test("re-sends session-history on agent_end (non-retry) so messages get entryId", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).session = createSessionMock({
+				sessionId: "session-1",
+			}) as any;
+
+			const serialized: any[] = [
+				{ role: "user", content: "hi", entryId: "entry-1", timestamp: 100 },
+			];
+			(provider as any).getSerializedSessionMessages = () => serialized;
+
+			const messages: any[] = [];
+			(provider as any).notifyWebview = (msg: any) => {
+				messages.push(msg);
+			};
+
+			// Should send session-history on agent_end without retry
+			await (provider as any).handleSessionEvent({
+				type: "agent_end",
+				willRetry: false,
+			} as any);
+
+			const historyMsg = messages.find(
+				(m: any) => m.type === "session-history",
+			);
+			assert.ok(
+				historyMsg,
+				"session-history should be sent on agent_end (non-retry)",
+			);
+			assert.strictEqual(
+				historyMsg?.data?.sessionId,
+				"session-1",
+			);
+			assert.strictEqual(
+				historyMsg?.data?.messages?.[0]?.entryId,
+				"entry-1",
+				"messages should carry entryId from path entries",
+			);
+
+			// Should NOT send session-history on agent_end with willRetry
+			messages.length = 0;
+			await (provider as any).handleSessionEvent({
+				type: "agent_end",
+				willRetry: true,
+			} as any);
+			const retryHistory = messages.find(
+				(m: any) => m.type === "session-history",
+			);
+			assert.ok(
+				!retryHistory,
+				"session-history should NOT be sent on agent_end with willRetry",
+			);
+
+			// Should NOT send session-history when session is null
+			messages.length = 0;
+			(provider as any).session = null;
+			await (provider as any).handleSessionEvent({
+				type: "agent_end",
+				willRetry: false,
+			} as any);
+			const noSessionHistory = messages.find(
+				(m: any) => m.type === "session-history",
+			);
+			assert.ok(
+				!noSessionHistory,
+				"session-history should NOT be sent when session is null",
+			);
+		});
 	});
 
 	suite("dispose", () => {

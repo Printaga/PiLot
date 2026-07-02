@@ -17,7 +17,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
 import { VoiceManager } from "./voice-manager.js";
-import { type ImageContent, type ThinkingLevel } from "./webview/types/index.js";
+import {
+	type ImageContent,
+	type ThinkingLevel,
+} from "./webview/types/index.js";
 
 import {
 	checkBetterSqlite3,
@@ -1048,9 +1051,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		const cwd = sm.getCwd();
 		const sessionDir = sm.getSessionDir();
-		let selectedPrompt:
-			| { text: string; images?: ImageContent[] }
-			| undefined;
+		let selectedPrompt: { text: string; images?: ImageContent[] } | undefined;
 		let forkedManager: SessionManager | undefined;
 
 		try {
@@ -1097,7 +1098,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					});
 				}
 			} else {
-				const tempManager = SessionManager.open(currentSessionFile, sessionDir, cwd);
+				const tempManager = SessionManager.open(
+					currentSessionFile,
+					sessionDir,
+					cwd,
+				);
 				const leafId = tempManager.getLeafId();
 				if (!leafId) {
 					this.logError("[PI] Fork failed: source session has no entries");
@@ -1740,6 +1745,24 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			}
 		}
 
+		// Re-send session-history after agent completes so messages get entryId
+		// for fork support. Live pi-event messages lack entryId because SDK's
+		// AgentMessage type doesn't carry it — it only exists in session path entries.
+		if (event.type === "agent_end" && !event.willRetry && this.session) {
+			try {
+				const serialized = this.getSerializedSessionMessages(this.session);
+				this.notifyWebview({
+					type: "session-history",
+					data: { sessionId: this.session.sessionId, messages: serialized },
+				});
+			} catch (e) {
+				this.logError(
+					"[PI] Failed to re-send session history after agent end:",
+					e,
+				);
+			}
+		}
+
 		// Derive activity statuses from session events
 		if (event.type === "tool_execution_start") {
 			const toolName = event.toolName || "tool";
@@ -1851,7 +1874,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.serializeMessages(session.messages);
 	}
 
-	private getSessionEntry(sessionManager: any, entryId: string): any | undefined {
+	private getSessionEntry(
+		sessionManager: any,
+		entryId: string,
+	): any | undefined {
 		if (typeof sessionManager?.getEntry === "function") {
 			return sessionManager.getEntry(entryId);
 		}
