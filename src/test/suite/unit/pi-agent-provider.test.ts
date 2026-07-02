@@ -1052,10 +1052,7 @@ suite("PiAgentProvider", () => {
 				historyMsg,
 				"session-history should be sent on agent_end (non-retry)",
 			);
-			assert.strictEqual(
-				historyMsg?.data?.sessionId,
-				"session-1",
-			);
+			assert.strictEqual(historyMsg?.data?.sessionId, "session-1");
 			assert.strictEqual(
 				historyMsg?.data?.messages?.[0]?.entryId,
 				"entry-1",
@@ -1337,7 +1334,10 @@ suite("PiAgentProvider", () => {
 				sessionName: string | null;
 			}> = [];
 			(provider as any).footerManager = {
-				start: (config: { getCwd: () => string; sessionName: string | null }) => {
+				start: (config: {
+					getCwd: () => string;
+					sessionName: string | null;
+				}) => {
 					footerStartCalls.push({
 						cwd: config.getCwd(),
 						sessionName: config.sessionName,
@@ -1360,7 +1360,10 @@ suite("PiAgentProvider", () => {
 
 			assert.strictEqual(openCalls.length, 2);
 			assert.ok(openCalls[1].includes("forked.jsonl"));
-			assert.strictEqual((provider as any).session!.sessionId, "forked-session");
+			assert.strictEqual(
+				(provider as any).session!.sessionId,
+				"forked-session",
+			);
 			assert.ok(
 				webviewMessages.some(
 					(msg: any) =>
