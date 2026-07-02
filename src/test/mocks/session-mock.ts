@@ -10,7 +10,12 @@ export interface AgentSessionMock {
 	abort: () => Promise<void>;
 	compact: () => Promise<unknown>;
 	editMessage: (index: number, text: string) => Promise<void>;
-	sessionManager: { getCwd: () => string };
+	sessionManager: {
+		getCwd: () => string;
+		getBranch?: (fromId?: string) => any[];
+		getPath?: () => any[];
+		getEntry?: (id: string) => any | undefined;
+	};
 	events?: any[];
 }
 
@@ -55,6 +60,9 @@ export function createSessionMock(options?: {
 		editMessage: async () => {},
 		sessionManager: {
 			getCwd: () => "/fake/workspace",
+			getBranch: () => [],
+			getPath: () => [],
+			getEntry: () => undefined,
 		},
 		events: options?.events ?? [],
 	};

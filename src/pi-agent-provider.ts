@@ -1867,7 +1867,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	private getSerializedSessionMessages(session: AgentSession) {
 		const sessionManager = session.sessionManager as any;
-		const pathEntries = sessionManager?.getPath?.();
+		// ponytail: prefer path entries (root→leaf) so messages carry entryId for fork support.
+		// session.messages only carries raw AgentMessage without entryId.
+		const pathEntries =
+			typeof sessionManager?.getBranch === "function"
+				? sessionManager.getBranch()
+				: sessionManager?.getPath?.();
 		if (Array.isArray(pathEntries) && pathEntries.length > 0) {
 			return this.serializeMessages(pathEntries);
 		}
@@ -1881,7 +1886,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (typeof sessionManager?.getEntry === "function") {
 			return sessionManager.getEntry(entryId);
 		}
-		const pathEntries = sessionManager?.getPath?.();
+		const pathEntries =
+			typeof sessionManager?.getBranch === "function"
+				? sessionManager.getBranch()
+				: sessionManager?.getPath?.();
 		if (Array.isArray(pathEntries)) {
 			return pathEntries.find((entry: any) => entry?.id === entryId);
 		}

@@ -1088,6 +1088,55 @@ suite("PiAgentProvider", () => {
 				"session-history should NOT be sent when session is null",
 			);
 		});
+
+		test("getSerializedSessionMessages uses sessionManager.getBranch for entryId", () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const session = createSessionMock({
+				sessionId: "session-1",
+			}) as any;
+			// Path entries carry entryId; raw session.messages do not.
+			session.sessionManager.getBranch = () => [
+				{
+					type: "message",
+					id: "entry-1",
+					parentId: null,
+					timestamp: "2024-01-01T00:00:00Z",
+					message: { role: "user", content: "hi" },
+				},
+			];
+			session.sessionManager.getPath = undefined;
+			session.messages = [{ role: "user", content: "hi" }];
+			(provider as any).session = session;
+
+			const result = (provider as any).getSerializedSessionMessages(session);
+			assert.strictEqual(result.length, 1);
+			assert.strictEqual(
+				result[0].entryId,
+				"entry-1",
+				"path entries should yield entryId for fork support",
+			);
+		});
+
+		test("getSerializedSessionMessages falls back to session.messages when getBranch is missing", () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const session = createSessionMock({
+				sessionId: "session-1",
+			}) as any;
+			session.sessionManager.getBranch = undefined;
+			session.sessionManager.getPath = undefined;
+			session.messages = [{ role: "user", content: "hi" }];
+			(provider as any).session = session;
+
+			const result = (provider as any).getSerializedSessionMessages(session);
+			assert.strictEqual(result.length, 1);
+			assert.strictEqual(
+				result[0].entryId,
+				undefined,
+				"raw messages have no entryId; this is the degraded fallback",
+			);
+		});
 	});
 
 	suite("dispose", () => {
