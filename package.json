@@ -635,7 +635,8 @@
     "build": "pnpm run webview:build && pnpm run bundle",
     "test": "pnpm run compile && node ./dist-tsc/test/runTest.js",
     "lint": "eslint src --ext ts",
-    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository --skip-license"
+    "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "postinstall": "node scripts/postinstall-patch.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.78.0",

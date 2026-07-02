@@ -8,6 +8,7 @@ export default [
 			"dist/**",
 			"dist-tsc/**",
 			"node_modules/**",
+			"scripts/**",
 			"esbuild.config.mjs",
 			"svelte.config.js",
 		],

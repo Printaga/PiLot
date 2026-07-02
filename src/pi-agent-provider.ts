@@ -252,8 +252,9 @@ export class PiAgentProvider
 
 		try {
 			this.authStorage = piAgentProviderInternals.createAuthStorage();
-			this.modelRegistry =
-				piAgentProviderInternals.createModelRegistry(this.authStorage);
+			this.modelRegistry = piAgentProviderInternals.createModelRegistry(
+				this.authStorage,
+			);
 			this.settingsManager = piAgentProviderInternals.createSettingsManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
@@ -893,19 +894,39 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				installedPkgs.length,
 			);
 
+			// Log skill details with source info
+			if (skills.length > 0) {
+				this.logDebug(
+					"[PI] Skills detail:",
+					skills.map(
+						(s: any) =>
+							`${s.name} (source=${s.sourceInfo?.source || "?"}, scope=${s.sourceInfo?.scope || "?"}, origin=${s.sourceInfo?.origin || "?"}, path=${s.filePath || s.path})`,
+					),
+				);
+			} else {
+				this.logDebug("[PI] No skills loaded via resource loader");
+			}
+
 			this.notifyWebview({
 				type: "session-resources",
 				data: {
 					skills: skills.map((s: any) => ({
 						name: s.name,
 						description: s.description,
-						sourceName: s.sourceInfo?.name || null,
+						sourceName:
+							s.sourceInfo?.origin === "package"
+								? s.sourceInfo?.source
+										?.replace(/^npm:/, "")
+										?.replace(/^git:/, "") || null
+								: null,
 						path: s.path || "",
-						sourceType: s.sourceInfo
-							? "package"
-							: s.path?.includes("/.pi/")
-								? "local"
-								: "built-in",
+						sourceType:
+							s.sourceInfo?.origin === "package"
+								? "package"
+								: s.sourceInfo?.scope === "user" ||
+										s.sourceInfo?.scope === "project"
+									? "local"
+									: "built-in",
 					})),
 					skillCount: skills.length,
 					extensions: extensions.map((e: any) => ({
@@ -1737,13 +1758,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			return skills.map((s: any) => ({
 				name: s.name,
 				description: s.description || "",
-				sourceName: s.sourceInfo?.name || null,
+				sourceName:
+					s.sourceInfo?.origin === "package"
+						? s.sourceInfo?.source
+								?.replace(/^npm:/, "")
+								?.replace(/^git:/, "") || null
+						: null,
 				path: s.path || "",
-				sourceType: s.sourceInfo
-					? "package"
-					: s.path?.includes("/.pi/")
-						? "local"
-						: "built-in",
+				sourceType:
+					s.sourceInfo?.origin === "package"
+						? "package"
+						: s.sourceInfo?.scope === "user" ||
+								s.sourceInfo?.scope === "project"
+							? "local"
+							: "built-in",
 			}));
 		} catch {
 			return [];

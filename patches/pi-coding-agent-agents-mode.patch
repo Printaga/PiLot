@@ -1,0 +1,18 @@
+--- a/dist/core/package-manager.js
++++ b/dist/core/package-manager.js
+@@ -1879,7 +1879,7 @@
+                 baseDir: agentsBaseDir,
+             };
+-            addResources("skills", collectAutoSkillEntries(agentsSkillsDir, "agents"), agentsMetadata, projectOverrides.skills, agentsBaseDir);
++            addResources("skills", collectAutoSkillEntries(agentsSkillsDir, "pi"), agentsMetadata, projectOverrides.skills, agentsBaseDir);
+         }
+         addResources("prompts", collectAutoPromptEntries(projectDirs.prompts), projectMetadata, projectOverrides.prompts, projectBaseDir);
+         addResources("themes", collectAutoThemeEntries(projectDirs.themes), projectMetadata, projectOverrides.themes, projectBaseDir);
+@@ -1893,7 +1893,7 @@
+             baseDir: userAgentsBaseDir,
+         };
+-        addResources("skills", collectAutoSkillEntries(userAgentsSkillsDir, "agents"), userAgentsMetadata, userOverrides.skills, userAgentsBaseDir);
++        addResources("skills", collectAutoSkillEntries(userAgentsSkillsDir, "pi"), userAgentsMetadata, userOverrides.skills, userAgentsBaseDir);
+         addResources("prompts", collectAutoPromptEntries(userDirs.prompts), userMetadata, userOverrides.prompts, globalBaseDir);
+         addResources("themes", collectAutoThemeEntries(userDirs.themes), userMetadata, userOverrides.themes, globalBaseDir);
+     }
