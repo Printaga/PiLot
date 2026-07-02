@@ -35,7 +35,7 @@ interface ParsedVersion {
 	prerelease?: string;
 }
 
-function parsePackageVersion(version: string): ParsedVersion | undefined {
+export function parsePackageVersion(version: string): ParsedVersion | undefined {
 	const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/);
 	if (!match) return undefined;
 	return {
@@ -46,7 +46,7 @@ function parsePackageVersion(version: string): ParsedVersion | undefined {
 	};
 }
 
-function isNewerVersion(candidate: string, current: string): boolean {
+export function isNewerVersion(candidate: string, current: string): boolean {
 	const c = parsePackageVersion(candidate);
 	const r = parsePackageVersion(current);
 	if (!c || !r) return candidate.trim() !== current.trim();
@@ -63,7 +63,7 @@ function isNewerVersion(candidate: string, current: string): boolean {
 
 // ── API calls ──────────────────────────────────────────────────────────────
 
-async function fetchLatestPiRelease(): Promise<PiReleaseInfo | undefined> {
+export async function fetchLatestPiRelease(): Promise<PiReleaseInfo | undefined> {
 	if (process.env.PI_SKIP_VERSION_CHECK || process.env.PI_OFFLINE) {
 		return undefined;
 	}
@@ -363,7 +363,7 @@ export function startUpdateChecker(
  * Perform a check, but only notify if the updates haven't been reported before.
  * Uses globalState to remember which updates were already shown.
  */
-async function performCheckWithDeduplication(
+export async function performCheckWithDeduplication(
 	context: vscode.ExtensionContext,
 	provider: PiAgentProvider,
 ): Promise<void> {

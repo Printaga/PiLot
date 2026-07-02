@@ -13,6 +13,23 @@ export const diagnosticsChannel = vscode.window.createOutputChannel(
 const diagnosticsBuffer: string[] = [];
 let isDiagnosticsEnabled = false;
 
+/** @internal Reset diagnostics state for tests. guarded by PI_TEST env. */
+export function resetDiagnosticsStateForTests(): void {
+	if (process.env.PI_TEST !== "1") {
+		throw new Error("resetDiagnosticsStateForTests is only available under PI_TEST=1");
+	}
+	diagnosticsBuffer.length = 0;
+	isDiagnosticsEnabled = false;
+}
+
+/** @internal Read diagnostics buffer for tests. guarded by PI_TEST env. */
+export function getDiagnosticsBuffer(): readonly string[] {
+	if (process.env.PI_TEST !== "1") {
+		throw new Error("getDiagnosticsBuffer is only available under PI_TEST=1");
+	}
+	return diagnosticsBuffer;
+}
+
 /** Append a message to the diagnostics log if diagnostics are enabled. */
 export function logDiagnostics(message: string, ...args: unknown[]) {
 	if (!isDiagnosticsEnabled) return;

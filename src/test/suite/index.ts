@@ -6,6 +6,8 @@ import { glob } from 'glob';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+process.env.PI_TEST = "1";
+
 export async function run(): Promise<void> {
 	const mocha = new Mocha({
 		ui: 'tdd',

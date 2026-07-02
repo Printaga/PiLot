@@ -61,6 +61,10 @@ const VOICE_MODELS: Record<string, VoiceModelDef> = {
 const VOICE_MODEL_BASE_URL =
 	"https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
+export const voiceManagerInternals = {
+	spawn,
+};
+
 // ── Helper path resolution ──────────────────────────────────────────────
 
 function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
@@ -368,7 +372,10 @@ export class VoiceManager {
 			});
 
 			// Initialize voice helper with full model path
-			this.voiceHelperProcess = spawn(helperPath, ["--model", modelPath]);
+			this.voiceHelperProcess = voiceManagerInternals.spawn(helperPath, [
+				"--model",
+				modelPath,
+			]);
 
 			this.voiceHelperProcess.stdout?.on("data", (chunk) => {
 				const text = chunk.toString();

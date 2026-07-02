@@ -20,6 +20,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Changed
 
 - Message actions (copy, timestamp toggle) appear on hover
+- Added multiple tests for better test coverage
 
 ### Fixed
 

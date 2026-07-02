@@ -45,6 +45,16 @@ const THINKING_LEVELS: ReadonlySet<string> = new Set([
 	"xhigh",
 ]);
 
+export const piAgentProviderInternals = {
+	createAgentSession,
+	getAgentDir,
+	createAuthStorage: () => AuthStorage.create(),
+	createModelRegistry: (authStorage: AuthStorage) =>
+		ModelRegistry.create(authStorage),
+	createSettingsManager: (cwd: string) => SettingsManager.create(cwd),
+	createSessionManager: (cwd: string) => SessionManager.create(cwd),
+};
+
 export function validateThinkingLevel(value: unknown): ThinkingLevel {
 	if (typeof value === "string" && THINKING_LEVELS.has(value)) {
 		return value as ThinkingLevel;
@@ -173,7 +183,7 @@ export class PiAgentProvider
 		});
 		this.voiceManager = new VoiceManager({
 			extensionUri: this.context.extensionUri,
-			agentDir: getAgentDir(),
+			agentDir: piAgentProviderInternals.getAgentDir(),
 			logDebug: this.logDebug.bind(this),
 			logError: this.logError.bind(this),
 			notifyWebview: this.notifyWebview.bind(this),
@@ -241,12 +251,13 @@ export class PiAgentProvider
 		this.binaryService.prependToPath();
 
 		try {
-			this.authStorage = AuthStorage.create();
-			this.modelRegistry = ModelRegistry.create(this.authStorage);
-			this.settingsManager = SettingsManager.create(
+			this.authStorage = piAgentProviderInternals.createAuthStorage();
+			this.modelRegistry =
+				piAgentProviderInternals.createModelRegistry(this.authStorage);
+			this.settingsManager = piAgentProviderInternals.createSettingsManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
-			this.sessionManager = SessionManager.create(
+			this.sessionManager = piAgentProviderInternals.createSessionManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
 
@@ -563,7 +574,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Build createAgentSession options from VS Code settings to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
 
-		const { session } = await createAgentSession({
+		const { session } = await piAgentProviderInternals.createAgentSession({
 			...sessionOpts,
 			sessionManager,
 			authStorage,
@@ -701,7 +712,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Create a resource loader with VS Code settings applied
 		const resourceLoader = new DefaultResourceLoader({
 			cwd,
-			agentDir: getAgentDir(),
+			agentDir: piAgentProviderInternals.getAgentDir(),
 			settingsManager: this.settingsManager,
 			additionalExtensionPaths:
 				extraExtensions.length > 0 ? extraExtensions : undefined,
@@ -740,7 +751,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		return {
 			cwd,
-			agentDir: getAgentDir(),
+			agentDir: piAgentProviderInternals.getAgentDir(),
 			resourceLoader,
 			tools,
 			noTools,
@@ -798,7 +809,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		try {
 			const cwd =
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-			const agentDir = getAgentDir();
+			const agentDir = piAgentProviderInternals.getAgentDir();
 
 			// Use the session resource loader so the webview matches the TUI exactly.
 			let contextFiles: Array<{ path: string }> = [];
@@ -976,7 +987,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Build session options from VS Code configuration to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
 
-		const { session } = await createAgentSession({
+		const { session } = await piAgentProviderInternals.createAgentSession({
 			...sessionOpts,
 			sessionManager,
 			authStorage: this.authStorage,

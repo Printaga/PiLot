@@ -3,7 +3,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { spawnSync } from "node:child_process";
+import * as childProcess from "node:child_process";
 import { stripAnsi } from "./utils/shell.js";
 
 export type InstalledPackage = { source: string; path: string };
@@ -18,6 +18,10 @@ export type EnrichedPackage = InstalledPackage & {
 	prompts: Array<{ name: string; description: string }>;
 };
 type PackageSettingEntry = string | { source?: string };
+
+export const piBinaryInternals = {
+	spawnSync: childProcess.spawnSync,
+};
 
 // ── Binary resolution ───────────────────────────────────────────────────
 
@@ -154,7 +158,7 @@ export function resolvePiBinary(): string | null {
 	}
 	try {
 		if (process.platform === "win32") {
-			const result = spawnSync("where", [binary], {
+			const result = piBinaryInternals.spawnSync("where", [binary], {
 				shell: true,
 				timeout: 1000,
 			});
@@ -164,7 +168,7 @@ export function resolvePiBinary(): string | null {
 			}
 			return null;
 		} else {
-			const result = spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, {
+			const result = piBinaryInternals.spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, {
 				shell: true,
 				timeout: 1000,
 			});
@@ -258,7 +262,9 @@ export function readPackageSourcesFromSettingsFile(
 		}
 
 		return parsed.packages
-			.map((entry) => (typeof entry === "string" ? entry : entry.source))
+			.map((entry) =>
+				typeof entry === "string" ? entry.trim() : entry.source?.trim(),
+			)
 			.filter(
 				(entry): entry is string =>
 					typeof entry === "string" && entry.length > 0,

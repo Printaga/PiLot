@@ -4,6 +4,11 @@ import * as fsSync from "node:fs";
 import { execFileAsync } from "./utils/shell.js";
 import { findPiBinary, resolvePiBinary } from "./pi-binary.js";
 
+export const binaryServiceInternals = {
+	findPiBinary,
+	resolvePiBinary,
+};
+
 export interface BinaryServiceDeps {
 	logDebug: (msg: string, ...details: unknown[]) => void;
 	logError: (msg: string, error?: unknown) => void;
@@ -18,7 +23,7 @@ export class BinaryService {
 
 	resolveAtStartup(): void {
 		if (this.pathResolved) return;
-		this.resolvedBinaryPath = resolvePiBinary();
+		this.resolvedBinaryPath = binaryServiceInternals.resolvePiBinary();
 		this.pathResolved = true;
 		if (this.resolvedBinaryPath) {
 			this.deps.logDebug(`Resolved pi binary: ${this.resolvedBinaryPath}`);
@@ -48,7 +53,8 @@ export class BinaryService {
 	async getCliVersion(): Promise<string | null> {
 		if (this.cachedVersion) return this.cachedVersion;
 		try {
-			const binaryPath = this.resolvedBinaryPath || findPiBinary();
+			const binaryPath =
+				this.resolvedBinaryPath || binaryServiceInternals.findPiBinary();
 			const result = await execFileAsync(binaryPath, ["--version"]);
 			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
 			if (result.code === 0 && versionOutput) {
@@ -67,11 +73,11 @@ export class BinaryService {
 	}
 
 	resolveBinary(): string | null {
-		return resolvePiBinary();
+		return binaryServiceInternals.resolvePiBinary();
 	}
 
 	getBinaryPath(): string {
-		return findPiBinary();
+		return binaryServiceInternals.findPiBinary();
 	}
 
 	isBinaryAvailable(): boolean {
