@@ -758,6 +758,7 @@
                         stroke-width="2"
                         ><polyline points="20 6 9 17 4 12" /></svg
                       >
+                      <span>Apply</span>
                     </button>
                     <button
                       class="code-action-btn"
@@ -778,6 +779,7 @@
                           height="16"
                         /></svg
                       >
+                      <span>Diff</span>
                     </button>
                     <button
                       class="code-action-btn"
@@ -800,6 +802,7 @@
                           y2="3"
                         /></svg
                       >
+                      <span>Open</span>
                     </button>
                     <button
                       class="code-action-btn"
@@ -807,6 +810,7 @@
                       title="Copy code"
                     >
                       {@html clipboardSvg}
+                      <span>Copy</span>
                       {#if copiedCode}<span class="copy-check">✓</span>{/if}
                     </button>
                   </div>
@@ -1336,14 +1340,16 @@
   .code-action-btn {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 6px;
+    gap: 4px;
+    padding: 3px 7px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 0;
     color: var(--color-text-muted);
     cursor: pointer;
-    font-size: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
   }
   .code-action-btn:hover {
     color: var(--color-primary);
