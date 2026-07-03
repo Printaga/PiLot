@@ -11,7 +11,10 @@ function createMockProvider(): {
 	const calls: Record<string, unknown[][]> = {};
 	const webviewMessages: any[] = [];
 
-	const makeSpy = (name: string, impl: (...args: unknown[]) => unknown = () => undefined) => {
+	const makeSpy = (
+		name: string,
+		impl: (...args: unknown[]) => unknown = () => undefined,
+	) => {
 		return (...args: unknown[]) => {
 			calls[name] = calls[name] || [];
 			calls[name].push(args);
@@ -60,7 +63,10 @@ function createMockProvider(): {
 		removeAuth: makeSpy("removeAuth"),
 		toggleFavorite: makeSpy("toggleFavorite", async () => []),
 		listSessions: makeSpy("listSessions", async () => []),
-		getSettings: makeSpy("getSettings", async () => ({ toolPreset: "default", customTools: [] })),
+		getSettings: makeSpy("getSettings", async () => ({
+			toolPreset: "default",
+			customTools: [],
+		})),
 		setToolConfig: makeSpy("setToolConfig"),
 		listPackages: makeSpy("listPackages", async () => []),
 		installPackage: makeSpy("installPackage"),
@@ -111,7 +117,11 @@ suite("MessageHandler", () => {
 
 	test("prompt success - calls provider.prompt and returns success", async () => {
 		provider.prompt = () => Promise.resolve();
-		const result = await handler.handle({ type: "prompt", id: "msg-1", data: { text: "hello" } });
+		const result = await handler.handle({
+			type: "prompt",
+			id: "msg-1",
+			data: { text: "hello" },
+		});
 		assert.strictEqual(provider.calls.prompt.length, 1);
 		assert.deepStrictEqual(provider.calls.prompt[0], ["hello", undefined]);
 		const response = webviewMessages.find((m: any) => m.id === "msg-1");
@@ -124,7 +134,11 @@ suite("MessageHandler", () => {
 		provider.prompt = () => Promise.reject(err);
 		let caught: any;
 		try {
-			await handler.handle({ type: "prompt", id: "msg-1", data: { text: "hello" } });
+			await handler.handle({
+				type: "prompt",
+				id: "msg-1",
+				data: { text: "hello" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -158,10 +172,15 @@ suite("MessageHandler", () => {
 
 	test("exportSession html", async () => {
 		provider.prompt = () => Promise.resolve();
-		const result = await handler.handle({ type: "exportSession", data: { format: "html" } });
+		const result = await handler.handle({
+			type: "exportSession",
+			data: { format: "html" },
+		});
 		assert.deepStrictEqual(provider.calls.prompt[0], ["/export .html"]);
 		assert.strictEqual(result.success, true);
-		const exportMsg = webviewMessages.find((m: any) => m.type === "exportResult");
+		const exportMsg = webviewMessages.find(
+			(m: any) => m.type === "exportResult",
+		);
 		assert.ok(exportMsg);
 		assert.strictEqual(exportMsg.data.success, true);
 	});
@@ -174,24 +193,35 @@ suite("MessageHandler", () => {
 
 	test("exportSession markdown", async () => {
 		provider.prompt = () => Promise.resolve();
-		await handler.handle({ type: "exportSession", data: { format: "markdown" } });
+		await handler.handle({
+			type: "exportSession",
+			data: { format: "markdown" },
+		});
 		assert.deepStrictEqual(provider.calls.prompt[0], ["/export .md"]);
 	});
 
 	test("exportSession error - sends error exportResult", async () => {
 		const err = new Error("export failed");
 		provider.prompt = () => Promise.reject(err);
-		const result = await handler.handle({ type: "exportSession", data: { format: "html" } });
+		const result = await handler.handle({
+			type: "exportSession",
+			data: { format: "html" },
+		});
 		assert.strictEqual(result.success, false);
 		assert.ok(result.error?.includes("export failed"));
-		const exportMsg = webviewMessages.find((m: any) => m.type === "exportResult");
+		const exportMsg = webviewMessages.find(
+			(m: any) => m.type === "exportResult",
+		);
 		assert.ok(exportMsg);
 		assert.strictEqual(exportMsg.data.success, false);
 	});
 
 	test("switchSession success", async () => {
 		provider.switchSession = () => Promise.resolve();
-		const result = await handler.handle({ type: "switchSession", data: { sessionId: "s1" } });
+		const result = await handler.handle({
+			type: "switchSession",
+			data: { sessionId: "s1" },
+		});
 		assert.deepStrictEqual(provider.calls.switchSession[0], ["s1"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -201,7 +231,10 @@ suite("MessageHandler", () => {
 		provider.switchSession = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "switchSession", data: { sessionId: "s1" } });
+			await handler.handle({
+				type: "switchSession",
+				data: { sessionId: "s1" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -211,7 +244,10 @@ suite("MessageHandler", () => {
 
 	test("setSessionName success", async () => {
 		provider.setSessionName = () => Promise.resolve();
-		const result = await handler.handle({ type: "setSessionName", data: { name: "new-name" } });
+		const result = await handler.handle({
+			type: "setSessionName",
+			data: { name: "new-name" },
+		});
 		assert.deepStrictEqual(provider.calls.setSessionName[0], ["new-name"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -230,7 +266,10 @@ suite("MessageHandler", () => {
 
 	test("switchModel success", async () => {
 		provider.setModel = () => Promise.resolve();
-		const result = await handler.handle({ type: "switchModel", data: { modelId: "m1" } });
+		const result = await handler.handle({
+			type: "switchModel",
+			data: { modelId: "m1" },
+		});
 		assert.deepStrictEqual(provider.calls.setModel[0], ["m1"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -250,7 +289,10 @@ suite("MessageHandler", () => {
 
 	test("setThinkingLevel success", async () => {
 		provider.setThinkingLevel = () => Promise.resolve();
-		const result = await handler.handle({ type: "setThinkingLevel", data: { level: "high" } });
+		const result = await handler.handle({
+			type: "setThinkingLevel",
+			data: { level: "high" },
+		});
 		assert.deepStrictEqual(provider.calls.setThinkingLevel[0], ["high"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -260,7 +302,10 @@ suite("MessageHandler", () => {
 		provider.setThinkingLevel = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "setThinkingLevel", data: { level: "low" } });
+			await handler.handle({
+				type: "setThinkingLevel",
+				data: { level: "low" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -269,7 +314,10 @@ suite("MessageHandler", () => {
 
 	test("steer success", async () => {
 		provider.steer = () => Promise.resolve();
-		const result = await handler.handle({ type: "steer", data: { text: "be concise" } });
+		const result = await handler.handle({
+			type: "steer",
+			data: { text: "be concise" },
+		});
 		assert.deepStrictEqual(provider.calls.steer[0], ["be concise"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -288,7 +336,10 @@ suite("MessageHandler", () => {
 
 	test("followUp success", async () => {
 		provider.followUp = () => Promise.resolve();
-		const result = await handler.handle({ type: "followUp", data: { text: "more" } });
+		const result = await handler.handle({
+			type: "followUp",
+			data: { text: "more" },
+		});
 		assert.deepStrictEqual(provider.calls.followUp[0], ["more"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -359,7 +410,10 @@ suite("MessageHandler", () => {
 		provider.editMessage = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "edit-message", data: { index: 0, text: "x" } });
+			await handler.handle({
+				type: "edit-message",
+				data: { index: 0, text: "x" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -402,7 +456,9 @@ suite("MessageHandler", () => {
 			{ toolPreset: "custom", customTools: ["bash"] },
 		]);
 		assert.strictEqual(result.success, true);
-		const settingsMsg = webviewMessages.find((m: any) => m.type === "settings-response");
+		const settingsMsg = webviewMessages.find(
+			(m: any) => m.type === "settings-response",
+		);
 		assert.ok(settingsMsg);
 		assert.strictEqual(settingsMsg.data.toolPreset, "custom");
 	});
@@ -425,7 +481,10 @@ suite("MessageHandler", () => {
 	test("installPackage success", async () => {
 		provider.installPackage = () => Promise.resolve();
 		provider.listPackages = () => Promise.resolve([{ source: "skill-a" }]);
-		const result = await handler.handle({ type: "installPackage", data: { source: "skill-a" } });
+		const result = await handler.handle({
+			type: "installPackage",
+			data: { source: "skill-a" },
+		});
 		assert.deepStrictEqual(provider.calls.installPackage[0], ["skill-a"]);
 		assert.strictEqual(result.success, true);
 		assert.ok(
@@ -439,7 +498,10 @@ suite("MessageHandler", () => {
 		provider.installPackage = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "installPackage", data: { source: "skill-a" } });
+			await handler.handle({
+				type: "installPackage",
+				data: { source: "skill-a" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -449,7 +511,10 @@ suite("MessageHandler", () => {
 	test("uninstallPackage success", async () => {
 		provider.uninstallPackage = () => Promise.resolve();
 		provider.listPackages = () => Promise.resolve([]);
-		const result = await handler.handle({ type: "uninstallPackage", data: { source: "skill-a" } });
+		const result = await handler.handle({
+			type: "uninstallPackage",
+			data: { source: "skill-a" },
+		});
 		assert.deepStrictEqual(provider.calls.uninstallPackage[0], ["skill-a"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -459,7 +524,10 @@ suite("MessageHandler", () => {
 		provider.uninstallPackage = () => Promise.reject(err);
 		let caught: Error | undefined;
 		try {
-			await handler.handle({ type: "uninstallPackage", data: { source: "skill-a" } });
+			await handler.handle({
+				type: "uninstallPackage",
+				data: { source: "skill-a" },
+			});
 		} catch (e) {
 			caught = e as Error;
 		}
@@ -488,7 +556,10 @@ suite("MessageHandler", () => {
 
 	test("toggle-voice-capture success", async () => {
 		provider.toggleVoiceCapture = () => Promise.resolve();
-		const result = await handler.handle({ type: "toggle-voice-capture", data: {} });
+		const result = await handler.handle({
+			type: "toggle-voice-capture",
+			data: {},
+		});
 		assert.ok(provider.calls.toggleVoiceCapture.length > 0);
 		assert.strictEqual(result.success, true);
 	});
@@ -506,16 +577,20 @@ suite("MessageHandler", () => {
 	});
 
 	test("getModels - fetches models and posts models-updated", async () => {
-		provider.getAvailableModels = () => Promise.resolve([{ id: "m1", provider: "p", name: "M1" }]);
+		provider.getAvailableModels = () =>
+			Promise.resolve([{ id: "m1", provider: "p", name: "M1" }]);
 		const result = await handler.handle({ type: "getModels", data: {} });
 		assert.deepStrictEqual(result, [{ id: "m1", provider: "p", name: "M1" }]);
 		const msg = webviewMessages.find((m: any) => m.type === "models-updated");
 		assert.ok(msg);
-		assert.deepStrictEqual(msg.data.models, [{ id: "m1", provider: "p", name: "M1" }]);
+		assert.deepStrictEqual(msg.data.models, [
+			{ id: "m1", provider: "p", name: "M1" },
+		]);
 	});
 
 	test("getProviderAuth - returns auth and sends provider-auth", async () => {
-		provider.getProviderAuthData = () => Promise.resolve([{ provider: "openai", configured: true }]);
+		provider.getProviderAuthData = () =>
+			Promise.resolve([{ provider: "openai", configured: true }]);
 		const result = await handler.handle({ type: "getProviderAuth", data: {} });
 		assert.deepStrictEqual(result, [{ provider: "openai", configured: true }]);
 		const msg = webviewMessages.find((m: any) => m.type === "provider-auth");
@@ -525,7 +600,10 @@ suite("MessageHandler", () => {
 
 	test("toggleFavorite success", async () => {
 		provider.toggleFavorite = () => Promise.resolve(["model-a"]);
-		const result = await handler.handle({ type: "toggleFavorite", data: { modelId: "m1", isFavorite: true } });
+		const result = await handler.handle({
+			type: "toggleFavorite",
+			data: { modelId: "m1", isFavorite: true },
+		});
 		assert.deepStrictEqual(provider.calls.toggleFavorite[0], ["m1", true]);
 		assert.deepStrictEqual(result, ["model-a"]);
 	});
@@ -571,7 +649,10 @@ suite("MessageHandler", () => {
 
 	test("getSessionResources - calls provider.sendSessionResources", async () => {
 		provider.sendSessionResources = () => Promise.resolve();
-		const result = await handler.handle({ type: "getSessionResources", data: {} });
+		const result = await handler.handle({
+			type: "getSessionResources",
+			data: {},
+		});
 		assert.ok(provider.calls.sendSessionResources.length > 0);
 		assert.strictEqual(result, undefined);
 	});
@@ -585,9 +666,14 @@ suite("MessageHandler", () => {
 
 	test("getSkillDiscovery - sends skill-discovery-changed", async () => {
 		provider.getSkillDiscovery = () => true;
-		const result = await handler.handle({ type: "getSkillDiscovery", data: {} });
+		const result = await handler.handle({
+			type: "getSkillDiscovery",
+			data: {},
+		});
 		assert.strictEqual(result, true);
-		const msg = webviewMessages.find((m: any) => m.type === "skill-discovery-changed");
+		const msg = webviewMessages.find(
+			(m: any) => m.type === "skill-discovery-changed",
+		);
 		assert.ok(msg);
 		assert.strictEqual(msg.data.enabled, true);
 	});
@@ -597,7 +683,10 @@ suite("MessageHandler", () => {
 		provider.setSkillDiscovery = (enabled: boolean) => {
 			lastEnabled = enabled;
 		};
-		const result = await handler.handle({ type: "setSkillDiscovery", data: { enabled: true } });
+		const result = await handler.handle({
+			type: "setSkillDiscovery",
+			data: { enabled: true },
+		});
 		assert.strictEqual(lastEnabled, true);
 		assert.strictEqual(result.success, true);
 	});
@@ -614,16 +703,24 @@ suite("MessageHandler", () => {
 
 	test("getExtraSkillPaths - sends extra-skill-paths", async () => {
 		provider.getExtraSkillPaths = () => ["/skill-a"];
-		const result = await handler.handle({ type: "getExtraSkillPaths", data: {} });
+		const result = await handler.handle({
+			type: "getExtraSkillPaths",
+			data: {},
+		});
 		assert.deepStrictEqual(result, ["/skill-a"]);
-		const msg = webviewMessages.find((m: any) => m.type === "extra-skill-paths");
+		const msg = webviewMessages.find(
+			(m: any) => m.type === "extra-skill-paths",
+		);
 		assert.ok(msg);
 		assert.deepStrictEqual(msg.data.paths, ["/skill-a"]);
 	});
 
 	test("getAutoCompactionStatus - returns value", async () => {
 		provider.getAutoCompactionEnabled = () => true;
-		const result = await handler.handle({ type: "getAutoCompactionStatus", data: {} });
+		const result = await handler.handle({
+			type: "getAutoCompactionStatus",
+			data: {},
+		});
 		assert.strictEqual(result, true);
 	});
 
@@ -632,7 +729,10 @@ suite("MessageHandler", () => {
 		provider.setAutoCompactionEnabled = (enabled: boolean) => {
 			lastEnabled = enabled;
 		};
-		const result = await handler.handle({ type: "setAutoCompaction", data: { enabled: true } });
+		const result = await handler.handle({
+			type: "setAutoCompaction",
+			data: { enabled: true },
+		});
 		assert.strictEqual(lastEnabled, true);
 		assert.strictEqual(result.success, true);
 	});
@@ -642,13 +742,19 @@ suite("MessageHandler", () => {
 		provider.setAutoContext = (enabled: boolean) => {
 			lastEnabled = enabled;
 		};
-		const result = await handler.handle({ type: "setAutoContext", data: { enabled: false } });
+		const result = await handler.handle({
+			type: "setAutoContext",
+			data: { enabled: false },
+		});
 		assert.strictEqual(lastEnabled, false);
 		assert.strictEqual(result.success, true);
 	});
 
 	test("deleteSessions with empty ids - returns skipped", async () => {
-		const result = await handler.handle({ type: "deleteSessions", data: { sessionIds: [] } });
+		const result = await handler.handle({
+			type: "deleteSessions",
+			data: { sessionIds: [] },
+		});
 		assert.strictEqual(result.success, true);
 		assert.strictEqual(result.skipped, true);
 	});
@@ -656,17 +762,26 @@ suite("MessageHandler", () => {
 	test("deleteSessions cancelled by user - returns cancelled", async () => {
 		resetVscodeMocks();
 		(vscode.window.showWarningMessage as any) = async () => "Cancel";
-		const result = await handler.handle({ type: "deleteSessions", data: { sessionIds: ["s1"] } });
+		const result = await handler.handle({
+			type: "deleteSessions",
+			data: { sessionIds: ["s1"] },
+		});
 		assert.strictEqual(result.success, true);
 		assert.strictEqual(result.cancelled, true);
-		assert.ok(!provider.calls.deleteSessions.length, "deleteSessions should not be called");
+		assert.ok(
+			!provider.calls.deleteSessions.length,
+			"deleteSessions should not be called",
+		);
 	});
 
 	test("deleteSessions success", async () => {
 		resetVscodeMocks();
 		(vscode.window.showWarningMessage as any) = async () => "Delete";
 		provider.deleteSessions = () => Promise.resolve();
-		const result = await handler.handle({ type: "deleteSessions", data: { sessionIds: ["s1"] } });
+		const result = await handler.handle({
+			type: "deleteSessions",
+			data: { sessionIds: ["s1"] },
+		});
 		assert.strictEqual(result.success, true);
 		assert.ok(provider.calls.deleteSessions.length > 0);
 	});
@@ -674,16 +789,25 @@ suite("MessageHandler", () => {
 	test("showRenameSessionDialog cancelled", async () => {
 		resetVscodeMocks();
 		(vscode.window.showInputBox as any) = async () => null;
-		const result = await handler.handle({ type: "showRenameSessionDialog", data: {} });
+		const result = await handler.handle({
+			type: "showRenameSessionDialog",
+			data: {},
+		});
 		assert.strictEqual(result.cancelled, true);
-		assert.ok(!provider.calls.setSessionName.length, "setSessionName should not be called");
+		assert.ok(
+			!provider.calls.setSessionName.length,
+			"setSessionName should not be called",
+		);
 	});
 
 	test("showRenameSessionDialog success", async () => {
 		resetVscodeMocks();
 		(vscode.window.showInputBox as any) = async () => "new-name";
 		provider.setSessionName = () => Promise.resolve();
-		const result = await handler.handle({ type: "showRenameSessionDialog", data: {} });
+		const result = await handler.handle({
+			type: "showRenameSessionDialog",
+			data: {},
+		});
 		assert.deepStrictEqual(provider.calls.setSessionName[0], ["new-name"]);
 		assert.strictEqual(result.success, true);
 	});
@@ -701,7 +825,11 @@ suite("MessageHandler", () => {
 
 	test("message.id present - calls sendResponse", async () => {
 		provider.prompt = () => Promise.resolve();
-		await handler.handle({ type: "prompt", id: "req-123", data: { text: "hi" } });
+		await handler.handle({
+			type: "prompt",
+			id: "req-123",
+			data: { text: "hi" },
+		});
 		const response = webviewMessages.find((m: any) => m.id === "req-123");
 		assert.ok(response, "expected response with id");
 	});
@@ -710,7 +838,10 @@ suite("MessageHandler", () => {
 		provider.prompt = () => Promise.resolve();
 		// ready sends ready message, not response
 		await handler.handle({ type: "ready" });
-		assert.ok(!webviewMessages.some((m: any) => m.id), "no response id expected");
+		assert.ok(
+			!webviewMessages.some((m: any) => m.id),
+			"no response id expected",
+		);
 	});
 
 	test("default unknown type - returns error and logs debug", async () => {
@@ -738,5 +869,368 @@ suite("MessageHandler", () => {
 		assert.ok(response);
 		assert.strictEqual(response.isError, true);
 		assert.ok(provider.calls.logError.length > 0, "expected logError call");
+	});
+
+	// ── getSessionInfo ────────────────────────────────────────────────────
+
+	test("getSessionInfo returns resource info when session exists", async () => {
+		const rl = {
+			getAgentsFiles: () => ({ agentsFiles: [{ path: "ctx.ts" }] }),
+			getSkills: () => ({ skills: [{ name: "s1", description: "skill one" }] }),
+			getExtensions: () => ({ extensions: [{ path: "/ext" }] }),
+			getPrompts: () => ({
+				prompts: [{ name: "p1", description: "prompt one" }],
+			}),
+		};
+		provider.session = { sessionId: "s1", resourceLoader: rl };
+		provider.hasSession = true;
+
+		const result = await handler.handle({ type: "getSessionInfo" });
+		assert.ok(result);
+		assert.strictEqual(result.skillCount, 1);
+		assert.strictEqual(result.skills[0].name, "s1");
+		assert.strictEqual(result.extensionCount, 1);
+		assert.strictEqual(result.contextFileCount, 1);
+		assert.strictEqual(result.promptCount, 1);
+	});
+
+	test("getSessionInfo returns null when no session", async () => {
+		provider.session = undefined;
+		provider.hasSession = false;
+
+		const result = await handler.handle({ type: "getSessionInfo" });
+		assert.strictEqual(result, null);
+	});
+
+	test("getSessionInfo handles resource loader errors gracefully", async () => {
+		const rl = {
+			getAgentsFiles: () => {
+				throw new Error("loader broken");
+			},
+			getSkills: () => {
+				throw new Error("loader broken");
+			},
+			getExtensions: () => {
+				throw new Error("loader broken");
+			},
+			getPrompts: () => {
+				throw new Error("loader broken");
+			},
+		};
+		provider.session = { sessionId: "s1", resourceLoader: rl };
+		provider.hasSession = true;
+
+		const result = await handler.handle({ type: "getSessionInfo" });
+		// Should return null on error, not throw
+		assert.strictEqual(result, null);
+	});
+
+	// ── getContext ─────────────────────────────────────────────────────────
+
+	test("getContext returns project info", async () => {
+		resetVscodeMocks();
+		const vscode = (globalThis as any).vscode;
+		vscode.workspace.fs.readFile = async () =>
+			Buffer.from(JSON.stringify({ name: "proj", version: "2.0" }));
+
+		const result = await handler.handle({ type: "getContext" });
+		assert.ok(result);
+		assert.strictEqual(result.name, "proj");
+		assert.strictEqual(result.version, "2.0");
+	});
+
+	test("getContext returns null when no workspace folders", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.workspace.workspaceFolders = undefined;
+
+		const result = await handler.handle({ type: "getContext" });
+		assert.strictEqual(result, null);
+	});
+
+	// ── get-workspace-files ────────────────────────────────────────────────
+
+	test("get-workspace-files sends sorted file list", async () => {
+		resetVscodeMocks();
+		const vscode = (globalThis as any).vscode;
+		vscode.workspace.findFiles = async () => [
+			{ fsPath: "/ws/src/b.ts" },
+			{ fsPath: "/ws/src/a.ts" },
+			{ fsPath: "/ws/node_modules/x.js" },
+		];
+
+		await handler.handle({ type: "get-workspace-files" });
+		const msg = webviewMessages.find((m: any) => m.type === "workspace-files");
+		assert.ok(msg);
+		// node_modules should be filtered out
+		assert.ok(!msg.data.files.some((f: string) => f.includes("node_modules")));
+		// Should be sorted
+		const files = msg.data.files;
+		for (let i = 1; i < files.length; i++) {
+			assert.ok(files[i] >= files[i - 1], "files should be sorted");
+		}
+	});
+
+	test("get-workspace-files handles no workspace folders", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.workspace.workspaceFolders = undefined;
+
+		await handler.handle({ type: "get-workspace-files" });
+		const msg = webviewMessages.find((m: any) => m.type === "workspace-files");
+		assert.ok(msg);
+		assert.deepStrictEqual(msg.data.files, []);
+	});
+
+	// ── openFileAttachmentDialog ───────────────────────────────────────────
+
+	test("openFileAttachmentDialog sends selected file paths", async () => {
+		resetVscodeMocks();
+		const vscode = (globalThis as any).vscode;
+		vscode.window.showOpenDialog = async () => [{ fsPath: "/ws/src/main.ts" }];
+
+		await handler.handle({ type: "openFileAttachmentDialog" });
+		const msg = webviewMessages.find((m: any) => m.type === "files-attached");
+		assert.ok(msg);
+		assert.ok(msg.data.paths.length > 0);
+	});
+
+	test("openFileAttachmentDialog returns empty when cancelled", async () => {
+		resetVscodeMocks();
+		const vscode = (globalThis as any).vscode;
+		vscode.window.showOpenDialog = async () => undefined;
+
+		await handler.handle({ type: "openFileAttachmentDialog" });
+		const msg = webviewMessages.find((m: any) => m.type === "files-attached");
+		assert.ok(msg);
+		assert.deepStrictEqual(msg.data.paths, []);
+	});
+
+	// ── apply-code ─────────────────────────────────────────────────────────
+
+	test("apply-code replaces selection when selection exists", async () => {
+		resetVscodeMocks();
+		const replacedWith: string[] = [];
+		(globalThis as any).vscode.window.activeTextEditor = {
+			selection: {
+				isEmpty: false,
+				start: { line: 0, character: 0 },
+				end: { line: 0, character: 5 },
+			},
+			edit: async (cb: any) => {
+				const builder = {
+					replace: (_sel: any, text: string) => replacedWith.push(text),
+					insert: () => {},
+				};
+				cb(builder);
+			},
+			document: { languageId: "typescript" },
+		};
+
+		const result = await handler.handle({
+			type: "apply-code",
+			data: { code: "new code" },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(replacedWith, ["new code"]);
+	});
+
+	test("apply-code inserts at cursor when no selection", async () => {
+		resetVscodeMocks();
+		const inserted: string[] = [];
+		(globalThis as any).vscode.window.activeTextEditor = {
+			selection: { isEmpty: true, active: { line: 1, character: 3 } },
+			edit: async (cb: any) => {
+				const builder = {
+					replace: () => {},
+					insert: (_pos: any, text: string) => inserted.push(text),
+				};
+				cb(builder);
+			},
+			document: { languageId: "typescript" },
+		};
+
+		const result = await handler.handle({
+			type: "apply-code",
+			data: { code: "inserted" },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(inserted, ["inserted"]);
+	});
+
+	test("apply-code returns error when no editor", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.window.activeTextEditor = undefined;
+
+		const result = await handler.handle({
+			type: "apply-code",
+			data: { code: "x" },
+		});
+		assert.strictEqual(result.success, false);
+		assert.ok(result.error?.includes("No active editor"));
+	});
+
+	test("apply-code returns error when no code provided", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.window.activeTextEditor = {
+			selection: { isEmpty: true },
+			edit: async () => {},
+			document: {},
+		};
+
+		const result = await handler.handle({
+			type: "apply-code",
+			data: { code: "" },
+		});
+		assert.strictEqual(result.success, false);
+		assert.ok(result.error?.includes("No code provided"));
+	});
+
+	// ── preview-diff ───────────────────────────────────────────────────────
+
+	test("preview-diff returns error when no editor", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.window.activeTextEditor = undefined;
+
+		const result = await handler.handle({
+			type: "preview-diff",
+			data: { code: "x" },
+		});
+		assert.strictEqual(result.success, false);
+		assert.ok(result.error?.includes("No active editor"));
+	});
+
+	test("preview-diff returns error when no code provided", async () => {
+		resetVscodeMocks();
+		(globalThis as any).vscode.window.activeTextEditor = {
+			selection: { isEmpty: true },
+			document: { getText: () => "original", fileName: "/test.ts" },
+		};
+
+		const result = await handler.handle({
+			type: "preview-diff",
+			data: { code: "" },
+		});
+		assert.strictEqual(result.success, false);
+		assert.ok(result.error?.includes("No code provided"));
+	});
+
+	test("preview-diff creates temp file and opens diff", async () => {
+		resetVscodeMocks();
+		let diffCmd: string | undefined;
+		let diffArgs: any[] = [];
+		const vscode = (globalThis as any).vscode;
+		vscode.commands.executeCommand = async (cmd: string, ...args: any[]) => {
+			diffCmd = cmd;
+			diffArgs = args;
+		};
+		vscode.workspace.fs.createDirectory = async () => {};
+		vscode.workspace.fs.writeFile = async () => {};
+
+		(globalThis as any).vscode.window.activeTextEditor = {
+			selection: { isEmpty: true, active: { line: 0, character: 0 } },
+			document: {
+				getText: () => "old code",
+				fileName: "/test.ts",
+				offsetAt: (pos: any) => pos.line * 10 + pos.character,
+			},
+		};
+
+		const result = await handler.handle({
+			type: "preview-diff",
+			data: { code: "new code" },
+		});
+		assert.strictEqual(result.success, true);
+		assert.strictEqual(diffCmd, "vscode.diff");
+		assert.ok(diffArgs.length >= 2, "diff command should have file URIs");
+	});
+
+	// ── ready sessionId ────────────────────────────────────────────────────
+
+	test("ready includes sessionId when session exists", async () => {
+		provider.session = { sessionId: "abc-123" };
+		provider.hasSession = true;
+
+		const result = await handler.handle({ type: "ready" });
+		assert.strictEqual(result.sessionId, "abc-123");
+	});
+
+	test("ready includes undefined sessionId when no session", async () => {
+		provider.session = undefined;
+		provider.hasSession = false;
+
+		const result = await handler.handle({ type: "ready" });
+		assert.strictEqual(result.sessionId, undefined);
+	});
+
+	// ── setApiKey / removeAuth / getCurrentModel / getFavorites / open-in-editor ─
+
+	test("setApiKey calls provider.setApiKey", async () => {
+		const result = await handler.handle({
+			type: "setApiKey",
+			data: { provider: "openai", apiKey: "sk-test" },
+		});
+		assert.deepStrictEqual(provider.calls.setApiKey[0], ["openai", "sk-test"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("removeAuth calls provider.removeAuth", async () => {
+		const result = await handler.handle({
+			type: "removeAuth",
+			data: { provider: "openai" },
+		});
+		assert.deepStrictEqual(provider.calls.removeAuth[0], ["openai"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("getCurrentModel returns current model id", async () => {
+		const result = await handler.handle({ type: "getCurrentModel" });
+		assert.strictEqual(result, "model-a");
+	});
+
+	test("getFavorites returns favorites list", async () => {
+		const result = await handler.handle({ type: "getFavorites" });
+		assert.deepStrictEqual(result, []);
+	});
+
+	test("open-in-editor opens document when content provided", async () => {
+		resetVscodeMocks();
+		const vscode = (globalThis as any).vscode;
+		vscode.workspace.openTextDocument = async (opts: any) => ({
+			content: opts.content,
+		});
+		vscode.window.showTextDocument = async () => {};
+
+		const result = await handler.handle({
+			type: "open-in-editor",
+			data: { content: "hello", language: "typescript" },
+		});
+		assert.strictEqual(result.success, true);
+	});
+
+	test("open-in-editor does nothing when no content", async () => {
+		resetVscodeMocks();
+		const result = await handler.handle({
+			type: "open-in-editor",
+			data: { content: "" },
+		});
+		assert.strictEqual(result.success, true);
+	});
+
+	// ── deleteSessions single session ──────────────────────────────────────
+
+	test("deleteSessions single session shows single message", async () => {
+		resetVscodeMocks();
+		let warningMsg: string | undefined;
+		const vscode = (globalThis as any).vscode;
+		vscode.window.showWarningMessage = async (msg: string) => {
+			warningMsg = msg;
+			return "Delete";
+		};
+
+		await handler.handle({
+			type: "deleteSessions",
+			data: { sessionIds: ["s1"] },
+		});
+		assert.ok(warningMsg?.includes("this session"));
+		assert.ok(provider.calls.deleteSessions.length > 0);
 	});
 });
