@@ -39,14 +39,14 @@ import { type EnrichedPackage } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
 import { serializeMessages } from "./message-serializer.js";
 
-const THINKING_LEVELS: ReadonlySet<string> = new Set([
+const THINKING_LEVELS = [
 	"off",
 	"minimal",
 	"low",
 	"medium",
 	"high",
 	"xhigh",
-]);
+] as const;
 
 export const piAgentProviderInternals = {
 	createAgentSession,
@@ -62,7 +62,7 @@ export const piAgentProviderInternals = {
 };
 
 export function validateThinkingLevel(value: unknown): ThinkingLevel {
-	if (typeof value === "string" && THINKING_LEVELS.has(value)) {
+	if (typeof value === "string" && THINKING_LEVELS.includes(value as any)) {
 		return value as ThinkingLevel;
 	}
 	return "medium";
@@ -86,10 +86,8 @@ export class PiAgentProvider
 	private view?: vscode.WebviewView;
 	private session?: AgentSession;
 	// Cached update info for re-sending to webview on visibility change
-	private lastUpdateInfo: { piVersion: string | null; packageCount: number } = {
-		piVersion: null,
-		packageCount: 0,
-	};
+	private lastPiVersion: string | null = null;
+	private lastPackageCount = 0;
 	private config: PiAgentConfig;
 	private messageHandler: MessageHandler;
 	private isInitialized = false;
@@ -357,7 +355,6 @@ export class PiAgentProvider
 		this.logDebug("[PiLot Studio] resolveWebviewView called");
 		this.view = view;
 		this._webview = view.webview;
-		this.logDebug("[PiLot Studio] Webview view created");
 		view.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [
@@ -365,23 +362,17 @@ export class PiAgentProvider
 				vscode.Uri.joinPath(this.context.extensionUri, "media"),
 			],
 		};
-		this.logDebug("[PiLot Studio] Webview options set");
 
-		this.logDebug("[PiLot Studio] Starting initialization");
 		this.initialize()
 			.then(async () => {
 				this.logDebug(
 					"[PiLot Studio] Initialization complete, loading webview content",
 				);
 				view.webview.html = await this.getWebviewContent(view.webview);
-				this.logDebug("[PiLot Studio] Webview content loaded");
-				// Auto-create a session so the panel isn't empty on first open
 				if (!this.session) {
 					this.logDebug("[PiLot Studio] Creating new session");
 					await this.newSession();
 				}
-				this.logDebug("[PiLot Studio] Webview fully initialized");
-				// Set the view title and description with version info
 				this.updateViewTitle().catch((e) =>
 					this.logError("[PiLot Studio] Failed to update view title:", e),
 				);
@@ -390,32 +381,22 @@ export class PiAgentProvider
 				this.logError("[PiLot Studio] Initialization error:", error);
 			});
 
-		this.logDebug("[PiLot Studio] Setting up message handler");
 		view.webview.onDidReceiveMessage(
 			this.messageHandler.handle.bind(this.messageHandler),
 		);
-		this.logDebug("[PiLot Studio] Message handler set up");
 
-		// Re-sync state when the sidebar becomes visible (e.g. after switching tabs)
 		view.onDidChangeVisibility(() => {
-			if (view.visible && this.session) {
+			if (!view.visible) return;
+			if (this.session) {
 				this.notifyWebview({
 					type: "session-updated",
 					data: { sessionId: this.session.sessionId },
 				});
-				// Re-sync thinking level — TUI may have changed it in settings.json
 				const level = this.getThinkingLevel();
 				this.notifyWebview({ type: "thinking-level-changed", data: { level } });
-				// Refresh installed packages when panel becomes visible
 				this.refreshInstalledPackagesInWebview();
 			}
-			// Re-send cached update info whenever panel becomes visible
-			if (view.visible) {
-				this.sendUpdatesToWebview(
-					this.lastUpdateInfo.piVersion,
-					this.lastUpdateInfo.packageCount,
-				);
-			}
+			this.sendUpdatesToWebview(this.lastPiVersion, this.lastPackageCount);
 		});
 	}
 
@@ -765,26 +746,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async newSession() {
 		this.sessionListManager.autoNamingTriggered = false;
-		// Dispose old session properly before creating a new one
-		this.extensionUIContext.stopStatusPoller();
-		this.footerManager.stop();
-		this.extensionStatuses.clear();
-		this.notifyWebview({ type: "extension-statuses-clear" });
-		if (this.session) {
-			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
-			// can kill their child processes before the runner is invalidated.
-			// Without this, lean-ctx processes accumulate across session switches.
-			await this.session.extensionRunner
-				.emit({
-					type: "session_shutdown",
-					reason: "new",
-				})
-				.catch((e) => {
-					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
-				});
-			this.session.dispose();
-			this.session = undefined as any;
-		}
+		await this.tearDownCurrentSession();
 		// Create a new session file on disk — resets the SessionManager state
 		// so createAgentSession starts fresh instead of continuing.
 		if (this.sessionManager) {
@@ -807,6 +769,24 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.sendSessionStats();
 		// Send loaded resources: contexts, skills, extensions, and packages
 		await this.sendSessionResources();
+	}
+
+	private async tearDownCurrentSession(
+		reason: "reload" | "new" | "quit" | "resume" | "fork" = "new",
+	): Promise<void> {
+		this.extensionUIContext.stopStatusPoller();
+		this.footerManager.stop();
+		this.extensionStatuses.clear();
+		this.notifyWebview({ type: "extension-statuses-clear" });
+		if (this.session) {
+			await this.session.extensionRunner
+				.emit({ type: "session_shutdown", reason })
+				.catch((e) => {
+					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+				});
+			this.session.dispose();
+			this.session = undefined as any;
+		}
 	}
 
 	async sendSessionResources() {
@@ -914,24 +894,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.notifyWebview({
 				type: "session-resources",
 				data: {
-					skills: skills.map((s: any) => ({
-						name: s.name,
-						description: s.description,
-						sourceName:
-							s.sourceInfo?.origin === "package"
-								? s.sourceInfo?.source
-										?.replace(/^npm:/, "")
-										?.replace(/^git:/, "") || null
-								: null,
-						path: s.path || "",
-						sourceType:
-							s.sourceInfo?.origin === "package"
-								? "package"
-								: s.sourceInfo?.scope === "user" ||
-										s.sourceInfo?.scope === "project"
-									? "local"
-									: "built-in",
-					})),
+					skills: skills.map((s: any) => this.toWebviewSkill(s)),
 					skillCount: skills.length,
 					extensions: extensions.map((e: any) => ({
 						path: e.path,
@@ -983,24 +946,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		// Dispose old session
-		this.extensionUIContext.stopStatusPoller();
-		this.footerManager.stop();
-		this.extensionStatuses.clear();
-		this.notifyWebview({ type: "extension-statuses-clear" });
-		if (this.session) {
-			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
-			// can kill their child processes before the runner is invalidated.
-			await this.session.extensionRunner
-				.emit({
-					type: "session_shutdown",
-					reason: "new",
-				})
-				.catch((e) => {
-					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
-				});
-			this.session.dispose();
-			this.session = undefined;
-		}
+		await this.tearDownCurrentSession("new");
 
 		// Open the session file and create a new agent session from it
 		const sessionManager = SessionManager.open(
@@ -1132,23 +1078,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		// Shut down old session
-		this.extensionUIContext.stopStatusPoller();
-		this.footerManager.stop();
-		this.extensionStatuses.clear();
-		this.notifyWebview({ type: "extension-statuses-clear" });
-
-		if (this.session) {
-			await this.session.extensionRunner
-				.emit({
-					type: "session_shutdown",
-					reason: "new",
-				})
-				.catch((e) => {
-					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
-				});
-			this.session.dispose();
-			this.session = undefined;
-		}
+		await this.tearDownCurrentSession("new");
 
 		// Build session options from VS Code configuration
 		const sessionOpts = await this.buildSessionOptions(cwd);
@@ -1520,8 +1450,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	 * Called by the update checker when new updates are discovered or cleared.
 	 */
 	sendUpdatesToWebview(piVersion: string | null, packageCount: number): void {
-		// Cache so we can re-send when the panel becomes visible
-		this.lastUpdateInfo = { piVersion, packageCount };
+		this.lastPiVersion = piVersion;
+		this.lastPackageCount = packageCount;
 
 		if (piVersion || packageCount > 0) {
 			this.notifyWebview({
@@ -1977,6 +1907,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	// Skill methods
 
+	private toWebviewSkill(s: any): {
+		name: string;
+		description: string;
+		sourceName: string | null;
+		path: string;
+		sourceType: string;
+	} {
+		return {
+			name: s.name,
+			description: s.description || "",
+			sourceName:
+				s.sourceInfo?.origin === "package"
+					? s.sourceInfo?.source?.replace(/^npm:/, "")?.replace(/^git:/, "") ||
+						null
+					: null,
+			path: s.path || "",
+			sourceType:
+				s.sourceInfo?.origin === "package"
+					? "package"
+					: s.sourceInfo?.scope === "user" || s.sourceInfo?.scope === "project"
+						? "local"
+						: "built-in",
+		};
+	}
+
 	async getAllSkills(): Promise<
 		Array<{
 			name: string;
@@ -1992,24 +1947,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			if (!rl) return [];
 			const sr = rl.getSkills();
 			const skills = sr.skills || [];
-			return skills.map((s: any) => ({
-				name: s.name,
-				description: s.description || "",
-				sourceName:
-					s.sourceInfo?.origin === "package"
-						? s.sourceInfo?.source
-								?.replace(/^npm:/, "")
-								?.replace(/^git:/, "") || null
-						: null,
-				path: s.path || "",
-				sourceType:
-					s.sourceInfo?.origin === "package"
-						? "package"
-						: s.sourceInfo?.scope === "user" ||
-								s.sourceInfo?.scope === "project"
-							? "local"
-							: "built-in",
-			}));
+			return skills.map((s: any) => this.toWebviewSkill(s));
 		} catch {
 			return [];
 		}
@@ -2077,19 +2015,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.initialize();
 		}
 
-		const thinkingLevels: ThinkingLevel[] = [
-			"off",
-			"minimal",
-			"low",
-			"medium",
-			"high",
-			"xhigh",
-		];
-		const currentIndex = thinkingLevels.indexOf(
-			this.config.thinkingLevel as ThinkingLevel,
+		const currentIndex = THINKING_LEVELS.indexOf(
+			this.config.thinkingLevel as any,
 		);
 		const nextLevel =
-			thinkingLevels[(currentIndex + 1) % thinkingLevels.length] || "medium";
+			THINKING_LEVELS[(currentIndex + 1) % THINKING_LEVELS.length] || "medium";
 
 		await this.setThinkingLevel(nextLevel);
 		this.notifyWebview({

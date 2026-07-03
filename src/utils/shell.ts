@@ -6,19 +6,8 @@ type CommandResult = { code: number | null; stdout: string; stderr: string };
 
 /** Strip ANSI escape sequences from a string */
 export function stripAnsi(text: string): string {
-	let result = "";
-	for (let index = 0; index < text.length; index++) {
-		const char = text[index];
-		if (char === "\u001b" && text[index + 1] === "[") {
-			index += 2;
-			while (index < text.length && !/[A-Za-z]/.test(text[index]!)) {
-				index++;
-			}
-			continue;
-		}
-		result += char;
-	}
-	return result;
+	// eslint-disable-next-line no-control-regex
+	return text.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "");
 }
 
 /** Single-quote a string for shell (safe for POSIX shells) */

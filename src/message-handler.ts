@@ -7,6 +7,24 @@ import { type ProviderApi } from "./protocol/types.js";
 export class MessageHandler {
 	constructor(private provider: ProviderApi) {}
 
+	private async withErrorReporting<T>(
+		fn: () => Promise<T>,
+	): Promise<{ success: true } | T> {
+		try {
+			const result = await fn();
+			return result ?? { success: true };
+		} catch (error) {
+			this.provider.webview?.postMessage({
+				type: "error",
+				data: {
+					message: error instanceof Error ? error.message : String(error),
+					timestamp: Date.now(),
+				},
+			});
+			throw error;
+		}
+	}
+
 	async handle(message: {
 		type: string;
 		id?: string;
@@ -23,37 +41,15 @@ export class MessageHandler {
 					break;
 
 				case "prompt":
-					try {
-						await this.provider.prompt(message.data.text, message.data.images);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.prompt(message.data.text, message.data.images),
+					);
 					break;
 
 				case "newSession":
-					try {
-						await this.provider.newSession();
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.newSession(),
+					);
 					break;
 
 				case "exportSession": {
@@ -90,20 +86,9 @@ export class MessageHandler {
 				}
 
 				case "switchSession":
-					try {
-						await this.provider.switchSession(message.data.sessionId);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.switchSession(message.data.sessionId),
+					);
 					break;
 
 				case "navigateTree":
@@ -112,104 +97,37 @@ export class MessageHandler {
 					break;
 
 				case "setSessionName":
-					try {
-						await this.provider.setSessionName(message.data.name);
-						result = { success: true };
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.setSessionName(message.data.name),
+					);
 					break;
 
 				case "switchModel":
-					try {
-						await this.provider.setModel(message.data.modelId);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.setModel(message.data.modelId),
+					);
 					break;
 
 				case "setThinkingLevel":
-					try {
-						await this.provider.setThinkingLevel(message.data.level);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.setThinkingLevel(message.data.level),
+					);
 					break;
 
 				case "steer":
-					try {
-						await this.provider.steer(message.data.text);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.steer(message.data.text),
+					);
 					break;
 
 				case "followUp":
-					try {
-						await this.provider.followUp(message.data.text);
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.followUp(message.data.text),
+					);
 					break;
 
 				case "abort":
-					try {
-						await this.provider.abort();
-						result = { success: true };
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() => this.provider.abort());
 					break;
 
 				case "getModels":
@@ -264,19 +182,7 @@ export class MessageHandler {
 					break;
 
 				case "compact":
-					try {
-						result = await this.provider.compact();
-					} catch (error) {
-						// Send error as system message to webview
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error; // Re-throw for the caller's error handling
-					}
+					result = await this.withErrorReporting(() => this.provider.compact());
 					break;
 
 				case "getContextUsage":
@@ -372,70 +278,34 @@ export class MessageHandler {
 					this.sendPackagesList(result);
 					break;
 
-				case "installPackage": {
-					try {
+				case "installPackage":
+					result = await this.withErrorReporting(async () => {
 						await this.provider.installPackage(message.data.source);
-						result = { success: true };
-						// Refresh packages list after install
-						const packages = await this.provider.listPackages();
-						this.sendPackagesList(packages);
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+						const pkgs = await this.provider.listPackages();
+						this.sendPackagesList(pkgs);
+					});
 					break;
-				}
 
-				case "uninstallPackage": {
-					try {
+				case "uninstallPackage":
+					result = await this.withErrorReporting(async () => {
 						await this.provider.uninstallPackage(message.data.source);
-						result = { success: true };
-						// Refresh packages list after uninstall
-						const packages = await this.provider.listPackages();
-						this.sendPackagesList(packages);
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+						const pkgs = await this.provider.listPackages();
+						this.sendPackagesList(pkgs);
+					});
 					break;
-				}
 
 				case "checkForUpdates":
 					await vscode.commands.executeCommand("pi-agent.checkForUpdates");
 					result = { success: true };
 					break;
 
-				case "updateResources": {
-					try {
+				case "updateResources":
+					result = await this.withErrorReporting(async () => {
 						await this.provider.updatePackages();
-						result = { success: true };
-						// Refresh packages list after update
-						const packages = await this.provider.listPackages();
-						this.sendPackagesList(packages);
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+						const pkgs = await this.provider.listPackages();
+						this.sendPackagesList(pkgs);
+					});
 					break;
-				}
 
 				case "openFileAttachmentDialog":
 					{
@@ -454,19 +324,9 @@ export class MessageHandler {
 					break;
 
 				case "toggle-voice-capture":
-					try {
-						await this.provider.toggleVoiceCapture();
-						result = { success: true };
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.toggleVoiceCapture(),
+					);
 					break;
 
 				case "showRenameSessionDialog":
@@ -491,7 +351,6 @@ export class MessageHandler {
 						break;
 					}
 
-					// Confirm with the user via VS Code dialog (webviews cannot use confirm())
 					const count = sessionIds.length;
 					const confirmBtn =
 						count === 1
@@ -511,39 +370,16 @@ export class MessageHandler {
 						break;
 					}
 
-					try {
-						await this.provider.deleteSessions(sessionIds);
-						result = { success: true };
-					} catch (error: any) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error?.message ?? String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.deleteSessions(sessionIds),
+					);
 					break;
 				}
 
 				case "edit-message":
-					try {
-						await this.provider.editMessage(
-							message.data.index,
-							message.data.text,
-						);
-						result = { success: true };
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+					result = await this.withErrorReporting(() =>
+						this.provider.editMessage(message.data.index, message.data.text),
+					);
 					break;
 
 				case "open-in-editor":
@@ -659,21 +495,11 @@ export class MessageHandler {
 					break;
 
 				case "forkSession":
-					try {
-						await this.provider.forkSession(
+					result = await this.withErrorReporting(() =>
+						this.provider.forkSession(
 							message.data.entryId ?? message.data.fromNodeId,
-						);
-						result = { success: true };
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+						),
+					);
 					break;
 
 				case "getSettings":
@@ -682,23 +508,13 @@ export class MessageHandler {
 					break;
 
 				case "setToolConfig":
-					try {
+					result = await this.withErrorReporting(async () => {
 						await this.provider.setToolConfig(message.data);
-						result = { success: true };
 						this.sendSettingsResponse({
 							toolPreset: message.data.toolPreset,
 							customTools: message.data.customTools,
 						});
-					} catch (error) {
-						this.provider.webview?.postMessage({
-							type: "error",
-							data: {
-								message: error instanceof Error ? error.message : String(error),
-								timestamp: Date.now(),
-							},
-						});
-						throw error;
-					}
+					});
 					break;
 
 				default:

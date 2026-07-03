@@ -8,19 +8,20 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - "Apply to Editor" button on code blocks — inserts or replaces selection in active editor
 - "Preview Diff" button on code blocks — opens VS Code diff editor with proposed changes
+- "Open in Editor" button for code blocks
 - Code block copy button with clipboard feedback
 - Message-level copy button for assistant responses
 - Add support for forking sessions from existing ones
 - Chat search (Ctrl+F) to highlight matching text in messages
 - Markdown table rendering
-- "Open in Editor" button for code blocks
 - Timestamp toggle (relative ↔ absolute)
 - Markdown header anchors for linking
 - Expanded empty state quick actions (Debug Issue, Write Tests)
 
 ### Changed
 
-- Message actions (copy, timestamp toggle) appear on hover
+- Message actions (copy, timestamp toggle, fork) appear on hover
+- Refactor to minimize code bloat.
 - Significantly improved test coverage
 
 ### Fixed
