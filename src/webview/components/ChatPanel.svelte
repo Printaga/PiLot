@@ -458,7 +458,7 @@
   function handleInput() {
     const cursorPos = textareaEl?.selectionStart || 0;
     const textBeforeCursor = inputText.slice(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@\S*$/);
+    const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
     if (atMatch) {
       autocompleteQuery = atMatch[1] || "";

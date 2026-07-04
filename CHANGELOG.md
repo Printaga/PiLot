@@ -7,6 +7,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Changed
 
 - Improved landing page design
+- Improved file picker @ search function
 
 ### Fixed
 
