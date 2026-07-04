@@ -427,8 +427,13 @@ export class PiAgentProvider
 				this.log(
 					"[PI] Code intelligence won't work until better-sqlite3 is rebuilt. Run 'PiLot: Rebuild Native Addons' command.",
 				);
-				if (status.modulePath) {
-					this.log(`[PI] Module path: ${status.modulePath}`);
+				// Log all mismatched copies
+				for (const copy of status.copies) {
+					if (!copy.compatible) {
+						this.log(
+							`[PI]   Mismatched copy: ${copy.dir} (ABI ${copy.moduleABI})`,
+						);
+					}
 				}
 			}
 		} catch (error) {

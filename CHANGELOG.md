@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [2.2.1] - Unreleased
+
+### Fixed
+
+- Package @catdaemon/pi-code-intelligence sqllite3 node compability with VsCode
+
 ## [2.2.0] - 2026-07-03
 
 ### Added

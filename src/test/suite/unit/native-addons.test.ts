@@ -122,9 +122,10 @@ suite("native-addons", () => {
 			assert.ok(desc.includes("24.x"));
 		});
 
-		test("formats known ABI 140 as Node 26.x", () => {
+		test("formats known ABI 140 as Node 22.x (Electron build)", () => {
 			const desc = describeABIStatus(140, 140);
-			assert.ok(desc.includes("26.x"));
+			assert.ok(desc.includes("22.x"));
+			assert.ok(desc.includes("Electron build"));
 		});
 
 		test("formats known ABI 142 as Node 27.x", () => {
