@@ -731,7 +731,7 @@ export class MessageHandler {
 			const fileUris = await vscode.workspace.findFiles(
 				pattern,
 				excludePattern,
-				2000,
+				10000,
 			);
 
 			const seen = new Set<string>();

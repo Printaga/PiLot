@@ -10,8 +10,9 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Fixed
 
+- Fixed some files not available in file picker. Increaced limit on files available in file picker from 2000 to 10000
 - Package @catdaemon/pi-code-intelligence sqllite3 node compability with VsCode
-- Removed redundant versions of the landing page.
+- Removed redundant extra versions of the landing page.
 
 ## [2.2.0] - 2026-07-03
 
