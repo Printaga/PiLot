@@ -532,7 +532,7 @@ export class PiAgentProvider
 
 		// Compute webview URIs for media assets and inject them as globals
 		const mediaIconUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.svg"),
+			vscode.Uri.joinPath(this.context.extensionUri, "media", "icon.png"),
 		);
 		const mediaKofiUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.context.extensionUri, "media", "kofi.png"),

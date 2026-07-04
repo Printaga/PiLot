@@ -799,23 +799,22 @@
           >. Type a message below to start.
         </p>
 
-        {#if piCliVersion && isBinaryAvailable}
-          <div class="setup-card ready">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-success)"
-              stroke-width="2.5"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>PI CLI <span class="version-tag">v{piCliVersion}</span></span>
-          </div>
-        {:else}
-          <div class="setup-card">
-            <div class="setup-header">
+        <div class="setup-card">
+          <div class="setup-header">
+            {#if piCliVersion && isBinaryAvailable}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-success)"
+                stroke-width="2.5"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>PI CLI Ready</span>
+              <span class="version-tag">v{piCliVersion}</span>
+            {:else}
               <svg
                 width="16"
                 height="16"
@@ -834,7 +833,9 @@
                 text="This extension requires the PI CLI. Install it globally with npm and ensure the 'pi' command is on your PATH."
                 title="Setup Help"
               />
-            </div>
+            {/if}
+          </div>
+          {#if !(piCliVersion && isBinaryAvailable)}
             <button
               class="setup-code"
               onclick={() =>
@@ -858,8 +859,8 @@
                 />
               </svg>
             </button>
-          </div>
-        {/if}
+          {/if}
+        </div>
 
         {#if mediaKofi}
           <div class="kofi-section">
@@ -1686,23 +1687,12 @@
     text-align: left;
     transition: all var(--transition-interactive);
   }
-  .setup-card.ready {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-5);
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    border-color: oklch(from var(--color-success) l c h / 0.25);
-    background: oklch(from var(--color-success) l c h / 0.06);
-  }
-  .setup-card.ready svg {
-    flex-shrink: 0;
-  }
   .version-tag {
-    color: var(--color-text);
-    font-weight: 700;
+    color: var(--color-text-muted);
+    font-weight: 600;
     font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    margin-left: auto;
   }
   .setup-header {
     display: flex;
