@@ -137,10 +137,7 @@
     piCliVersion = null,
   }: Props = $props();
 
-  // Show setup guidance only when PI binary is not available and no messages exist
-  const showSetupCard = $derived(
-    messages.length === 0 && (!piCliVersion || !isBinaryAvailable),
-  );
+  // Setup status: shown in empty state, content adapts after ready data arrives
 
   let messagesContainer: HTMLDivElement | null = null;
   let transcriptWindowSize = $state(100);
@@ -802,7 +799,21 @@
           >. Type a message below to start.
         </p>
 
-        {#if showSetupCard}
+        {#if piCliVersion && isBinaryAvailable}
+          <div class="setup-card ready">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-success)"
+              stroke-width="2.5"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span>PI CLI <span class="version-tag">v{piCliVersion}</span></span>
+          </div>
+        {:else}
           <div class="setup-card">
             <div class="setup-header">
               <svg
@@ -851,14 +862,17 @@
         {/if}
 
         {#if mediaKofi}
-          <a
-            href="https://ko-fi.com/O4H020U50P"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="kofi-link"
-          >
-            <img src={mediaKofi} alt="Support on Ko-fi" />
-          </a>
+          <div class="kofi-section">
+            <span class="kofi-label">Support this project</span>
+            <a
+              href="https://ko-fi.com/O4H020U50P"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="kofi-link"
+            >
+              <img src={mediaKofi} alt="Support on Ko-fi" />
+            </a>
+          </div>
         {/if}
 
         <div class="quick-actions">
@@ -1544,7 +1558,7 @@
     justify-content: center;
     height: 100%;
     padding: var(--space-8);
-    gap: var(--space-4);
+    gap: var(--space-5);
     animation: msg-fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   }
   @keyframes msg-fade-in {
@@ -1559,10 +1573,12 @@
   }
   .hero-graphic {
     position: relative;
-    margin-bottom: var(--space-2);
+    margin-bottom: var(--space-3);
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: var(--space-4);
+    border: 2px solid var(--color-border);
   }
   .orb {
     position: absolute;
@@ -1597,22 +1613,36 @@
     border-radius: var(--radius-lg);
     object-fit: contain;
   }
+  .kofi-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+  }
+  .kofi-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-muted);
+    opacity: 0.5;
+  }
   .kofi-link {
     display: inline-block;
-    margin-top: var(--space-2);
     transition: transform var(--transition-interactive);
   }
   .kofi-link:hover {
     transform: scale(1.05);
   }
   .kofi-link img {
-    height: 36px;
+    height: 28px;
     width: auto;
   }
   .empty-state h1 {
-    font-size: var(--text-xl);
+    font-size: var(--text-2xl);
     font-weight: 800;
     letter-spacing: -0.03em;
+    font-family: var(--font-display);
     background: linear-gradient(
       135deg,
       var(--color-text),
@@ -1654,6 +1684,25 @@
     max-width: 480px;
     width: 100%;
     text-align: left;
+    transition: all var(--transition-interactive);
+  }
+  .setup-card.ready {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    border-color: oklch(from var(--color-success) l c h / 0.25);
+    background: oklch(from var(--color-success) l c h / 0.06);
+  }
+  .setup-card.ready svg {
+    flex-shrink: 0;
+  }
+  .version-tag {
+    color: var(--color-text);
+    font-weight: 700;
+    font-family: var(--font-mono);
   }
   .setup-header {
     display: flex;
@@ -1717,7 +1766,7 @@
     gap: var(--space-3);
     margin-top: var(--space-2);
     width: 100%;
-    max-width: 280px;
+    max-width: 340px;
   }
   .action-group {
     display: flex;
