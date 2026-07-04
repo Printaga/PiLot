@@ -28,19 +28,37 @@
 ## Project Structure
 
 - `src/extension.ts` — extension activation and command registration entry point
+- `src/loader.cjs` — CommonJS entry shim (loaded by VS Code, delegates to `dist/` bundle)
 - `src/pi-agent-provider.ts` — session lifecycle, webview bridge, settings sync, package/resource actions
-- `src/webview/` — Svelte app, components, browser-side types, and styles
-- `src/protocol/` — shared host/webview message contracts
-- `src/test/` — VS Code integration runner plus unit tests
+- `src/pi-binary.ts` — PI CLI binary detection, version checks, upgrade handling
+- `src/session-manager.ts` — session CRUD, tree navigation, fork/merge operations
+- `src/session-resources.ts` — workspace context, file mentions, package resolution
+- `src/message-handler.ts` — webview message dispatch and routing
+- `src/message-serializer.ts` — session message serialization for webview transport
+- `src/extension-ui-context.ts` — runner UI hooks, status polling, activity tracking
+- `src/footer-manager.ts` — status bar footer data (cwd, git branch, session name)
+- `src/voice-manager.ts` — dictation lifecycle, model download, audio streaming
+- `src/binary-service.ts` — shell command execution, git branch resolution
+- `src/model-registry-handler.ts` — model list fetching and caching
+- `src/package-manager.ts` — PI package install/update/remove operations
+- `src/update-checker.ts` — extension update notification and changelog display
+- `src/commands/index.ts` — registered VS Code command handlers
+- `src/utils/native-addons.ts` — native addon ABI mismatch detection and recovery
+- `src/utils/shell.ts` — cross-platform shell helpers
+- `src/protocol/types.ts` — shared host/webview message type definitions
+- `src/webview/` — Svelte app (App.svelte + 21 components, entry `main.ts`), types, styles
+- `src/test/` — VS Code integration runner plus unit tests (18 test files under `suite/unit/`)
 - `scripts/` — install-time patching utilities
 - `patches/` — checked-in patches applied during `postinstall`
 - `media/` — icons, screenshots, and bundled voice binaries
 - `.kilo/plans/` — internal planning notes, not runtime source of truth
+- Root config: `esbuild.config.mjs`, `eslint.config.mjs`, `svelte.config.js`, `tsconfig.json`, `tsconfig.test.json`, `tsconfig.webview.json`, `vite.webview.config.mts`, `pnpm-workspace.yaml`
 
 ## Related Docs
 
 - [README.md](./README.md) — setup, features, troubleshooting, and development entry points
 - [CHANGELOG.md](./CHANGELOG.md) — release history
+- [TODO.md](./TODO.md) — tracked feature/bug backlog
 - [media/voice/README.md](./media/voice/README.md) — platform/runtime notes for bundled dictation helpers
 - [skill-management-gui.md](./skill-management-gui.md) — planning document only, not implementation truth
 
@@ -52,6 +70,7 @@
 - Preserve the message bridge contract: host messages flow through `PiAgentProvider.notifyWebview(...)`, webview messages go through `window.vscode.postMessage(...)`, and new message types must be wired on both sides
 - `getWebviewContent()` owns VS Code-safe asset rewriting; do not weaken CSP or webview resource restrictions
 - Use Svelte 5 runes in the webview; top-level state lives in `App.svelte` rather than shared stores
+- Test conventions: Mocha TDD style (`suite`/`test`, not `describe`/`it`), `node:assert` for assertions, mocks via `globalThis.vscode` and `src/test/mocks/` factories
 
 ## Gotchas
 
@@ -72,7 +91,9 @@
 
 - `AGENTS.md` is the only checked-in agent instruction file in this repo
 - No `.github/copilot-instructions.md`, `.github/instructions/`, `.claude/`, `.cursor/`, `.windsurf/`, or `.github/prompts/` files are present
-- `.mcp.json` exists but currently defines no checked-in MCP servers
+- `.mcp.json` exists but currently defines no checked-in MCP servers (`{"mcpServers": {}}`)
+- `src/test/mocks/pi-sdk-mocks.ts` — mock factories for PI SDK internals (memento, binary service, etc.)
+- `src/test/mocks/session-mock.ts` — mock session/runner/resource-loader factories
 
 ## Boundaries
 
