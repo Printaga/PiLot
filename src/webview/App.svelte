@@ -1257,8 +1257,6 @@
           onNewSession={handleNewSession}
           onAbort={handleAbort}
           {sessionResources}
-          {isBinaryAvailable}
-          {piCliVersion}
           {isListening}
           onToggleVoice={handleToggleVoice}
           bind:inputText={draftInputText}

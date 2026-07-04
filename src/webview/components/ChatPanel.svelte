@@ -99,8 +99,6 @@
     footerCwd?: string;
     footerGitBranch?: string | null;
     footerSessionName?: string | null;
-    isBinaryAvailable?: boolean;
-    piCliVersion?: string | null;
   }
 
   let {
@@ -133,11 +131,7 @@
     footerCwd = "",
     footerGitBranch = null,
     footerSessionName = null,
-    isBinaryAvailable = false,
-    piCliVersion = null,
   }: Props = $props();
-
-  // Setup status: shown in empty state, content adapts after ready data arrives
 
   let messagesContainer: HTMLDivElement | null = null;
   let transcriptWindowSize = $state(100);
@@ -801,65 +795,48 @@
 
         <div class="setup-card">
           <div class="setup-header">
-            {#if piCliVersion && isBinaryAvailable}
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-success)"
-                stroke-width="2.5"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span>PI CLI Ready</span>
-              <span class="version-tag">v{piCliVersion}</span>
-            {:else}
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-              <span>Getting Started</span>
-              <HelpTooltip
-                text="This extension requires the PI CLI. Install it globally with npm and ensure the 'pi' command is on your PATH."
-                title="Setup Help"
-              />
-            {/if}
-          </div>
-          {#if !(piCliVersion && isBinaryAvailable)}
-            <button
-              class="setup-code"
-              onclick={() =>
-                navigator.clipboard.writeText(
-                  "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
-                )}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
             >
-              <span class="code-prompt">$</span> npm install -g --ignore-scripts
-              @earendil-works/pi-coding-agent
-              <svg
-                class="copy-icon"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                />
-              </svg>
-            </button>
-          {/if}
+              <path
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>Getting Started</span>
+            <HelpTooltip
+              text="This extension requires the PI CLI. Install it globally with npm and ensure the 'pi' command is on your PATH."
+              title="Setup Help"
+            />
+          </div>
+          <button
+            class="setup-code"
+            onclick={() =>
+              navigator.clipboard.writeText(
+                "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+              )}
+          >
+            <span class="code-prompt">$</span> npm install -g --ignore-scripts
+            @earendil-works/pi-coding-agent
+            <svg
+              class="copy-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              />
+            </svg>
+          </button>
         </div>
 
         {#if mediaKofi}
@@ -1686,13 +1663,6 @@
     width: 100%;
     text-align: left;
     transition: all var(--transition-interactive);
-  }
-  .version-tag {
-    color: var(--color-text-muted);
-    font-weight: 600;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    margin-left: auto;
   }
   .setup-header {
     display: flex;
