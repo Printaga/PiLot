@@ -147,6 +147,67 @@
   let showScrollBtn = $state(false);
   let userScrolledUp = false;
 
+  // Slash command autocomplete state
+  let showSlashAutocomplete = $state(false);
+  let slashQuery = $state("");
+  let selectedSlashIndex = $state(0);
+
+  /** Built-in slash commands matching PI CLI/TUI. The SDK's prompt() does not
+   *  resolve these — the extension host intercepts them in prompt(). */
+  const BUILTIN_SLASH_COMMANDS = [
+    { name: "/settings", description: "Open settings menu" },
+    { name: "/model", description: "Select model (opens selector UI)" },
+    { name: "/export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
+    { name: "/name ", description: "Set session display name (e.g. /name my-session)" },
+    { name: "/compact", description: "Manually compact the session context" },
+    { name: "/new", description: "Start a new session" },
+    { name: "/tree", description: "Navigate session tree (switch branches)" },
+    { name: "/reload", description: "Reload keybindings, extensions, skills, prompts" },
+    { name: "/tools", description: "Show tools panel" },
+    { name: "/packages", description: "Show packages panel" },
+    { name: "/skills", description: "Show skills panel" },
+    { name: "/providers", description: "Show providers panel" },
+  ] as const;
+
+  /** Combine built-in commands with skills and templates from session resources.
+   *  Skills are prefixed with /skill: and templates expose their bare name. */
+  const allSlashCommands = $derived.by(() => {
+    const builtins = BUILTIN_SLASH_COMMANDS.map((c) => ({
+      name: c.name,
+      description: c.description,
+      source: "builtin" as const,
+    }));
+    const skills = resources.skills
+      .filter((s) => s.name)
+      .map((s) => ({
+        name: `/skill:${s.name}`,
+        description: s.description ?? "",
+        source: "skill" as const,
+      }));
+    const templates = resources.prompts
+      .filter((p) => p.name)
+      .map((p) => ({
+        name: `/${p.name}`,
+        description: p.description ?? "",
+        source: "template" as const,
+      }));
+    return [...builtins, ...skills, ...templates];
+  });
+
+  const filteredSlashCommands = $derived.by(() => {
+    const q = slashQuery.toLowerCase();
+    return allSlashCommands
+      .filter((c) => {
+        if (!q) return true;
+        const name = c.name.replace(/\s+$/, "").toLowerCase();
+        return (
+          name.toLowerCase().includes(q) ||
+          c.description.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 20);
+  });
+
   // Chat search state
   let searchQuery = $state("");
   let showSearch = $state(false);
@@ -280,7 +341,7 @@
       const cursorPos = textareaEl?.selectionStart || inputText.length;
       inputText =
         inputText.slice(0, cursorPos) + text + inputText.slice(cursorPos);
-      closeAutocomplete();
+      closeAllAutocompletes();
     }
     window.addEventListener(
       "voice-transcription",
@@ -365,6 +426,10 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (showSlashAutocomplete && filteredSlashCommands.length > 0) {
+        applySlashCommand(filteredSlashCommands[selectedSlashIndex]);
+        return;
+      }
       if (showAutocomplete && filteredFiles.length > 0) {
         selectFile(filteredFiles[selectedIndex]);
         return;
@@ -377,10 +442,35 @@
         searchQuery = "";
         return;
       }
+      if (showSlashAutocomplete) {
+        e.preventDefault();
+        closeSlashAutocomplete();
+        return;
+      }
       if (showAutocomplete) {
         e.preventDefault();
         closeAutocomplete();
       }
+    }
+    if (showSlashAutocomplete) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedSlashIndex = Math.min(
+          selectedSlashIndex + 1,
+          filteredSlashCommands.length - 1,
+        );
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedSlashIndex = Math.max(selectedSlashIndex - 1, 0);
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (filteredSlashCommands.length > 0) {
+          applySlashCommand(filteredSlashCommands[selectedSlashIndex]);
+        }
+      }
+      return;
     }
     if (showAutocomplete) {
       if (e.key === "ArrowDown") {
@@ -460,14 +550,35 @@
     const textBeforeCursor = inputText.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
+    // Slash command detection: a leading "/" anywhere triggers autocomplete.
+    // We want slash to take precedence over @ (slash kinds of commands look like
+    // /skill:name) — accept the most recent /…$ match at the cursor.
+    const slashMatch = textBeforeCursor.match(/\/(\S*)$/);
+    if (slashMatch) {
+      slashQuery = slashMatch[1] || "";
+      showSlashAutocomplete = true;
+      selectedSlashIndex = 0;
+      // Close the @ dropdown without cascading into slash state — the slash
+      // dropdown we just opened would be silently toggled back off by a
+      // cascade through closeAutocomplete() → closeSlashAutocomplete().
+      showAutocomplete = false;
+      autocompleteQuery = "";
+      return;
+    }
+
     if (atMatch) {
       autocompleteQuery = atMatch[1] || "";
       showAutocomplete = true;
       selectedIndex = 0;
       if (files.length === 0) requestWorkspaceFiles();
+      closeSlashAutocomplete();
       return;
     }
-    closeAutocomplete();
+    // No trigger matched: close both dropdowns explicitly.
+    showAutocomplete = false;
+    autocompleteQuery = "";
+    showSlashAutocomplete = false;
+    slashQuery = "";
   }
 
   function requestWorkspaceFiles() {
@@ -476,9 +587,66 @@
       vscode.postMessage({ type: "get-workspace-files" });
   }
 
+  // Each close helper now owns a single dropdown's state. Do not cascade
+  // closeAutocomplete() through closeSlashAutocomplete() (or vice versa) —
+  // doing so caused the slash dropdown to silently toggle off in the same
+  // tick it was opened.
   function closeAutocomplete() {
     showAutocomplete = false;
     autocompleteQuery = "";
+  }
+
+  function closeSlashAutocomplete() {
+    showSlashAutocomplete = false;
+    slashQuery = "";
+  }
+
+  /** Close both dropdowns. Use at code paths where neither should remain
+   *  open (e.g. insert completion, submit, ESC). */
+  function closeAllAutocompletes() {
+    closeAutocomplete();
+    closeSlashAutocomplete();
+  }
+
+  /** Apply a selected slash command to the input. Cursor lands after a trailing
+   *  space so the user can continue typing their request/instruction. */
+  function applySlashCommand(item: { name: string; source: string }) {
+    if (!textareaEl) return;
+    const cursorPos = textareaEl.selectionStart || inputText.length;
+    const textBeforeCursor = inputText.slice(0, cursorPos);
+    const textAfterCursor = inputText.slice(cursorPos);
+
+    // Match the slash token that the dropdown was responding to.
+    const slashTokenRegex = /\/\S*$/;
+    const match = textBeforeCursor.match(slashTokenRegex);
+    const insertName =
+      item.source === "builtin" && item.name.endsWith(" ")
+        ? item.name
+        : `${item.name} `;
+
+    if (match && match.index !== undefined) {
+      const replacement = match[0].startsWith(insertName)
+        ? `${match[0]} `
+        : insertName;
+      inputText =
+        inputText.slice(0, match.index) +
+        replacement +
+        textAfterCursor;
+    } else {
+      inputText =
+        (textBeforeCursor ? textBeforeCursor + (textBeforeCursor.endsWith(" ") ? "" : " ") : "") +
+        insertName +
+        textAfterCursor;
+    }
+    closeSlashAutocomplete();
+    requestAnimationFrame(() => {
+      textareaEl?.focus();
+      // Position cursor after the inserted command + trailing space.
+      const newPos = match && match.index !== undefined
+        ? match.index + insertName.length
+        : textBeforeCursor.length + insertName.length;
+      textareaEl?.setSelectionRange(newPos, newPos);
+    });
   }
 
   function handleAttachFile() {
@@ -562,7 +730,7 @@
     if (match && match.index !== undefined) {
       inputText =
         inputText.slice(0, match.index) + "@" + path + " " + textAfterCursor;
-      closeAutocomplete();
+      closeAllAutocompletes();
     } else {
       inputText =
         textBeforeCursor +
@@ -592,7 +760,7 @@
         filepath +
         " " +
         textAfterCursor;
-      closeAutocomplete();
+      closeAllAutocompletes();
       setTimeout(() => textareaEl?.focus(), 0);
     }
   }
@@ -1171,7 +1339,7 @@
           }
           handleInput();
         }}
-        placeholder="Type a message... @ to mention files"
+        placeholder="Type a message... / for commands, @ to mention files"
         rows="4"
       ></textarea>
       {#if isStreaming}
@@ -1229,6 +1397,28 @@
               />
             </svg>
             <span class="file-path">{file}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    {#if showSlashAutocomplete && filteredSlashCommands.length > 0}
+      <div class="autocomplete-dropdown slash-autocomplete">
+        {#each filteredSlashCommands as cmd, i}
+          <button
+            class="autocomplete-item"
+            class:selected={i === selectedSlashIndex}
+            onclick={() => applySlashCommand(cmd)}
+            onmouseenter={() => (selectedSlashIndex = i)}
+            title={cmd.description}
+          >
+            <span class="slash-source-badge source-{cmd.source}" aria-hidden="true">
+              {#if cmd.source === "skill"}🧩
+              {:else if cmd.source === "template"}📝
+              {:else}⚡{/if}
+            </span>
+            <span class="slash-cmd-name">{cmd.name.replace(/\s+$/, "")}</span>
+            <span class="slash-cmd-desc">{cmd.description}</span>
           </button>
         {/each}
       </div>
@@ -2130,6 +2320,42 @@
   .file-path {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+  }
+
+  /* Slash command autocomplete */
+  .slash-autocomplete {
+    max-height: 280px;
+  }
+
+  .slash-autocomplete .autocomplete-item {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .slash-source-badge {
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+  }
+
+  .slash-cmd-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  .slash-cmd-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
   }
 
   .show-more-btn {

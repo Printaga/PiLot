@@ -61,9 +61,11 @@ export class MessageHandler {
 								: format === "markdown"
 									? `/export .md`
 									: `/export .html`;
+						// Reuse the new slash-command path so /export goes through
+						// session.exportToHtml()/exportToJsonl() instead of being
+						// sent as a prompt (which the SDK doesn't actually handle).
 						await this.provider.prompt(cmd);
 						result = { success: true };
-						// Send result back to webview so the dialog shows proper feedback
 						this.provider.webview?.postMessage({
 							type: "exportResult",
 							data: { success: true },
@@ -73,7 +75,6 @@ export class MessageHandler {
 							success: false,
 							error: error instanceof Error ? error.message : String(error),
 						};
-						// Send error back to webview so the dialog shows proper feedback
 						this.provider.webview?.postMessage({
 							type: "exportResult",
 							data: {
@@ -82,6 +83,13 @@ export class MessageHandler {
 							},
 						});
 					}
+					break;
+				}
+
+				case "slashCommand": {
+					result = await this.withErrorReporting(() =>
+						this.provider.tryHandleBuiltinCommand(message.data.text),
+					);
 					break;
 				}
 

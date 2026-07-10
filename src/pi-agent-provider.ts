@@ -1267,6 +1267,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Resolve @file mentions to actual file content
 		const textWithFiles = await this.resolveFileMentions(text);
 
+		// Slash commands must arrive at session.prompt() starting with "/".
+		// PI SDK guards on text.startsWith("/") for skill/template/extension
+		// command expansion. Prepending auto-context would break that.
+		// Built-in slash commands are intercepted first by tryHandleBuiltinCommand.
+		if (textWithFiles.startsWith("/")) {
+			const handled = await this.tryHandleBuiltinCommand(textWithFiles);
+			if (!handled) {
+				try {
+					await this.session.prompt(textWithFiles, promptOpts);
+				} catch (error) {
+					this.notifyErrorToWebview(error);
+					throw error;
+				}
+			}
+			return;
+		}
+
 		const context = this.config.autoContext
 			? await this.getProjectContext()
 			: "";
@@ -1277,16 +1294,166 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		try {
 			await this.session.prompt(fullPrompt, promptOpts);
 		} catch (error) {
-			// Send error to webview
-			this.notifyWebview({
-				type: "error",
-				data: {
-					message: error instanceof Error ? error.message : String(error),
-					timestamp: Date.now(),
-				},
-			});
+			this.notifyErrorToWebview(error);
 			throw error;
 		}
+	}
+
+	/**
+	 * Handle built-in slash commands locally before they reach the SDK.
+	 * Returns true when handled, false when caller should pass the text through
+	 * to session.prompt() (skill commands, template commands, extension commands).
+	 */
+	async tryHandleBuiltinCommand(text: string): Promise<boolean> {
+		if (!this.session) return false;
+		const spaceIndex = text.indexOf(" ");
+		const command = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+
+		switch (command) {
+			case "compact": {
+				try {
+					await this.session.compact(args || undefined);
+					const usage = this.getContextUsage();
+					this.notifyWebview({ type: "context-usage", data: usage });
+					this.notifyWebview({
+						type: "system-message",
+						data: { message: `✓ Context compacted` },
+					});
+					return true;
+				} catch (error) {
+					this.notifyErrorToWebview(error);
+					return true;
+				}
+			}
+			case "export": {
+				try {
+					const format = args || ".html";
+					const folders = vscode.workspace.workspaceFolders;
+					const cwd =
+						folders && folders.length > 0
+							? folders[0].uri.fsPath
+							: process.cwd();
+					const sessionId = this.session.sessionId?.slice(0, 8) ?? "session";
+					let outputPath: string;
+					if (format.startsWith(".") || format === "") {
+						const ext = format.startsWith(".") ? format : ".html";
+						outputPath = path.join(cwd, `pi-session-${sessionId}${ext}`);
+					} else {
+						outputPath = format;
+					}
+					const ext = path.extname(outputPath).toLowerCase();
+					// exportToJsonl is currently sync in PI SDK 0.78.x, but we
+					// `await` defensively so the message-handler sees a string
+					// path even if a future SDK version turns it into Promise<string>.
+					const resultPath =
+						ext === ".jsonl"
+							? await this.session.exportToJsonl(outputPath)
+							: await this.session.exportToHtml(outputPath);
+					this.notifyWebview({
+						type: "system-message",
+						data: { message: `✓ Session exported to: ${resultPath}` },
+					});
+					this.notifyWebview({
+						type: "exportResult",
+						data: { success: true, path: resultPath },
+					});
+					return true;
+				} catch (error) {
+					this.notifyErrorToWebview(error);
+					this.notifyWebview({
+						type: "exportResult",
+						data: {
+							success: false,
+							error: error instanceof Error ? error.message : String(error),
+						},
+					});
+					return true;
+				}
+			}
+			case "name": {
+				if (args) {
+					this.session.setSessionName(args);
+				}
+				return true;
+			}
+			case "tree": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: "sessions" },
+				});
+				return true;
+			}
+			case "model": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: "models" },
+				});
+				return true;
+			}
+			case "settings": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: "settings" },
+				});
+				return true;
+			}
+			case "login":
+			case "logout": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: "providers" },
+				});
+				return true;
+			}
+			case "skills":
+			case "packages": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: command === "skills" ? "skills" : "packages" },
+				});
+				return true;
+			}
+			case "tools": {
+				this.notifyWebview({
+					type: "switchTab",
+					data: { tab: "tools" },
+				});
+				return true;
+			}
+			case "new": {
+				try {
+					await this.newSession();
+					return true;
+				} catch (error) {
+					this.notifyErrorToWebview(error);
+					return true;
+				}
+			}
+			case "reload": {
+				try {
+					await this.session.reload();
+					await this.sendSessionResources();
+					return true;
+				} catch (error) {
+					this.notifyErrorToWebview(error);
+					return true;
+				}
+			}
+			default:
+				return false;
+		}
+	}
+
+	/** Send an error to the webview (shared by prompt/tryHandleBuiltinCommand). */
+	private notifyErrorToWebview(error: unknown): void {
+		this.notifyWebview({
+			type: "error",
+			data: {
+				message: error instanceof Error ? error.message : String(error),
+				timestamp: Date.now(),
+			},
+		});
 	}
 
 	async steer(text: string, images?: any[]) {

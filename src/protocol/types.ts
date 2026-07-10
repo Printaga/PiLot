@@ -46,6 +46,7 @@ export interface ProviderApi {
 	getAvailableModels(): Promise<
 		Array<{ id: string; provider: string; name: string }>
 	>;
+	tryHandleBuiltinCommand(text: string): Promise<boolean>;
 	getCurrentModelId(): string | null;
 	getExtensionVersion(): string;
 	getPiCliVersion(): Promise<string | null>;
