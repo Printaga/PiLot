@@ -11,7 +11,7 @@
 
 	let { autoContext, appVersion, thinkingLevel, onAutoContextChange, onThinkingLevelChange }: Props = $props();
 
-	const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 	function handleThinkingLevelChange(level: string) {
 		onThinkingLevelChange(level);
@@ -100,6 +100,8 @@
 								Standard reasoning
 							{:else if level === 'high'}
 								Deep analysis
+							{:else if level === 'max'}
+								Absolute maximum reasoning
 							{:else}
 								Maximum reasoning
 							{/if}

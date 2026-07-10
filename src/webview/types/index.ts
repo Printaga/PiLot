@@ -99,7 +99,8 @@ export type ThinkingLevel =
 	| "low"
 	| "medium"
 	| "high"
-	| "xhigh";
+	| "xhigh"
+	| "max";
 
 /** Pi agent configuration */
 export interface PiAgentConfig {

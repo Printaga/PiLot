@@ -727,6 +727,157 @@ suite("PiAgentProvider", () => {
 		});
 	});
 
+	suite("refreshModels + handleExternalConfigChange", () => {
+		test("refreshModels reloads authStorage from disk before refreshing", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const reloadCalls: string[] = [];
+			(provider as any).authStorage = {
+				reload: () => {
+					reloadCalls.push("reload");
+				},
+			} as any;
+
+			const refreshCalls: string[] = [];
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {
+					refreshCalls.push("refresh");
+				},
+				invalidateCliModelIdsCache: () => {},
+				getMergedModels: async () => [],
+				getAvailableModels: async () => [],
+				getProviderAuthData: async () => [],
+			} as any;
+
+			await provider["refreshModels"]();
+
+			assert.ok(
+				reloadCalls.length === 1,
+				"authStorage.reload should be called exactly once",
+			);
+			assert.ok(
+				refreshCalls.includes("refresh"),
+				"refreshAvailableModels should be called",
+			);
+		});
+
+		test("handleExternalConfigChange on auth.json reloads authStorage", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const reloadCalls: string[] = [];
+			const invalidateCalls: string[] = [];
+			const refreshCalls: string[] = [];
+
+			(provider as any).authStorage = {
+				reload: () => {
+					reloadCalls.push("reload");
+				},
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {
+					refreshCalls.push("refresh");
+				},
+				invalidateCliModelIdsCache: () => {
+					invalidateCalls.push("inv");
+				},
+				getMergedModels: async () => [],
+				getAvailableModels: async () => [],
+				getProviderAuthData: async () => [],
+			} as any;
+
+			await provider["handleExternalConfigChange"]("auth.json");
+
+			assert.ok(
+				reloadCalls.length === 1,
+				"authStorage.reload should be called exactly once",
+			);
+			assert.ok(
+				invalidateCalls.length === 1,
+				"CLI model ids cache should be invalidated",
+			);
+			assert.ok(
+				refreshCalls.length === 1,
+				"refreshAvailableModels should be called exactly once",
+			);
+		});
+
+		test("handleExternalConfigChange on models.json does NOT reload authStorage", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const reloadCalls: string[] = [];
+			const refreshCalls: string[] = [];
+
+			(provider as any).authStorage = {
+				reload: () => {
+					reloadCalls.push("reload");
+				},
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {
+					refreshCalls.push("refresh");
+				},
+				invalidateCliModelIdsCache: () => {},
+				getMergedModels: async () => [],
+				getAvailableModels: async () => [],
+				getProviderAuthData: async () => [],
+			} as any;
+
+			await provider["handleExternalConfigChange"]("models.json");
+
+			assert.ok(
+				reloadCalls.length === 0,
+				"authStorage.reload should NOT be called for models.json changes",
+			);
+			assert.ok(
+				refreshCalls.length === 1,
+				"refreshAvailableModels should still run",
+			);
+		});
+
+		test("rapid auth.json changes coalesce into a single reload+refresh", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const reloadCalls: string[] = [];
+			const refreshCalls: string[] = [];
+			(provider as any).authStorage = {
+				reload: () => {
+					reloadCalls.push("reload");
+				},
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {
+					refreshCalls.push("refresh");
+				},
+				invalidateCliModelIdsCache: () => {},
+				getMergedModels: async () => [],
+				getAvailableModels: async () => [],
+				getProviderAuthData: async () => [],
+			} as any;
+
+			// Fire several handler calls in the same tick — representing one
+			// atomic-rename save emitting 2-3 fs.watch events back-to-back.
+			const p1 = provider["handleExternalConfigChange"]("auth.json");
+			const p2 = provider["handleExternalConfigChange"]("auth.json");
+			const p3 = provider["handleExternalConfigChange"]("auth.json");
+			await Promise.all([p1, p2, p3]);
+
+			assert.strictEqual(
+				reloadCalls.length,
+				1,
+				"reload should be called exactly once after debounce coalesces",
+			);
+			assert.strictEqual(
+				refreshCalls.length,
+				1,
+				"refresh should be called exactly once after debounce coalesces",
+			);
+		});
+	});
+
 	suite("openConfigFile", () => {
 		test("creates missing file with {} and opens document", async () => {
 			const provider = buildProvider();

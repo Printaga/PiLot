@@ -6,6 +6,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
+- Support for the new max thinking level in Pi 0.80.6.
 - Support for slash commands for invoking PI CLI built-in commands and available skills.
 - Add a button in the **Settings** tab to open the global Pi settings file (`settings.json`), a button in the **Models** tab to open `models.json`, and a button in the **Providers** tab to open `auth.json` for manual editing. This is needed because some providers, such as Cloudflare, require additional manual configuration beyond entering an API key in the GUI.
 
@@ -19,7 +20,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - List of available models did not automatically update after the initial provider configuration.
 - The current session name was not displayed in the 'Rename Session' dialog.
-- Some provider error messages was not shown to the user.
+- Some provider error messages was not exposed to the user.
 
 ## [2.2.1] - 2026-07-04
 

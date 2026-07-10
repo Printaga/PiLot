@@ -11,7 +11,7 @@ suite('PiLot Studio Extension Test Suite', () => {
 	suite('validateThinkingLevel', () => {
 
 		test('returns the level for each valid thinking level string', () => {
-			const validLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+			const validLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 			for (const level of validLevels) {
 				const result = validateThinkingLevel(level);
 				assert.strictEqual(result, level, `expected "${level}" to be accepted`);
@@ -71,8 +71,8 @@ suite('PiLot Studio Extension Test Suite', () => {
 
 	suite('ThinkingLevel type', () => {
 
-		test('all six levels round-trip through validateThinkingLevel', () => {
-			const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+		test('all seven levels round-trip through validateThinkingLevel', () => {
+			const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 			for (const level of levels) {
 				const validated: string = validateThinkingLevel(level);
 				assert.strictEqual(validated, level);

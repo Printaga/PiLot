@@ -310,7 +310,8 @@
               "low",
               "medium",
               "high",
-              "xhigh"
+              "xhigh",
+              "max"
             ],
             "default": "medium",
             "order": 1,

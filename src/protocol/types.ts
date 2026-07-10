@@ -31,7 +31,7 @@ export interface ProviderApi {
 	setSessionName(name: string): Promise<void>;
 	setModel(modelId: string): Promise<void>;
 	setThinkingLevel(
-		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
+		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
 	): Promise<void>;
 	steer(text: string, images?: unknown[]): Promise<void>;
 	followUp(text: string, images?: unknown[]): Promise<void>;
@@ -51,7 +51,7 @@ export interface ProviderApi {
 	getExtensionVersion(): string;
 	getPiCliVersion(): Promise<string | null>;
 	isBinaryAvailable(): boolean;
-	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	getFavorites(): string[];
 	getProviderAuthData(): Promise<
 		Array<{

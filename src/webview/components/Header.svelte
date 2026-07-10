@@ -52,7 +52,7 @@
   let showThinkDropdown = $state(false);
   let thinkWrapperEl = $state<HTMLElement | null>(null);
 
-  const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+  const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
   $effect(() => {
     if (!showThinkDropdown) return;

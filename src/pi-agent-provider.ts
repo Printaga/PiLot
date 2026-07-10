@@ -48,6 +48,7 @@ const THINKING_LEVELS = [
 	"medium",
 	"high",
 	"xhigh",
+	"max",
 ] as const;
 
 export const piAgentProviderInternals = {
@@ -104,7 +105,8 @@ export class PiAgentProvider
 	private packageManager!: PackageManager;
 	private sessionListManager!: SessionListManager;
 	private modelRefreshTimer?: ReturnType<typeof setInterval>;
-	private modelsFileWatcher?: FSWatcher;
+	private configFileWatcher?: FSWatcher;
+	private configFileWatcherTimer?: ReturnType<typeof setTimeout>;
 	private availableModels: Array<{
 		id: string;
 		provider: string;
@@ -313,13 +315,21 @@ export class PiAgentProvider
 				clearInterval(this.modelRefreshTimer);
 				this.modelRefreshTimer = undefined;
 			}
-			if (this.modelsFileWatcher) {
-				this.modelsFileWatcher.close();
-				this.modelsFileWatcher = undefined;
+			if (this.configFileWatcher) {
+				this.configFileWatcher.close();
+				this.configFileWatcher = undefined;
+			}
+			if (this.configFileWatcherTimer) {
+				clearTimeout(this.configFileWatcherTimer);
+				this.configFileWatcherTimer = undefined;
 			}
 
-			// Set up file watcher for models.json to detect manual edits or provider additions
-			this.setupModelsFileWatcher();
+			// Set up directory watcher covering auth.json + models.json so external
+			// edits (the "Open auth.json" workflow, package managers updating keys,
+			// external CLIs) propagate without waiting for the 5-min timer.
+			// A directory-level watcher is required because most editors save with
+			// atomic rename — file-level fs.watch misses those events.
+			this.setupConfigFileWatcher();
 
 			// Periodic model refresh (every 5 min) to pick up new/changed built-in models
 			// from PI SDK or providers added by packages/extensions
@@ -474,39 +484,67 @@ export class PiAgentProvider
 	}
 
 	/** Watch models.json for changes and auto-refresh models/providers. */
-	private setupModelsFileWatcher(): void {
+	private setupConfigFileWatcher(): void {
 		try {
 			const agentDir = piAgentProviderInternals.getAgentDir();
-			const modelsJsonPath = path.join(agentDir, "models.json");
-			if (!existsSync(modelsJsonPath)) {
+			if (!existsSync(agentDir)) {
 				this.logDebug(
-					"[PI] models.json not found, skipping file watcher setup",
+					"[PI] Agent dir not found, skipping config file watcher setup",
 				);
 				return;
 			}
-			this.modelsFileWatcher = watch(
-				modelsJsonPath,
-				(eventType: string) => {
-					if (eventType === "change") {
-						this.logDebug(
-							"[PI] models.json changed on disk, refreshing models",
-						);
-						this.refreshModels().catch((e) =>
-							this.logError(
-								"[PI] Failed to refresh models after models.json change:",
-								e,
-							),
-						);
+			this.configFileWatcher = watch(
+				agentDir,
+				{ persistent: false },
+				(_eventType: string, filename: string | null) => {
+					if (!filename) return;
+					if (filename !== "models.json" && filename !== "auth.json") {
+						return;
 					}
+					this.handleExternalConfigChange(filename).catch((e) =>
+						this.logError(
+							`[PI] Failed to refresh models after ${filename} change:`,
+							e,
+						),
+					);
 				},
 			);
-			this.logDebug("[PI] File watcher set up for models.json");
+			this.logDebug("[PI] Config file watcher set up on agent dir");
 		} catch (e) {
 			this.logDebug(
-				"[PI] Failed to set up models.json file watcher:",
+				"[PI] Failed to set up config file watcher:",
 				e,
 			);
 		}
+	}
+
+	/**
+	 * Handle a `models.json` or `auth.json` change detected by the directory
+	 * watcher. Coalesces rapid bursts (atomic-rename saves fire 2+ events)
+	 * with a short debounce, ensures the in-memory `AuthStorage` matches disk
+	 * before refreshing the model registry, then propagates the new list to
+	 * the webview via `refreshModels()`.
+	 */
+	private handleExternalConfigChange(filename: string): Promise<void> {
+		return new Promise<void>((resolve) => {
+			if (this.configFileWatcherTimer) {
+				clearTimeout(this.configFileWatcherTimer);
+			}
+			this.configFileWatcherTimer = setTimeout(async () => {
+				this.configFileWatcherTimer = undefined;
+				this.logDebug(
+					`[PI] ${filename} changed on disk, reloading and refreshing models`,
+				);
+				// AuthStorage keeps an in-memory copy of auth.json; reload() is
+				// required because ModelRegistry.refresh() does not invalidate it.
+				if (filename === "auth.json" && this.authStorage) {
+					(this.authStorage as AuthStorage).reload?.();
+				}
+				this.modelRegistryHandler.invalidateCliModelIdsCache();
+				await this.refreshModels();
+				resolve();
+			}, 300);
+		});
 	}
 
 	/** Manually trigger better-sqlite3 rebuild. Called from command palette. */
@@ -1542,14 +1580,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async setThinkingLevel(
-		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
+		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
 	) {
 		if (this.session) {
-			this.session.setThinkingLevel(level);
+			this.session.setThinkingLevel(level as any);
 		}
 		// Persist to settings.json so PI TUI reads same value
 		if (this.settingsManager) {
-			this.settingsManager.setDefaultThinkingLevel(level);
+			this.settingsManager.setDefaultThinkingLevel(level as any);
 			await this.settingsManager.flush();
 		}
 	}
@@ -1781,6 +1819,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async refreshModels(): Promise<void> {
+		// Re-read auth.json from disk so external edits (the "Open auth.json"
+		// workflow, package providers, parallel CLI use) propagate even when
+		// the directory watcher hasn't fired (e.g. the user hit the manual
+		// refresh button or the 5-min periodic timer ticked).
+		this.authStorage?.reload?.();
+		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		await this.modelRegistryHandler.refreshAvailableModels();
 		// Send the refreshed model list so the webview UI can reflect changes
 		this.notifyWebview({
@@ -2390,9 +2434,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			clearInterval(this.modelRefreshTimer);
 			this.modelRefreshTimer = undefined;
 		}
-		if (this.modelsFileWatcher) {
-			this.modelsFileWatcher.close();
-			this.modelsFileWatcher = undefined;
+		if (this.configFileWatcher) {
+			this.configFileWatcher.close();
+			this.configFileWatcher = undefined;
+		}
+		if (this.configFileWatcherTimer) {
+			clearTimeout(this.configFileWatcherTimer);
+			this.configFileWatcherTimer = undefined;
 		}
 		if (this.session) {
 			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)

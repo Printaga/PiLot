@@ -125,7 +125,7 @@ Everything is configurable under `pi-agent.*` settings. Key options:
 
 ### Session
 
-- **Thinking level** — Control how deep PI reasons (off → minimal → low → medium → high → xhigh)
+- **Thinking level** — Control how deep PI reasons (off → minimal → low → medium → high → xhigh → max)
 - **Auto-compact** — Automatically manage conversation context
 - **Auto-retry** — Retry on transient errors automatically
 
