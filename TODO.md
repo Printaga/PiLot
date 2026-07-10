@@ -1,10 +1,6 @@
-- Support for opening config files
-- GUI rules management
-- GUI MCP support
-- Edit message support
-- Slash command support
-- Oauth authentication
+- Slash command support for packages
+- Improve default prompt templates
+- Prompt auto-enhancement button
 - More settings exposed in GUI
-- Prompt enhancement tool
-- Worktree support
-- Agents support
+- GUI rules management
+- Oauth authentication

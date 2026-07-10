@@ -2332,6 +2332,18 @@
     padding: var(--space-2) var(--space-3);
   }
 
+  /* When a row is selected or hovered, the parent sets a green background
+     with --color-text-inverse (near-black) text. Our .slash-cmd-name and
+     .slash-cmd-desc override color explicitly, which would otherwise leave
+     the name green-on-green. Force them to follow the row's inverted text
+     when the row is the active one. */
+  .slash-autocomplete .autocomplete-item:hover .slash-cmd-name,
+  .slash-autocomplete .autocomplete-item.selected .slash-cmd-name,
+  .slash-autocomplete .autocomplete-item:hover .slash-cmd-desc,
+  .slash-autocomplete .autocomplete-item.selected .slash-cmd-desc {
+    color: var(--color-text-inverse);
+  }
+
   .slash-source-badge {
     font-size: 14px;
     line-height: 1;

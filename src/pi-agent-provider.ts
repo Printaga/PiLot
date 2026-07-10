@@ -1407,10 +1407,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				return true;
 			}
 			case "skills":
-			case "packages": {
+			case "packages":
+			case "providers": {
 				this.notifyWebview({
 					type: "switchTab",
-					data: { tab: command === "skills" ? "skills" : "packages" },
+					data: { tab: command === "skills" ? "skills" : command === "packages" ? "packages" : "providers" },
 				});
 				return true;
 			}
@@ -1424,6 +1425,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			case "new": {
 				try {
 					await this.newSession();
+					// Tell the webview to clear its local message list so the
+					// slash command visibly opens the new session instead of
+					// leaving the previous transcript on screen.
+					this.notifyWebview({ type: "new-session" });
 					return true;
 				} catch (error) {
 					this.notifyErrorToWebview(error);
