@@ -3,4 +3,5 @@
 - Prompt auto-enhancement button
 - More settings exposed in GUI
 - GUI rules management
+- Diff view
 - Oauth authentication
