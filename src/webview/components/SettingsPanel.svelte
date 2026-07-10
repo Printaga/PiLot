@@ -26,6 +26,12 @@
 		window.dispatchEvent(new CustomEvent('show-tour'));
 	}
 
+	function openConfigFile(file: 'auth' | 'models' | 'settings') {
+		if (typeof (window as any).vscode?.postMessage === 'function') {
+			(window as any).vscode.postMessage({ type: 'openConfigFile', data: { file } });
+		}
+	}
+
 
 </script>
 
@@ -136,6 +142,24 @@
 					<span class="shortcut-key">Ctrl+Shift+Alt+N</span>
 					<span class="shortcut-desc">New session</span>
 				</div>
+			</div>
+		</section>
+
+		<section class="settings-section">
+			<h4>Configuration Files</h4>
+			<p class="section-description">
+				Open PI's global config files in the editor for manual editing.
+			</p>
+			<div class="config-files">
+				<button class="config-btn" onclick={() => openConfigFile('settings')}>
+					Open settings.json
+				</button>
+				<button class="config-btn" onclick={() => openConfigFile('auth')}>
+					Open auth.json
+				</button>
+				<button class="config-btn" onclick={() => openConfigFile('models')}>
+					Open models.json
+				</button>
 			</div>
 		</section>
 
@@ -327,6 +351,28 @@
 	.shortcut-desc { color: var(--color-text-muted); font-size: var(--text-xs); }
 
 
+
+	.config-files {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+	}
+
+	.config-btn {
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		font-size: var(--text-sm);
+		font-weight: 600;
+		cursor: pointer;
+		transition: all var(--transition-interactive);
+	}
+
+	.config-btn:hover {
+		border-color: var(--color-primary);
+		color: var(--color-text);
+	}
 
 	.about-info {
 		padding: var(--space-3); background: var(--color-surface);

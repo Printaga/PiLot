@@ -9,6 +9,10 @@ out/
 # VS Code
 .vscode/
 .vscode-test/
+.openspec/
+openspec/
+.kilocode/
+.kilo/
 
 # VS Code extension package
 *.vsix
@@ -34,3 +38,6 @@ graphify-out
 
 # macOS
 .DS_Store
+
+
+

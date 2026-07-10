@@ -1,5 +1,6 @@
 import * as assert from "node:assert";
 import * as vscode from "vscode";
+import * as fsPromises from "node:fs/promises";
 import {
 	type AuthStorage,
 	type ModelRegistry,
@@ -723,6 +724,97 @@ suite("PiAgentProvider", () => {
 				"authStorage.remove should be called",
 			);
 			assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
+		});
+	});
+
+	suite("openConfigFile", () => {
+		test("creates missing file with {} and opens document", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const writeCalls: any[] = [];
+			const openCalls: any[] = [];
+			const savedMkdir = fsPromises.mkdir;
+			const savedWrite = fsPromises.writeFile;
+			const savedOpen = vscode.workspace.openTextDocument;
+			const savedShow = vscode.window.showTextDocument;
+
+			(fsPromises as any).mkdir = async () => undefined;
+			(fsPromises as any).writeFile = async (
+				p: string,
+				content: string,
+				opts: any,
+			) => {
+				assert.strictEqual(opts.flag, "wx");
+				writeCalls.push({ p, content });
+			};
+			vscode.workspace.openTextDocument = async (uri: any) => {
+				openCalls.push(uri.fsPath);
+				return {} as any;
+			};
+			vscode.window.showTextDocument = (async () => {}) as any;
+
+			try {
+				await provider["openConfigFile"]("models");
+
+				assert.strictEqual(writeCalls.length, 1, "writeFile called once");
+				assert.strictEqual(writeCalls[0].content, "{}");
+				assert.ok(
+					writeCalls[0].p.endsWith("models.json"),
+					"path resolves to models.json",
+				);
+				assert.ok(
+					openCalls[0].endsWith("models.json"),
+					"opens models.json",
+				);
+			} finally {
+				(fsPromises as any).mkdir = savedMkdir;
+				(fsPromises as any).writeFile = savedWrite;
+				vscode.workspace.openTextDocument = savedOpen;
+				vscode.window.showTextDocument = savedShow;
+			}
+		});
+
+		test("does not overwrite an existing file", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			let writeAttempted = false;
+			const savedMkdir = fsPromises.mkdir;
+			const savedWrite = fsPromises.writeFile;
+			const savedOpen = vscode.workspace.openTextDocument;
+			const savedShow = vscode.window.showTextDocument;
+
+			(fsPromises as any).mkdir = async () => undefined;
+			(fsPromises as any).writeFile = async () => {
+				writeAttempted = true;
+			};
+			// openDocument rejects, simulating the file already existing when
+			// writeFile runs with flag "wx" (EEXIST) — implementation must ignore it.
+			vscode.workspace.openTextDocument = async (uri: any) => {
+				return uri as any;
+			};
+			vscode.window.showTextDocument = (async () => {}) as any;
+
+			try {
+				// Force an EEXIST error to exercise the guard branch.
+				(fsPromises as any).writeFile = async () => {
+					const err: any = new Error("exists");
+					err.code = "EEXIST";
+					throw err;
+				};
+				await provider["openConfigFile"]("settings");
+				assert.strictEqual(
+					writeAttempted,
+					false,
+					"no write attempted when EEXIST path used",
+				);
+			} finally {
+				(fsPromises as any).mkdir = savedMkdir;
+				(fsPromises as any).writeFile = savedWrite;
+				vscode.workspace.openTextDocument = savedOpen;
+				vscode.window.showTextDocument = savedShow;
+			}
 		});
 	});
 

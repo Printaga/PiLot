@@ -81,6 +81,9 @@ export class ModelRegistryHandler {
 	async refreshAvailableModels(): Promise<void> {
 		const modelRegistry = this.deps.getModelRegistry();
 		if (!modelRegistry) return;
+		// Reload models from disk (re-reads models.json and re-applies registered providers).
+		// Without this, getMergedModels() returns stale data from initial construction.
+		modelRegistry.refresh();
 		const models = await this.getMergedModels();
 		this.deps.availableModels = this.buildModelList(models);
 		this.deps.notifyWebview({

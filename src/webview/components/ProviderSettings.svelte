@@ -88,8 +88,30 @@
 
 <div class="provider-settings">
 	<div class="header">
-		<h3>Provider API Settings</h3>
-		<span class="subtitle">Configure API keys for model providers</span>
+		<div class="header-row">
+			<div class="header-text">
+				<h3>Provider API Settings</h3>
+				<span class="subtitle">Configure API keys for model providers</span>
+			</div>
+			<div class="header-actions">
+				<button
+					class="btn small icon-btn"
+					onclick={() => sendMessage({ type: 'refreshModels' })}
+					title="Refresh provider list"
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+						<path d="M23 4v6h-6" /><path d="M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+					</svg>
+				</button>
+				<button
+					class="btn small config-btn"
+					onclick={() => sendMessage({ type: 'openConfigFile', data: { file: 'auth' } })}
+					title="Open auth.json for manual editing"
+				>
+					Open auth.json
+				</button>
+			</div>
+		</div>
 	</div>
 
 	<div class="auth-list">
@@ -246,6 +268,23 @@
 
 	.header {
 		margin-bottom: var(--space-4);
+	}
+
+	.header-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--space-3);
+	}
+
+	.header-actions {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
+	.config-btn {
+		white-space: nowrap;
 	}
 
 	h3 {

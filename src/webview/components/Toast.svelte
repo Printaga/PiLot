@@ -16,8 +16,8 @@
 		const toast: Toast = { ...opts, id };
 		toasts = [...toasts, toast];
 
-		if (!opts.persistent && (opts.duration ?? 4000) > 0) {
-			setTimeout(() => dismissToast(id), opts.duration ?? 4000);
+		if (!opts.persistent && (opts.duration ?? 30000) > 0) {
+			setTimeout(() => dismissToast(id), opts.duration ?? 30000);
 		}
 		return id;
 	}

@@ -2,12 +2,13 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [2.2.2] - Unreleased
+## [2.3.0] - Unreleased
 
 ### Added
 
-- Support for slash commands for invoking installed skills
+- Improved support for slash commands for invoking installed skills as well as other PI CLI built-in commands.
 - Add button in the provider tab to open auth.json for manual editing (some providers, like cloudflare need manual configuration).
+- Add button in the settings tab to open Pi global settings file (settings.json).
 - Add button in the models tab to open models.json for manual editing.
 
 ### Changed

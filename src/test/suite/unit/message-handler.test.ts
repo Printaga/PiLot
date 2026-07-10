@@ -31,6 +31,7 @@ function createMockProvider(): {
 	const provider: any = {
 		webview,
 		hasSession: false,
+		getSession: () => undefined as { sessionName: string | undefined } | undefined,
 		prompt: makeSpy("prompt"),
 		newSession: makeSpy("newSession"),
 		switchSession: makeSpy("switchSession"),
@@ -61,6 +62,7 @@ function createMockProvider(): {
 		getProviderAuthData: makeSpy("getProviderAuthData", async () => []),
 		setApiKey: makeSpy("setApiKey"),
 		removeAuth: makeSpy("removeAuth"),
+		openConfigFile: makeSpy("openConfigFile"),
 		toggleFavorite: makeSpy("toggleFavorite", async () => []),
 		listSessions: makeSpy("listSessions", async () => []),
 		getSettings: makeSpy("getSettings", async () => ({
@@ -802,8 +804,13 @@ suite("MessageHandler", () => {
 
 	test("showRenameSessionDialog success", async () => {
 		resetVscodeMocks();
-		(vscode.window.showInputBox as any) = async () => "new-name";
+		(vscode.window.showInputBox as any) = async (opts: any) => {
+			// Verify current session name is pre-filled
+			assert.strictEqual(opts.value, "Current Name");
+			return "new-name";
+		};
 		provider.setSessionName = () => Promise.resolve();
+		provider.getSession = () => ({ sessionName: "Current Name" });
 		const result = await handler.handle({
 			type: "showRenameSessionDialog",
 			data: {},
@@ -1179,6 +1186,24 @@ suite("MessageHandler", () => {
 		});
 		assert.deepStrictEqual(provider.calls.removeAuth[0], ["openai"]);
 		assert.strictEqual(result.success, true);
+	});
+
+	test("openConfigFile routes to provider.openConfigFile with file", async () => {
+		const result = await handler.handle({
+			type: "openConfigFile",
+			data: { file: "models" },
+		});
+		assert.deepStrictEqual(provider.calls.openConfigFile[0], ["models"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("openConfigFile rejects invalid file", async () => {
+		const result = await handler.handle({
+			type: "openConfigFile",
+			data: { file: "not-a-file" },
+		});
+		assert.ok(result.error, "expected error for invalid file");
+		assert.strictEqual(provider.calls.openConfigFile, undefined);
 	});
 
 	test("getCurrentModel returns current model id", async () => {

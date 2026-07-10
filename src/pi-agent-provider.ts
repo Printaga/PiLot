@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import {
 	createAgentSession,
 	SessionManager,
@@ -101,6 +103,8 @@ export class PiAgentProvider
 	private modelRegistryHandler!: ModelRegistryHandler;
 	private packageManager!: PackageManager;
 	private sessionListManager!: SessionListManager;
+	private modelRefreshTimer?: ReturnType<typeof setInterval>;
+	private modelsFileWatcher?: FSWatcher;
 	private availableModels: Array<{
 		id: string;
 		provider: string;
@@ -116,6 +120,10 @@ export class PiAgentProvider
 
 	get hasSession(): boolean {
 		return this.session !== undefined;
+	}
+
+	getSession(): { sessionName: string | undefined } | undefined {
+		return this.session;
 	}
 
 	private voiceManager: VoiceManager;
@@ -300,6 +308,26 @@ export class PiAgentProvider
 			}
 
 			// Check native addon ABI compatibility (non-blocking, logs only)
+			// Dispose any prior timer/watcher so repeated initialize() calls don't leak.
+			if (this.modelRefreshTimer) {
+				clearInterval(this.modelRefreshTimer);
+				this.modelRefreshTimer = undefined;
+			}
+			if (this.modelsFileWatcher) {
+				this.modelsFileWatcher.close();
+				this.modelsFileWatcher = undefined;
+			}
+
+			// Set up file watcher for models.json to detect manual edits or provider additions
+			this.setupModelsFileWatcher();
+
+			// Periodic model refresh (every 5 min) to pick up new/changed built-in models
+			// from PI SDK or providers added by packages/extensions
+			this.modelRefreshTimer = setInterval(
+				() => this.refreshModels().catch(() => {}),
+				5 * 60 * 1000,
+			);
+
 			this.checkNativeAddons();
 		} catch (error) {
 			// Restore PATH on failure
@@ -441,6 +469,42 @@ export class PiAgentProvider
 			this.logDebug(
 				"[PI] Native addon check failed:",
 				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
+	/** Watch models.json for changes and auto-refresh models/providers. */
+	private setupModelsFileWatcher(): void {
+		try {
+			const agentDir = piAgentProviderInternals.getAgentDir();
+			const modelsJsonPath = path.join(agentDir, "models.json");
+			if (!existsSync(modelsJsonPath)) {
+				this.logDebug(
+					"[PI] models.json not found, skipping file watcher setup",
+				);
+				return;
+			}
+			this.modelsFileWatcher = watch(
+				modelsJsonPath,
+				(eventType: string) => {
+					if (eventType === "change") {
+						this.logDebug(
+							"[PI] models.json changed on disk, refreshing models",
+						);
+						this.refreshModels().catch((e) =>
+							this.logError(
+								"[PI] Failed to refresh models after models.json change:",
+								e,
+							),
+						);
+					}
+				},
+			);
+			this.logDebug("[PI] File watcher set up for models.json");
+		} catch (e) {
+			this.logDebug(
+				"[PI] Failed to set up models.json file watcher:",
+				e,
 			);
 		}
 	}
@@ -1544,6 +1608,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return result.sort((a, b) => a.provider.localeCompare(b.provider));
 	}
 
+	async refreshModels(): Promise<void> {
+		await this.modelRegistryHandler.refreshAvailableModels();
+		// Send the refreshed model list so the webview UI can reflect changes
+		this.notifyWebview({
+			type: "models-updated",
+			data: { models: await this.getAvailableModels() },
+		});
+		// Also refresh provider auth data so new providers show up
+		this.notifyWebview({
+			type: "provider-auth",
+			data: await this.getProviderAuthData(),
+		});
+	}
+
 	async setApiKey(provider: string, apiKey: string) {
 		if (!this.isInitialized || !this.authStorage) {
 			await this.initialize();
@@ -1571,6 +1649,30 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
 		});
+	}
+
+	async openConfigFile(file: "auth" | "models" | "settings"): Promise<void> {
+		if (!this.isInitialized) {
+			await this.initialize();
+		}
+		const fileName = `${file}.json`;
+		const agentDir = piAgentProviderInternals.getAgentDir();
+		const filePath = path.join(agentDir, fileName);
+
+		await fs.mkdir(agentDir, { recursive: true });
+		// Write only if the file does not already exist (flag "wx").
+		try {
+			await fs.writeFile(filePath, "{}", { flag: "wx" });
+		} catch (error: unknown) {
+			if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+				throw error;
+			}
+		}
+
+		const doc = await vscode.workspace.openTextDocument(
+			vscode.Uri.file(filePath),
+		);
+		await vscode.window.showTextDocument(doc);
 	}
 
 	// Session list methods delegated to sessionListManager
@@ -1900,14 +2002,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async installPackage(source: string): Promise<void> {
 		await this.packageManager.installPackage(source);
+		// Package may register new providers/models, refresh after install
+		await this.refreshModels();
 	}
 
 	async uninstallPackage(source: string): Promise<void> {
 		await this.packageManager.uninstallPackage(source);
+		// Package may have registered providers, refresh after uninstall
+		await this.refreshModels();
 	}
 
 	async updatePackages(): Promise<void> {
 		await this.packageManager.updatePackages();
+		await this.refreshModels();
 	}
 
 	// Skill methods
@@ -2105,6 +2212,16 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.footerManager.stop();
 		this.extensionStatuses.clear();
 		this._onDidChangeTreeData.dispose();
+
+		// Clean up model auto-refresh
+		if (this.modelRefreshTimer) {
+			clearInterval(this.modelRefreshTimer);
+			this.modelRefreshTimer = undefined;
+		}
+		if (this.modelsFileWatcher) {
+			this.modelsFileWatcher.close();
+			this.modelsFileWatcher = undefined;
+		}
 		if (this.session) {
 			// Emit session_shutdown so extensions (pi-lean-ctx MCP bridge, etc.)
 			// can kill their child processes before the runner is invalidated.

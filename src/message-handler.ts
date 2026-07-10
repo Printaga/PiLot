@@ -138,6 +138,12 @@ export class MessageHandler {
 					});
 					break;
 
+				case "refreshModels":
+					result = await this.withErrorReporting(() =>
+						this.provider.refreshModels(),
+					);
+					break;
+
 				case "getProviderAuth":
 					result = await this.provider.getProviderAuthData();
 					// Send directly even without message id so webview gets the data
@@ -156,6 +162,24 @@ export class MessageHandler {
 					await this.provider.removeAuth(message.data.provider);
 					result = { success: true };
 					break;
+
+				case "openConfigFile": {
+					const file = message.data?.file;
+					const allowed = ["auth", "models", "settings"];
+					if (typeof file !== "string" || !allowed.includes(file)) {
+						result = {
+							error: `Invalid config file: ${String(file)}`,
+						};
+						break;
+					}
+					await this.withErrorReporting(() =>
+						this.provider.openConfigFile(
+							file as "auth" | "models" | "settings",
+						),
+					);
+					result = { success: true };
+					break;
+				}
 
 				case "getCurrentModel":
 					result = this.provider.getCurrentModelId();
@@ -331,9 +355,11 @@ export class MessageHandler {
 
 				case "showRenameSessionDialog":
 					{
+						const currentName = this.provider.getSession()?.sessionName ?? "";
 						const newName = await vscode.window.showInputBox({
 							prompt: "Enter a new name for this session",
 							placeHolder: "My session name",
+							value: currentName,
 						});
 						if (newName) {
 							await this.provider.setSessionName(newName);

@@ -2,7 +2,7 @@
   "name": "pilots-studio",
   "displayName": "PiLot Studio",
   "description": "A visual VS Code interface for the Pi AI coding agent. Run and manage Pi CLI workflows directly inside your editor.",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "publisher": "PrintagaPublishingLLC",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -633,7 +633,7 @@
     "webview:serve": "vite --config vite.webview.config.mts",
     "webview:build": "vite build --config vite.webview.config.mts",
     "build": "pnpm run webview:build && pnpm run bundle",
-    "test": "pnpm run compile && node ./dist-tsc/test/runTest.js",
+    "test": "pnpm run compile && (command -v xvfb-run >/dev/null 2>&1 && xvfb-run -a node ./dist-tsc/test/runTest.js || node ./dist-tsc/test/runTest.js)",
     "lint": "eslint src --ext ts",
     "package": "pnpm run build && vsce package --no-dependencies --allow-missing-repository --skip-license",
     "postinstall": "node scripts/postinstall-patch.mjs"

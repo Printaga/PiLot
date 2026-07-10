@@ -21,6 +21,7 @@ export interface ProviderMessage {
 export interface ProviderApi {
 	readonly webview: { postMessage(message: ProviderMessage): void } | undefined;
 	readonly hasSession: boolean;
+	getSession(): { sessionName: string | undefined } | undefined;
 
 	prompt(text: string, images?: unknown[]): Promise<void>;
 	newSession(): Promise<void>;
@@ -59,8 +60,10 @@ export interface ProviderApi {
 			status: string;
 		}>
 	>;
+	refreshModels(): Promise<void>;
 	setApiKey(provider: string, apiKey: string): Promise<void>;
 	removeAuth(provider: string): Promise<void>;
+	openConfigFile(file: "auth" | "models" | "settings"): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
 	listSessions(): Promise<
 		Array<{

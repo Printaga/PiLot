@@ -1369,6 +1369,8 @@
           {providers}
           onSelect={handleSwitchModel}
           onToggleFavorite={handleToggleFavorite}
+          onOpenConfigFile={(file) => sendMessage({ type: 'openConfigFile', data: { file } })}
+          onRefresh={() => sendMessage({ type: 'refreshModels' })}
         />
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />

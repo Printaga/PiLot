@@ -19,9 +19,11 @@
 		providers: ProviderAuth[];
 		onSelect: (modelId: string) => void;
 		onToggleFavorite: (modelId: string) => void;
+		onOpenConfigFile: (file: "auth" | "models" | "settings") => void;
+		onRefresh?: () => void;
 	}
 
-	let { models, currentModel, favoriteModels, providers = [], onSelect, onToggleFavorite }: Props = $props();
+	let { models, currentModel, favoriteModels, providers = [], onSelect, onToggleFavorite, onOpenConfigFile, onRefresh }: Props = $props();
 
 	const configuredProviderNames = $derived(
 		new Set(providers.filter((p) => p.configured).map((p) => p.provider))
@@ -71,6 +73,24 @@
 		<div class="title-row">
 			<h3>Select Model</h3>
 			<span class="badge">{configuredModels.length} Models</span>
+			<div class="title-actions">
+				<button
+					class="btn small icon-btn"
+					onclick={() => onRefresh?.()}
+					title="Refresh model list"
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+						<path d="M23 4v6h-6" /><path d="M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+					</svg>
+				</button>
+				<button
+					class="btn small config-btn"
+					onclick={() => onOpenConfigFile('models')}
+					title="Open models.json for manual editing"
+				>
+					Open models.json
+				</button>
+			</div>
 		</div>
 		
 		<div class="controls">
@@ -178,6 +198,12 @@
 		align-items: center;
 	}
 
+	.title-actions {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
 	h3 {
 		font-size: var(--text-lg);
 		font-weight: 800;
@@ -193,6 +219,10 @@
 		padding: 2px 8px;
 		border-radius: var(--radius-full);
 		border: 1px solid var(--glass-border);
+	}
+
+	.config-btn {
+		white-space: nowrap;
 	}
 
 	.controls {
