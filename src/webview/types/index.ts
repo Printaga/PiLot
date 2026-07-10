@@ -23,9 +23,13 @@ export interface ToolCallMessage {
 	status: "pending" | "streaming" | "complete";
 }
 
-/** A chat message in the webview */
+/** A chat message in the webview.
+ *
+ * `provider` is used for extension/package injected messages (PI CLI custom
+ * messages, i.e. `pi.sendMessage({ display: true })`). These render like the
+ * PI CLI's CustomMessageComponent with markdown and a source label. */
 export interface Message {
-	role: "user" | "assistant" | "system";
+	role: "user" | "assistant" | "system" | "provider";
 	content: string;
 	thinking?: string;
 	images?: ImageContent[];
@@ -34,6 +38,8 @@ export interface Message {
 	parentId?: string | null;
 	isStreaming?: boolean;
 	toolCalls?: ToolCallMessage[];
+	/** Optional source label (e.g. custom message `customType`) shown in the header. */
+	label?: string;
 }
 
 /** Model definition sent from extension to webview */

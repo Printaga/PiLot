@@ -214,12 +214,53 @@
     if (!msg) return undefined;
     if (Array.isArray(msg.content)) {
       const thinkingBlocks = msg.content.filter(
-        (c: any) => c.type === "thinking" && typeof c.thinking === "string",
+        (c: any) =>
+          c.type === "thinking" &&
+          typeof c.thinking === "string" &&
+          c.thinking.trim().length > 0,
       );
       if (thinkingBlocks.length === 0) return undefined;
       return thinkingBlocks.map((c: any) => c.thinking).join("\n");
     }
     return undefined;
+  }
+
+  /** Extract joined text and images from a message content value that is either a
+   * plain string or an array of text/image blocks. Mirrors the serializer's
+   * extractTextAndImages so live and history rendering stay consistent. */
+  function extractTextAndImages(content: string | any[] | undefined): {
+    content: string;
+    images: ImageContent[];
+  } {
+    if (typeof content === "string") return { content, images: [] };
+    if (!Array.isArray(content)) return { content: "", images: [] };
+    const textParts: string[] = [];
+    const images: ImageContent[] = [];
+    for (const c of content) {
+      if (c.type === "text" && typeof c.text === "string") {
+        textParts.push(c.text);
+      } else if (c.type === "image" && "data" in c && "mimeType" in c) {
+        images.push({ type: "image", data: c.data, mimeType: c.mimeType });
+      }
+    }
+    return { content: textParts.join("\n"), images };
+  }
+
+  /** True when a finalized (non-streaming) assistant bubble has nothing to show.
+   * Such bubbles (tool-call only turns, redacted/empty thinking) would otherwise
+   * render as empty boxes — the PI CLI does not display them. */
+  function isEmptyAssistantMessage(msg: {
+    content?: string;
+    thinking?: string;
+    images?: ImageContent[];
+    toolCalls?: unknown[];
+  }): boolean {
+    return (
+      !msg.content?.trim() &&
+      !msg.thinking &&
+      !(msg.images && msg.images.length > 0) &&
+      !(msg.toolCalls && msg.toolCalls.length > 0)
+    );
   }
 
   function handleVSCodeMessage(event: MessageEvent) {
@@ -532,6 +573,32 @@
       case "message_start":
         {
           const msgRole = event.message?.role || "assistant";
+
+          // Extension/package injected "custom" messages (pi.sendMessage).
+          // The PI CLI renders these when `display` is true; context-only
+          // messages (display === false) are never surfaced. Insert without
+          // disturbing any in-progress streaming assistant bubble.
+          if (msgRole === "custom") {
+            if (event.message?.display !== false) {
+              const { content, images } = extractTextAndImages(
+                event.message?.content,
+              );
+              if (content.trim() || images.length > 0) {
+                messages = [
+                  ...messages,
+                  {
+                    role: "provider",
+                    content,
+                    images: images.length > 0 ? images : undefined,
+                    label: event.message?.customType,
+                    timestamp: event.message?.timestamp || Date.now(),
+                  },
+                ];
+              }
+            }
+            break;
+          }
+
           if (messages.length > 0) {
             const lastMsg = messages[messages.length - 1];
             if (lastMsg.isStreaming) {
@@ -563,6 +630,9 @@
         break;
 
       case "message_end":
+        // Custom (provider) messages are inserted on message_start; ignore their
+        // end event so we don't touch the streaming assistant bubble.
+        if (event.message?.role === "custom") break;
         if (messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           // Extract final content from the completed message to ensure nothing is lost
@@ -579,16 +649,18 @@
             finalContent = `❌ ${event.message.errorMessage}`;
           }
           if (lastMsg.isStreaming) {
-            messages = [
-              ...messages.slice(0, -1),
-              {
-                ...lastMsg,
-                // Use the final message content if it's more complete than what we accumulated
-                content: finalContent || lastMsg.content || "",
-                thinking: finalThinking || lastMsg.thinking,
-                isStreaming: false,
-              },
-            ];
+            const finalized = {
+              ...lastMsg,
+              // Use the final message content if it's more complete than what we accumulated
+              content: finalContent || lastMsg.content || "",
+              thinking: finalThinking || lastMsg.thinking,
+              isStreaming: false,
+            };
+            // Drop the bubble entirely if it ended up with nothing to render
+            // (tool-call only turn, redacted/empty thinking) to avoid empty boxes.
+            messages = isEmptyAssistantMessage(finalized)
+              ? messages.slice(0, -1)
+              : [...messages.slice(0, -1), finalized];
           }
         }
         break;
@@ -728,6 +800,12 @@
                 isStreaming: false,
               },
             ];
+            // Remove the bubble if the agent ended without producing renderable
+            // content (e.g. tool-call only final turn) to avoid empty boxes.
+            const finalizedEnd = messages[messages.length - 1];
+            if (isEmptyAssistantMessage(finalizedEnd)) {
+              messages = messages.slice(0, -1);
+            }
           }
         }
         break;

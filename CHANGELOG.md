@@ -2,6 +2,22 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [2.2.2] - Unreleased
+
+### Added
+
+- Support for slash commands for invoking installed skills
+- Add button in the provider tab to open auth.json for manual editing (some providers, like cloudflare need manual configuration).
+- Add button in the models tab to open models.json for manual editing.
+
+### Changed
+
+### Fixed
+
+- List of available models did not automatically update after the initial provider configuration.
+- The current session name was not displayed in the 'Rename Session' dialog.
+- Some provider error messages was not shown to the user.
+
 ## [2.2.1] - 2026-07-04
 
 ### Changed

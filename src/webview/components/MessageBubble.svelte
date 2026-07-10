@@ -454,6 +454,7 @@
   class:user={message.role === "user"}
   class:assistant={message.role === "assistant"}
   class:system={message.role === "system"}
+  class:provider={message.role === "provider"}
   class:streaming={message.isStreaming}
 >
   <div class="message-header">
@@ -483,6 +484,21 @@
             <rect x="2" y="2" width="20" height="20" rx="6" />
             <path d="M7 8h10M12 8v8M9 16h6" stroke-linecap="round" />
           </svg>
+        {:else if message.role === "provider"}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+            <line x1="12" y1="22.08" x2="12" y2="12" />
+          </svg>
         {:else}
           <svg
             width="14"
@@ -498,10 +514,10 @@
           </svg>
         {/if}
       </span>
-      <span class="role-name">{message.role}</span>
+      <span class="role-name">{message.role === "provider" ? message.label || "provider" : message.role}</span>
     </div>
     <div class="message-actions">
-      {#if (message.role === "assistant" || message.role === "user") && !message.isStreaming}
+      {#if (message.role === "assistant" || message.role === "user" || message.role === "provider") && !message.isStreaming}
         <button class="copy-msg-btn" onclick={copyMessage} title="Copy message">
           {@html clipboardSvg}
           {#if copiedMessage}<span class="copy-check">✓</span>{/if}
@@ -886,6 +902,10 @@
     width: 100%;
     max-width: 100%;
   }
+  .provider {
+    align-self: flex-start;
+    border-left: 4px solid var(--color-accent, var(--color-primary));
+  }
 
   /* ── Images in messages ────────────────────── */
   .message-images {
@@ -1040,6 +1060,18 @@
   .assistant.streaming .message-content {
     border-color: var(--color-primary);
     box-shadow: 4px 4px 0px var(--color-primary);
+  }
+
+  .provider .message-content {
+    background: var(--color-surface-2);
+    border: 1px dashed var(--color-accent, var(--color-primary));
+    box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
+  }
+  .provider .role-icon {
+    color: var(--color-accent, var(--color-primary));
+  }
+  .provider .role-name {
+    color: var(--color-accent, var(--color-primary));
   }
 
   /* ── System message ─────────────────────────── */
