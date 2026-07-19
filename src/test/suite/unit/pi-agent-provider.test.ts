@@ -2,8 +2,8 @@ import * as assert from "node:assert";
 import * as vscode from "vscode";
 import * as fsPromises from "node:fs/promises";
 import {
-	type AuthStorage,
 	type ModelRegistry,
+	type ModelRuntime,
 	SessionManager,
 	type SessionManager as SessionManagerType,
 	type SettingsManager,
@@ -26,6 +26,7 @@ import {
 	createMockMemento,
 	createMockBinaryService,
 	createMockModelRegistry,
+	createMockModelRuntime,
 	createMockSettingsManager,
 	createMockSessionManager,
 } from "../../mocks/pi-sdk-mocks.js";
@@ -59,8 +60,8 @@ let savedCreateAgentSession:
 	| typeof piAgentProviderInternals.createAgentSession
 	| undefined;
 let savedGetAgentDir: typeof piAgentProviderInternals.getAgentDir | undefined;
-let savedCreateAuthStorage:
-	| typeof piAgentProviderInternals.createAuthStorage
+let savedCreateModelRuntime:
+	| typeof piAgentProviderInternals.createModelRuntime
 	| undefined;
 let savedCreateModelRegistry:
 	| typeof piAgentProviderInternals.createModelRegistry
@@ -84,10 +85,11 @@ function setupPiSdkMocks() {
 	})) as any;
 	savedGetAgentDir = piAgentProviderInternals.getAgentDir;
 	piAgentProviderInternals.getAgentDir = () => "/fake/agent-dir";
-	savedCreateAuthStorage = piAgentProviderInternals.createAuthStorage;
-	piAgentProviderInternals.createAuthStorage = () => ({}) as AuthStorage;
+	savedCreateModelRuntime = piAgentProviderInternals.createModelRuntime;
+	piAgentProviderInternals.createModelRuntime = (async () =>
+		createMockModelRuntime()) as any;
 	savedCreateModelRegistry = piAgentProviderInternals.createModelRegistry;
-	piAgentProviderInternals.createModelRegistry = () => ({}) as ModelRegistry;
+	piAgentProviderInternals.createModelRegistry = () => createMockModelRegistry();
 	savedCreateSettingsManager = piAgentProviderInternals.createSettingsManager;
 	piAgentProviderInternals.createSettingsManager = () =>
 		({}) as SettingsManager;
@@ -103,8 +105,8 @@ function restorePiSdkMocks() {
 	if (savedGetAgentDir !== undefined) {
 		piAgentProviderInternals.getAgentDir = savedGetAgentDir;
 	}
-	if (savedCreateAuthStorage !== undefined) {
-		piAgentProviderInternals.createAuthStorage = savedCreateAuthStorage;
+	if (savedCreateModelRuntime !== undefined) {
+		piAgentProviderInternals.createModelRuntime = savedCreateModelRuntime;
 	}
 	if (savedCreateModelRegistry !== undefined) {
 		piAgentProviderInternals.createModelRegistry = savedCreateModelRegistry;
@@ -132,7 +134,11 @@ function createTestConfig(
 }
 
 function createMockAuthStorage() {
-	return {} as AuthStorage;
+	// Legacy helper retained for compatibility with named-import call sites;
+	// the SDK 0.80+ migration uses createMockModelRuntime instead. This
+	// deliberately returns the same fleet of no-ops that the provider
+	// relied on for older tests.
+	return createMockModelRuntime();
 }
 
 function buildProvider(
@@ -169,7 +175,7 @@ function buildProvider(
 		isBinaryAvailable: () => true,
 	} as any;
 
-	(provider as any).authStorage = createMockAuthStorage();
+	(provider as any).modelRuntime = createMockModelRuntime();
 	(provider as any).modelRegistry = createMockModelRegistry();
 	(provider as any).sessionManager = createMockSessionManager(
 		options.cwd || "/fake/workspace",
@@ -177,7 +183,7 @@ function buildProvider(
 	(provider as any).settingsManager = createMockSettingsManager();
 	(provider as any).modelRegistryHandler = new ModelRegistryHandler({
 		getModelRegistry: () => (provider as any).modelRegistry,
-		getAuthStorage: () => (provider as any).authStorage,
+		getModelRuntime: () => (provider as any).modelRuntime,
 		getSettingsManager: () => (provider as any).settingsManager,
 		binaryService: (provider as any).binaryService,
 		availableModels: (provider as any).availableModels,
@@ -207,8 +213,8 @@ function buildProvider(
 		setSessionManager: (m: any) => {
 			(provider as any).sessionManager = m;
 		},
-		getAuthStorage: () => (provider as any).authStorage,
 		getModelRegistry: () => (provider as any).modelRegistry,
+		getModelRuntime: () => (provider as any).modelRuntime,
 		getSettingsManager: () => (provider as any).settingsManager,
 		notifyWebview: (msg: any) => provider["notifyWebview"](msg),
 		logDebug: (..._args: any[]) => {},
@@ -296,24 +302,85 @@ suite("PiAgentProvider", () => {
 			assert.ok(resolveCalls.length > 0, "resolveAtStartup should be called");
 		});
 
-		test("creates AuthStorage ModelRegistry SettingsManager SessionManager via PI SDK", async () => {
+		test("creates ModelRuntime ModelRegistry SettingsManager SessionManager via PI SDK", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = false;
 			(provider as any).binaryService.resolveAtStartup = () => {};
 			(provider as any).binaryService.prependToPath = () => {};
 
-			await provider["initialize"]();
-			assert.strictEqual((provider as any).isInitialized, true);
-			assert.ok((provider as any).authStorage, "authStorage should be set");
-			assert.ok((provider as any).modelRegistry, "modelRegistry should be set");
-			assert.ok(
-				(provider as any).settingsManager,
-				"settingsManager should be set",
-			);
-			assert.ok(
-				(provider as any).sessionManager,
-				"sessionManager should be set",
-			);
+			let modelRuntimeFactoryCalls = 0;
+			const savedFactory = piAgentProviderInternals.createModelRuntime;
+			piAgentProviderInternals.createModelRuntime = (async () => {
+				modelRuntimeFactoryCalls++;
+				return createMockModelRuntime();
+			}) as any;
+
+			try {
+				await provider["initialize"]();
+				assert.strictEqual((provider as any).isInitialized, true);
+				assert.ok(
+					(provider as any).modelRuntime,
+					"modelRuntime should be set",
+				);
+				assert.ok(
+					(provider as any).modelRegistry,
+					"modelRegistry should be set",
+				);
+				assert.ok(
+					(provider as any).settingsManager,
+					"settingsManager should be set",
+				);
+				assert.ok(
+					(provider as any).sessionManager,
+					"sessionManager should be set",
+				);
+				assert.strictEqual(
+					modelRuntimeFactoryCalls,
+					1,
+					"createModelRuntime should be invoked exactly once during initialize()",
+				);
+			} finally {
+				piAgentProviderInternals.createModelRuntime = savedFactory;
+			}
+		});
+
+		test("initialize() does not call the removed AuthStorage.create() factory", async () => {
+			// Regression guard: SDK 0.80 removed the named `AuthStorage`
+			// export. PiAgentProvider used to call `AuthStorage.create()`
+			// directly, which threw `Cannot read properties of undefined
+			// (reading 'create')` when the bundled extension was loaded
+			// against the upgraded SDK. This test reproduces the failure
+			// mode by simulating the missing export and asserts the new
+			// code path never reaches it.
+			const provider = buildProvider();
+			(provider as any).isInitialized = false;
+			(provider as any).binaryService.resolveAtStartup = () => {};
+			(provider as any).binaryService.prependToPath = () => {};
+
+			let authStorageFactoryCalls = 0;
+			const savedFactory = (piAgentProviderInternals as any).createAuthStorage;
+			(piAgentProviderInternals as any).createAuthStorage = () => {
+				authStorageFactoryCalls++;
+				throw new TypeError(
+					"Cannot read properties of undefined (reading 'create')",
+				);
+			};
+
+			try {
+				await provider["initialize"]();
+				assert.strictEqual(
+					authStorageFactoryCalls,
+					0,
+					"initialize() must not invoke the removed AuthStorage.create() factory",
+				);
+				assert.strictEqual((provider as any).isInitialized, true);
+			} finally {
+				if (savedFactory === undefined) {
+					delete (piAgentProviderInternals as any).createAuthStorage;
+				} else {
+					(piAgentProviderInternals as any).createAuthStorage = savedFactory;
+				}
+			}
 		});
 
 		test("restores currentModelId from settings then globalState", async () => {
@@ -341,9 +408,9 @@ suite("PiAgentProvider", () => {
 			(provider as any).binaryService.isBinaryAvailable = () => true;
 
 			const err = new Error("init boom");
-			piAgentProviderInternals.createAuthStorage = () => {
+			piAgentProviderInternals.createModelRuntime = (async () => {
 				throw err;
-			};
+			}) as any;
 
 			const errorCalls: any[] = [];
 			(vscode.window.showErrorMessage as any) = (msg: string) => {
@@ -396,7 +463,7 @@ suite("PiAgentProvider", () => {
 		test("throws when dependencies missing", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).authStorage = undefined;
+			(provider as any).modelRuntime = undefined;
 			(provider as any).modelRegistry = undefined;
 
 			try {
@@ -413,7 +480,7 @@ suite("PiAgentProvider", () => {
 		test("successful creation sets session and subscribes events", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).authStorage = createMockAuthStorage();
+			(provider as any).modelRuntime = createMockModelRuntime();
 			(provider as any).modelRegistry = createMockModelRegistry();
 
 			const mockSession = createSessionMock({
@@ -443,7 +510,7 @@ suite("PiAgentProvider", () => {
 		test("stops footer, clears statuses, and emits session-updated", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).authStorage = createMockAuthStorage();
+			(provider as any).modelRuntime = createMockModelRuntime();
 			(provider as any).modelRegistry = createMockModelRegistry();
 
 			const mockOldSession = createSessionMock({ sessionId: "old-session" });
@@ -502,7 +569,7 @@ suite("PiAgentProvider", () => {
 		test("creates session when missing", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).authStorage = createMockAuthStorage();
+			(provider as any).modelRuntime = createMockModelRuntime();
 			(provider as any).modelRegistry = createMockModelRegistry();
 			(provider as any).session = undefined;
 
@@ -532,7 +599,7 @@ suite("PiAgentProvider", () => {
 		test("sends error to webview and re-throws on prompt failure", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).authStorage = createMockAuthStorage();
+			(provider as any).modelRuntime = createMockModelRuntime();
 			(provider as any).modelRegistry = createMockModelRegistry();
 
 			const mockSession = createSessionMock({ sessionId: "session-x" });
@@ -659,18 +726,18 @@ suite("PiAgentProvider", () => {
 	});
 
 	suite("setApiKey / removeAuth", () => {
-		test("setApiKey calls authStorage.set and refreshes models", async () => {
+		test("setApiKey calls ModelRuntime.setRuntimeApiKey and refreshes models", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
 			const setCalls: any[] = [];
-			const mockAuth = {
-				set: (provider: string, credential: any) => {
-					setCalls.push({ provider, credential });
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async (provider: string, apiKey: string) => {
+					setCalls.push({ provider, apiKey });
 				},
-				remove: () => {},
-			};
-			(provider as any).authStorage = mockAuth as any;
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+			} as any;
 
 			const refreshCalls: any[] = [];
 			(provider as any).modelRegistryHandler = {
@@ -685,8 +752,8 @@ suite("PiAgentProvider", () => {
 			await provider["setApiKey"]("openai", "sk-123");
 
 			assert.ok(
-				setCalls.some((c) => c.provider === "openai"),
-				"authStorage.set should be called with openai",
+				setCalls.some((c) => c.provider === "openai" && c.apiKey === "sk-123"),
+				"ModelRuntime.setRuntimeApiKey should be called with openai/sk-123",
 			);
 			assert.ok(
 				refreshCalls.includes("refresh"),
@@ -694,18 +761,18 @@ suite("PiAgentProvider", () => {
 			);
 		});
 
-		test("removeAuth calls authStorage.remove and refreshes models", async () => {
+		test("removeAuth calls ModelRuntime.removeRuntimeApiKey and refreshes models", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
 			const removeCalls: string[] = [];
-			const mockAuth = {
-				set: () => {},
-				remove: (provider: string) => {
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async (provider: string) => {
 					removeCalls.push(provider);
 				},
-			};
-			(provider as any).authStorage = mockAuth as any;
+				refresh: async () => ({}),
+			} as any;
 
 			const refreshCalls: any[] = [];
 			(provider as any).modelRegistryHandler = {
@@ -721,28 +788,31 @@ suite("PiAgentProvider", () => {
 
 			assert.ok(
 				removeCalls.includes("openai"),
-				"authStorage.remove should be called",
+				"ModelRuntime.removeRuntimeApiKey should be called",
 			);
 			assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
 		});
 	});
 
 	suite("refreshModels + handleExternalConfigChange", () => {
-		test("refreshModels reloads authStorage from disk before refreshing", async () => {
+		test("refreshModels calls ModelRuntime.refresh before refreshing models", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
-			const reloadCalls: string[] = [];
-			(provider as any).authStorage = {
-				reload: () => {
-					reloadCalls.push("reload");
+			const refreshCalls: string[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push("refresh");
+					return {};
 				},
 			} as any;
 
-			const refreshCalls: string[] = [];
+			const modelRefreshCalls: any[] = [];
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
+					modelRefreshCalls.push("refresh");
 				},
 				invalidateCliModelIdsCache: () => {},
 				getMergedModels: async () => [],
@@ -753,31 +823,34 @@ suite("PiAgentProvider", () => {
 			await provider["refreshModels"]();
 
 			assert.ok(
-				reloadCalls.length === 1,
-				"authStorage.reload should be called exactly once",
+				refreshCalls.length === 1,
+				"ModelRuntime.refresh should be called exactly once",
 			);
 			assert.ok(
-				refreshCalls.includes("refresh"),
+				modelRefreshCalls.includes("refresh"),
 				"refreshAvailableModels should be called",
 			);
 		});
 
-		test("handleExternalConfigChange on auth.json reloads authStorage", async () => {
+		test("handleExternalConfigChange on auth.json calls ModelRuntime.refresh", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
-			const reloadCalls: string[] = [];
-			const invalidateCalls: string[] = [];
 			const refreshCalls: string[] = [];
+			const invalidateCalls: string[] = [];
+			const modelRefreshCalls: string[] = [];
 
-			(provider as any).authStorage = {
-				reload: () => {
-					reloadCalls.push("reload");
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push("refresh");
+					return {};
 				},
 			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
+					modelRefreshCalls.push("refresh");
 				},
 				invalidateCliModelIdsCache: () => {
 					invalidateCalls.push("inv");
@@ -790,34 +863,37 @@ suite("PiAgentProvider", () => {
 			await provider["handleExternalConfigChange"]("auth.json");
 
 			assert.ok(
-				reloadCalls.length === 1,
-				"authStorage.reload should be called exactly once",
+				refreshCalls.length === 1,
+				"ModelRuntime.refresh should be called exactly once",
 			);
 			assert.ok(
 				invalidateCalls.length === 1,
 				"CLI model ids cache should be invalidated",
 			);
 			assert.ok(
-				refreshCalls.length === 1,
+				modelRefreshCalls.length === 1,
 				"refreshAvailableModels should be called exactly once",
 			);
 		});
 
-		test("handleExternalConfigChange on models.json does NOT reload authStorage", async () => {
+		test("handleExternalConfigChange on models.json does NOT call ModelRuntime.refresh", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
-			const reloadCalls: string[] = [];
 			const refreshCalls: string[] = [];
+			const modelRefreshCalls: string[] = [];
 
-			(provider as any).authStorage = {
-				reload: () => {
-					reloadCalls.push("reload");
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push("refresh");
+					return {};
 				},
 			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
+					modelRefreshCalls.push("refresh");
 				},
 				invalidateCliModelIdsCache: () => {},
 				getMergedModels: async () => [],
@@ -828,29 +904,32 @@ suite("PiAgentProvider", () => {
 			await provider["handleExternalConfigChange"]("models.json");
 
 			assert.ok(
-				reloadCalls.length === 0,
-				"authStorage.reload should NOT be called for models.json changes",
+				refreshCalls.length === 0,
+				"ModelRuntime.refresh should NOT be called for models.json changes",
 			);
 			assert.ok(
-				refreshCalls.length === 1,
+				modelRefreshCalls.length === 1,
 				"refreshAvailableModels should still run",
 			);
 		});
 
-		test("rapid auth.json changes coalesce into a single reload+refresh", async () => {
+		test("rapid auth.json changes coalesce into a single refresh+refreshAvailable", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
-			const reloadCalls: string[] = [];
 			const refreshCalls: string[] = [];
-			(provider as any).authStorage = {
-				reload: () => {
-					reloadCalls.push("reload");
+			const modelRefreshCalls: string[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push("refresh");
+					return {};
 				},
 			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
+					modelRefreshCalls.push("refresh");
 				},
 				invalidateCliModelIdsCache: () => {},
 				getMergedModels: async () => [],
@@ -866,14 +945,14 @@ suite("PiAgentProvider", () => {
 			await Promise.all([p1, p2, p3]);
 
 			assert.strictEqual(
-				reloadCalls.length,
-				1,
-				"reload should be called exactly once after debounce coalesces",
-			);
-			assert.strictEqual(
 				refreshCalls.length,
 				1,
-				"refresh should be called exactly once after debounce coalesces",
+				"ModelRuntime.refresh should be called exactly once after debounce coalesces",
+			);
+			assert.strictEqual(
+				modelRefreshCalls.length,
+				1,
+				"refreshAvailableModels should be called exactly once after debounce coalesces",
 			);
 		});
 	});

@@ -10,6 +10,7 @@ import {
 } from "../../../model-registry-handler.js";
 import type {
     ModelRegistry,
+    ModelRuntime,
     SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { BinaryService } from "../../../binary-service.js";
@@ -24,7 +25,7 @@ function buildDeps(
 ): ModelRegistryHandlerDeps {
     const base: ModelRegistryHandlerDeps = {
         getModelRegistry: () => undefined,
-        getAuthStorage: () => undefined,
+        getModelRuntime: () => undefined,
         getSettingsManager: () => undefined,
         binaryService: { getBinaryPath: () => "/fake/pi" } as unknown as BinaryService,
         availableModels: [],

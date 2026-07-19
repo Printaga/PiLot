@@ -1,8 +1,8 @@
 import type {
 	AgentSession,
 	AgentSessionEvent,
-	AuthStorage,
 	ModelRegistry,
+	ModelRuntime,
 	ResourceLoader,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -78,8 +78,22 @@ export function createMockResourceLoader(): ResourceLoader {
 	} as unknown as ResourceLoader;
 }
 
-export function createMockAuthStorage(): AuthStorage {
-	return {} as AuthStorage;
+export function createMockAuthStorage(): unknown {
+	// Legacy shape kept solely so older test fixtures that referenced it
+	// (without using it) continue to compile during the SDK 0.80 migration.
+	// It intentionally has no runtime users.
+	return {};
+}
+
+export function createMockModelRuntime(): ModelRuntime {
+	// Defaults match the SDK 0.80 surface used by PiAgentProvider:
+	// setRuntimeApiKey/removeRuntimeApiKey for auth management,
+	// refresh for disk re-reads (auth.json + models.json).
+	return {
+		setRuntimeApiKey: async (_provider: string, _apiKey: string) => {},
+		removeRuntimeApiKey: async (_provider: string) => {},
+		refresh: async () => ({}),
+	} as unknown as ModelRuntime;
 }
 
 export function createMockModelRegistry(): ModelRegistry {

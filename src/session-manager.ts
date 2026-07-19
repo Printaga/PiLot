@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import * as fs from "node:fs/promises";
 import {
 	SessionManager as PiSessionManager,
-	type AuthStorage,
 	type ModelRegistry,
+	type ModelRuntime,
 	type SettingsManager,
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
@@ -33,8 +33,10 @@ export interface SessionManagerDeps {
 	setSession: (session: AgentSession | undefined) => void;
 	getSessionManager: () => PiSessionManager | undefined;
 	setSessionManager: (manager: PiSessionManager) => void;
-	getAuthStorage: () => AuthStorage | undefined;
 	getModelRegistry: () => ModelRegistry | undefined;
+	// Replaces SDK 0.78's AuthStorage getter. Kept so consumers can fetch
+	// credentials helpers if needed; the field is unused inside this manager.
+	getModelRuntime: () => ModelRuntime | undefined;
 	getSettingsManager: () => SettingsManager | undefined;
 	notifyWebview: (message: { type: string; data?: unknown }) => void;
 	logDebug: (msg: string, ...details: unknown[]) => void;

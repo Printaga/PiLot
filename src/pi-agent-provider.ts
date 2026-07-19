@@ -5,8 +5,8 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import {
 	createAgentSession,
 	SessionManager,
-	AuthStorage,
 	ModelRegistry,
+	ModelRuntime,
 	SettingsManager,
 	getAgentDir,
 	AgentSession,
@@ -57,9 +57,11 @@ export const piAgentProviderInternals = {
 	unlinkFile: (path: string) => fs.unlink(path),
 	listSessions: (cwd: string, sessionDir?: string) =>
 		SessionManager.list(cwd, sessionDir),
-	createAuthStorage: () => AuthStorage.create(),
-	createModelRegistry: (authStorage: AuthStorage) =>
-		ModelRegistry.create(authStorage),
+	// Construct the canonical model/auth runtime from SDK 0.80.x. Replaces the
+	// previous AuthStorage.create() + ModelRegistry.create(authStorage) split,
+	// which was removed when AuthStorage was un-exported from the package entry.
+	createModelRuntime: () => ModelRuntime.create(),
+	createModelRegistry: (runtime: ModelRuntime) => new ModelRegistry(runtime),
 	createSettingsManager: (cwd: string) => SettingsManager.create(cwd),
 	createSessionManager: (cwd: string) => SessionManager.create(cwd),
 };
@@ -94,7 +96,7 @@ export class PiAgentProvider
 	private config: PiAgentConfig;
 	private messageHandler: MessageHandler;
 	private isInitialized = false;
-	private authStorage?: AuthStorage;
+	private modelRuntime?: ModelRuntime;
 	private modelRegistry?: ModelRegistry;
 	private sessionManager?: SessionManager;
 	private settingsManager?: SettingsManager;
@@ -155,7 +157,7 @@ export class PiAgentProvider
 		});
 		this.modelRegistryHandler = new ModelRegistryHandler({
 			getModelRegistry: () => this.modelRegistry,
-			getAuthStorage: () => this.authStorage,
+			getModelRuntime: () => this.modelRuntime,
 			getSettingsManager: () => this.settingsManager,
 			binaryService: this.binaryService,
 			availableModels: this.availableModels,
@@ -185,8 +187,8 @@ export class PiAgentProvider
 			setSessionManager: (manager) => {
 				this.sessionManager = manager;
 			},
-			getAuthStorage: () => this.authStorage,
 			getModelRegistry: () => this.modelRegistry,
+			getModelRuntime: () => this.modelRuntime,
 			getSettingsManager: () => this.settingsManager,
 			notifyWebview: (msg) => this.notifyWebview(msg),
 			logDebug: this.logDebug.bind(this),
@@ -265,9 +267,9 @@ export class PiAgentProvider
 		this.binaryService.prependToPath();
 
 		try {
-			this.authStorage = piAgentProviderInternals.createAuthStorage();
+			this.modelRuntime = await piAgentProviderInternals.createModelRuntime();
 			this.modelRegistry = piAgentProviderInternals.createModelRegistry(
-				this.authStorage,
+				this.modelRuntime,
 			);
 			this.settingsManager = piAgentProviderInternals.createSettingsManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
@@ -521,9 +523,9 @@ export class PiAgentProvider
 	/**
 	 * Handle a `models.json` or `auth.json` change detected by the directory
 	 * watcher. Coalesces rapid bursts (atomic-rename saves fire 2+ events)
-	 * with a short debounce, ensures the in-memory `AuthStorage` matches disk
-	 * before refreshing the model registry, then propagates the new list to
-	 * the webview via `refreshModels()`.
+	 * with a short debounce, ensures the in-memory `ModelRuntime` matches
+	 * disk before refreshing the model registry, then propagates the new list
+	 * to the webview via `refreshModels()`.
 	 */
 	private handleExternalConfigChange(filename: string): Promise<void> {
 		return new Promise<void>((resolve) => {
@@ -535,10 +537,11 @@ export class PiAgentProvider
 				this.logDebug(
 					`[PI] ${filename} changed on disk, reloading and refreshing models`,
 				);
-				// AuthStorage keeps an in-memory copy of auth.json; reload() is
-				// required because ModelRegistry.refresh() does not invalidate it.
-				if (filename === "auth.json" && this.authStorage) {
-					(this.authStorage as AuthStorage).reload?.();
+				// ModelRuntime keeps models and credentials fresh in memory;
+				// refresh() is the SDK 0.80+ equivalent of the legacy
+				// AuthStorage.reload() + ModelRegistry.refresh() pair.
+				if (filename === "auth.json" && this.modelRuntime) {
+					await this.modelRuntime.refresh();
 				}
 				this.modelRegistryHandler.invalidateCliModelIdsCache();
 				await this.refreshModels();
@@ -654,10 +657,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 
 		const sessionManager = this.sessionManager;
-		const authStorage = this.authStorage;
+		const modelRuntime = this.modelRuntime;
 		const modelRegistry = this.modelRegistry;
 
-		if (!sessionManager || !authStorage || !modelRegistry) {
+		if (!sessionManager || !modelRuntime || !modelRegistry) {
 			throw new Error(
 				"PiLot Studio dependencies not initialized. Check your API key configuration.",
 			);
@@ -672,8 +675,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const { session } = await piAgentProviderInternals.createAgentSession({
 			...sessionOpts,
 			sessionManager,
-			authStorage,
-			modelRegistry,
+			modelRuntime,
 		});
 
 		this.session = session;
@@ -1068,8 +1070,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const { session } = await piAgentProviderInternals.createAgentSession({
 			...sessionOpts,
 			sessionManager,
-			authStorage: this.authStorage,
-			modelRegistry: this.modelRegistry,
+			modelRuntime: this.modelRuntime,
 		});
 
 		this.sessionManager = sessionManager;
@@ -1193,8 +1194,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const { session } = await piAgentProviderInternals.createAgentSession({
 			...sessionOpts,
 			sessionManager: forkedManager,
-			authStorage: this.authStorage,
-			modelRegistry: this.modelRegistry,
+			modelRuntime: this.modelRuntime,
 		});
 
 		this.sessionManager = forkedManager;
@@ -1819,11 +1819,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async refreshModels(): Promise<void> {
-		// Re-read auth.json from disk so external edits (the "Open auth.json"
-		// workflow, package providers, parallel CLI use) propagate even when
-		// the directory watcher hasn't fired (e.g. the user hit the manual
-		// refresh button or the 5-min periodic timer ticked).
-		this.authStorage?.reload?.();
+		// Re-read auth.json + models.json from disk so external edits (the
+		// "Open auth.json" workflow, package providers, parallel CLI use)
+		// propagate even when the directory watcher hasn't fired (e.g. the
+		// user hit the manual refresh button or the 5-min periodic timer
+		// ticked). In SDK 0.80 the `ModelRuntime` is the single source of
+		// truth for both auth.json and models.json.
+		if (this.modelRuntime) {
+			await this.modelRuntime.refresh();
+		}
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		await this.modelRegistryHandler.refreshAvailableModels();
 		// Send the refreshed model list so the webview UI can reflect changes
@@ -1839,12 +1843,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async setApiKey(provider: string, apiKey: string) {
-		if (!this.isInitialized || !this.authStorage) {
+		if (!this.isInitialized || !this.modelRuntime) {
 			await this.initialize();
 		}
-		if (!this.authStorage) throw new Error("Auth storage not initialized");
+		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
-		this.authStorage.set(provider, { type: "api_key", key: apiKey });
+		await this.modelRuntime.setRuntimeApiKey(provider, apiKey);
 		await this.modelRegistryHandler.refreshAvailableModels();
 		this.notifyWebview({
 			type: "provider-auth",
@@ -1853,12 +1857,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	async removeAuth(provider: string) {
-		if (!this.isInitialized || !this.authStorage) {
+		if (!this.isInitialized || !this.modelRuntime) {
 			await this.initialize();
 		}
-		if (!this.authStorage) throw new Error("Auth storage not initialized");
+		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
-		this.authStorage.remove(provider);
+		await this.modelRuntime.removeRuntimeApiKey(provider);
 		await this.modelRegistryHandler.refreshAvailableModels();
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		this.notifyWebview({

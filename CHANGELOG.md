@@ -2,6 +2,16 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [2.3.1] - 2026-07-19
+
+### Changed
+
+- Migrated PiLot to the SDK 0.80.x API surface. Replaces the legacy `AuthStorage.create()` + `ModelRegistry.create(authStorage)` boot path (removed upstream) with `ModelRuntime.create()` + `new ModelRegistry(runtime)`. `auth.json` writes now go through `ModelRuntime.setRuntimeApiKey` / `removeRuntimeApiKey`, and disk re-reads use `ModelRuntime.refresh()`. Bumps dev-dep pin to `^0.80.0`.
+
+### Fixed
+
+- Restored extension startup. The previously bundled extension was failing to initialize against the upgraded global PI SDK with `TypeError: Cannot read properties of undefined (reading 'create')`.
+
 ## [2.3.0] - 2026-07-10
 
 ### Added

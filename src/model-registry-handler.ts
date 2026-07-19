@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import {
 	type ModelRegistry,
-	type AuthStorage,
+	type ModelRuntime,
 	type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { type BinaryService } from "./binary-service.js";
@@ -17,7 +17,10 @@ export interface ModelItem {
 
 export interface ModelRegistryHandlerDeps {
 	getModelRegistry: () => ModelRegistry | undefined;
-	getAuthStorage: () => AuthStorage | undefined;
+	// Replaces the SDK 0.78 `getAuthStorage` dep. ModelRuntime owns
+	// credentials + models in SDK 0.80+; only kept here so consumers can
+	// reach credentials-management helpers when they need to.
+	getModelRuntime: () => ModelRuntime | undefined;
 	getSettingsManager: () => SettingsManager | undefined;
 	binaryService: BinaryService;
 	availableModels: ModelItem[];
