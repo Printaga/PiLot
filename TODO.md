@@ -2,6 +2,17 @@
 - Improve default prompt templates
 - Prompt auto-enhancement button
 - More settings exposed in GUI
+- Auto detect available thinking
+- Fix missing token chase number
+- Fix session naming
+- Detect custom tools
 - GUI rules management
+- Persistant expand
+- Pause packages
+- Session tabs
 - Diff view
+- Search
 - Oauth authentication
+- Detect standalone extentions
+- Fix favourite remember feature
+- Latest version compatibility
