@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import {
 	createAgentSession,
 	SessionManager,
@@ -1779,6 +1779,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			name: string;
 			configured: boolean;
 			status: string;
+			custom: boolean;
 		}>
 	> {
 		if (!this.isInitialized || !this.modelRegistry) {
@@ -1786,36 +1787,88 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 		if (!this.modelRegistry) return [];
 
-		const models = this.modelRegistry.getAll();
 		const seen = new Set<string>();
 		const result: Array<{
 			provider: string;
 			name: string;
 			configured: boolean;
 			status: string;
+			custom: boolean;
 		}> = [];
 
-		for (const model of models) {
-			if (seen.has(model.provider)) continue;
-			seen.add(model.provider);
+		// Seed from any model's provider (builtins/config/extension that expose models).
+		const models = this.modelRegistry.getAll();
+		for (const model of models) seen.add(model.provider);
 
+		// Also include every composed provider — builtins, models.json config
+		// providers, and extension-registered providers — even when they expose no
+		// models. This is how the PI TUI lists custom providers such as Kilo Code,
+		// which otherwise never appear in the GUI provider list.
+		if (this.modelRuntime) {
+			for (const provider of this.modelRuntime.getProviders()) {
+				seen.add(provider.id);
+			}
+		}
+
+		// A provider is "custom" when it is not a built-in PI provider: either it
+		// was registered by an extension or it is defined in models.json.
+		const customIds = this.getCustomProviderIds();
+
+		for (const providerId of seen) {
 			const authStatus = this.modelRegistry.getProviderAuthStatus(
-				model.provider,
+				providerId,
 			);
 			const displayName = this.modelRegistry.getProviderDisplayName(
-				model.provider,
+				providerId,
 			);
 			result.push({
-				provider: model.provider,
-				name: displayName || model.provider,
+				provider: providerId,
+				name: displayName || providerId,
 				configured: authStatus.configured,
 				status:
 					authStatus.source ||
 					(authStatus.configured ? "configured" : "not_configured"),
+				custom: customIds.has(providerId),
 			});
 		}
 
 		return result.sort((a, b) => a.provider.localeCompare(b.provider));
+	}
+
+	/**
+	 * Compute the set of non-built-in provider IDs. Built-ins are never present
+	 * in models.json or registered as extension providers, so a provider defined
+	 * in either source is custom (e.g. Kilo Code added via the PI TUI).
+	 */
+	private getCustomProviderIds(): Set<string> {
+		const custom = new Set<string>();
+		if (this.modelRuntime) {
+			for (const id of this.modelRuntime.getRegisteredProviderIds()) {
+				custom.add(id);
+			}
+		}
+		try {
+			const config = this.readModelsJsonConfigSync();
+			if (config.providers) {
+				for (const id of Object.keys(config.providers)) custom.add(id);
+			}
+		} catch {
+			// Ignore malformed/unreadable models.json; built-in detection still works.
+		}
+		return custom;
+	}
+
+	private readModelsJsonConfigSync(): {
+		providers?: Record<string, unknown>;
+		[key: string]: unknown;
+	} {
+		const filePath = this.getModelsJsonPath();
+		if (!existsSync(filePath)) return {};
+		try {
+			return JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+		} catch {
+			return {};
+		}
 	}
 
 	async refreshModels(): Promise<void> {
@@ -1849,6 +1902,156 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
 		await this.modelRuntime.setRuntimeApiKey(provider, apiKey);
+		await this.modelRegistryHandler.refreshAvailableModels();
+		this.notifyWebview({
+			type: "provider-auth",
+			data: await this.getProviderAuthData(),
+		});
+	}
+
+	/** Path to the user's models.json (PI's provider/model config store). */
+	private getModelsJsonPath(): string {
+		return path.join(getAgentDir(), "models.json");
+	}
+
+	/** Read models.json, returning an empty object if it does not exist. */
+	private async readModelsJsonConfig(): Promise<{
+		providers?: Record<string, Record<string, unknown>>;
+		[key: string]: unknown;
+	}> {
+		const filePath = this.getModelsJsonPath();
+		if (!existsSync(filePath)) return {};
+		try {
+			const raw = await fs.readFile(filePath, "utf-8");
+			return JSON.parse(raw) as Record<string, unknown>;
+		} catch (error) {
+			this.logError("[PI] Failed to parse models.json; cannot read provider config", error);
+			throw error;
+		}
+	}
+
+	/** Write models.json, preserving all other top-level keys. */
+	private async writeModelsJsonConfig(
+		config: Record<string, unknown>,
+	): Promise<void> {
+		const filePath = this.getModelsJsonPath();
+		await fs.mkdir(path.dirname(filePath), { recursive: true });
+		await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf-8");
+	}
+
+	/**
+	 * Add (or replace) a custom provider, persisting it to models.json so it
+	 * survives restarts and is visible in both this GUI and the PI TUI.
+	 */
+	async addProvider(input: {
+		provider: string;
+		name?: string;
+		baseUrl?: string;
+		apiKey?: string;
+		api?: string;
+		headers?: Record<string, string>;
+	}): Promise<void> {
+		const providerId = input.provider?.trim();
+		if (!providerId) throw new Error("Provider ID is required");
+
+		if (!this.isInitialized || !this.modelRuntime) {
+			await this.initialize();
+		}
+		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
+
+		// Reject IDs that collide with built-in providers (same detection used by
+		// getCustomProviderIds): a composed provider that is not custom/extension.
+		const customIds = this.getCustomProviderIds();
+		const isBuiltin =
+			this.modelRuntime.getProviders().some((p) => p.id === providerId) &&
+			!customIds.has(providerId);
+		if (isBuiltin) {
+			throw new Error(
+				`"${providerId}" is a built-in provider and cannot be overridden. Choose a different provider ID.`,
+			);
+		}
+
+		const config = await this.readModelsJsonConfig();
+		config.providers = config.providers ?? {};
+		const existing = (config.providers[providerId] ?? {}) as Record<string, unknown>;
+		const providerConfig: Record<string, unknown> = { ...existing };
+		if (input.name?.trim()) providerConfig.name = input.name.trim();
+		if (input.baseUrl?.trim()) providerConfig.baseUrl = input.baseUrl.trim();
+		if (input.api?.trim()) providerConfig.api = input.api.trim();
+		if (input.apiKey?.trim()) providerConfig.apiKey = input.apiKey.trim();
+		if (input.headers && Object.keys(input.headers).length > 0) {
+			providerConfig.headers = {
+				...(providerConfig.headers as Record<string, string> | undefined),
+				...input.headers,
+			};
+		}
+		config.providers[providerId] = providerConfig;
+
+		await this.writeModelsJsonConfig(config);
+
+		// Re-read disk so the composed set (config + builtins + extensions) is
+		// authoritative. reloadConfig also composes config providers from models.json.
+		await this.modelRuntime.reloadConfig();
+
+		// Best-effort: keep an in-memory registration so the provider is usable
+		// this session even if the models.json write did not take effect.
+		try {
+			this.modelRuntime.registerProvider(providerId, {
+				name: providerConfig.name as string | undefined,
+				baseUrl: providerConfig.baseUrl as string | undefined,
+				apiKey: providerConfig.apiKey as string | undefined,
+				headers: providerConfig.headers as Record<string, string> | undefined,
+			});
+		} catch (error) {
+			this.logDebug(
+				`[PI] registerProvider skipped for "${providerId}" (reloadConfig is authoritative):`,
+				error,
+			);
+		}
+
+		await this.modelRegistryHandler.refreshAvailableModels();
+		this.notifyWebview({
+			type: "provider-auth",
+			data: await this.getProviderAuthData(),
+		});
+	}
+
+	/**
+	 * Remove a custom provider entirely: drop its models.json entry, unregister
+	 * any extension provider, clear in-memory credentials, and refresh the list.
+	 */
+	async removeProvider(providerId: string): Promise<void> {
+		const id = providerId?.trim();
+		if (!id) throw new Error("Provider ID is required");
+
+		if (!this.isInitialized || !this.modelRuntime) {
+			await this.initialize();
+		}
+		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
+
+		// Only custom (extension-registered or models.json-configured) providers
+		// can be deleted. Built-in providers cannot be fully removed and deleting
+		// them would break core functionality.
+		if (!this.getCustomProviderIds().has(id)) {
+			throw new Error(`Cannot delete built-in provider "${id}"`);
+		}
+
+		// Drop any in-memory runtime API key for this provider.
+		await this.modelRuntime.removeRuntimeApiKey(id);
+
+		// Remove from models.json if present (custom providers persist here).
+		const config = await this.readModelsJsonConfig();
+		if (config.providers && id in config.providers) {
+			delete config.providers[id];
+			await this.writeModelsJsonConfig(config);
+		}
+
+		// Unregister if it was added as an extension provider.
+		this.modelRuntime.unregisterProvider(id);
+
+		// Re-read disk so the composed provider set is authoritative.
+		await this.modelRuntime.reloadConfig();
+
 		await this.modelRegistryHandler.refreshAvailableModels();
 		this.notifyWebview({
 			type: "provider-auth",

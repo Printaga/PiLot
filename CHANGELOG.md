@@ -2,6 +2,20 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [2.4.0] - 2026-08-20
+
+### Added
+
+- Support for adding custom OpenAI-compatible providers in the GUI.
+
+### Changed
+
+- The thinking level setting now actually considers the available thinking levels for the selected model.
+
+### Fixed
+
+- Fixed a bug where deleting a provider from the GUI did not actually remove the provider from PI.
+
 ## [2.3.1] - 2026-07-19
 
 ### Changed

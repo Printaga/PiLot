@@ -49,6 +49,7 @@
       name: string;
       configured: boolean;
       status: string;
+      custom: boolean;
     }>
   >([]);
   let isListening = $state(false);

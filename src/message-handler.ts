@@ -9,6 +9,7 @@ export class MessageHandler {
 
 	private async withErrorReporting<T>(
 		fn: () => Promise<T>,
+		requestId?: string,
 	): Promise<{ success: true } | T> {
 		try {
 			const result = await fn();
@@ -19,6 +20,7 @@ export class MessageHandler {
 				data: {
 					message: error instanceof Error ? error.message : String(error),
 					timestamp: Date.now(),
+					...(requestId ? { requestId } : {}),
 				},
 			});
 			throw error;
@@ -171,7 +173,37 @@ export class MessageHandler {
 					result = { success: true };
 					break;
 
-				case "openConfigFile": {
+				case "addProvider":
+					await this.withErrorReporting(
+						() =>
+							this.provider.addProvider({
+								provider: message.data.provider,
+								name: message.data.name,
+								baseUrl: message.data.baseUrl,
+								apiKey: message.data.apiKey,
+								api: message.data.api,
+								headers: message.data.headers,
+							}),
+						message.id,
+					);
+					// Correlated success ack so the webview resets the add form exactly
+					// when THIS request finishes (new or update-existing), not before.
+					this.provider.webview?.postMessage({
+						type: "provider-added",
+						data: { provider: message.data.provider, requestId: message.id },
+					});
+					result = { success: true };
+					break;
+
+				case "removeProvider":
+					await this.withErrorReporting(
+						() => this.provider.removeProvider(message.data.provider),
+						message.id,
+					);
+					result = { success: true };
+					break;
+
+			case "openConfigFile": {
 					const file = message.data?.file;
 					const allowed = ["auth", "models", "settings"];
 					if (typeof file !== "string" || !allowed.includes(file)) {

@@ -10,7 +10,6 @@ import {
 } from "../../../model-registry-handler.js";
 import type {
     ModelRegistry,
-    ModelRuntime,
     SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { BinaryService } from "../../../binary-service.js";

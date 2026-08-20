@@ -2,8 +2,6 @@ import * as assert from "node:assert";
 import * as vscode from "vscode";
 import * as fsPromises from "node:fs/promises";
 import {
-	type ModelRegistry,
-	type ModelRuntime,
 	SessionManager,
 	type SessionManager as SessionManagerType,
 	type SettingsManager,
@@ -131,14 +129,6 @@ function createTestConfig(
 		sessionDir: undefined,
 		...overrides,
 	};
-}
-
-function createMockAuthStorage() {
-	// Legacy helper retained for compatibility with named-import call sites;
-	// the SDK 0.80+ migration uses createMockModelRuntime instead. This
-	// deliberately returns the same fleet of no-ops that the provider
-	// relied on for older tests.
-	return createMockModelRuntime();
 }
 
 function buildProvider(
@@ -791,6 +781,201 @@ suite("PiAgentProvider", () => {
 				"ModelRuntime.removeRuntimeApiKey should be called",
 			);
 			assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
+		});
+	});
+
+	suite("provider management (custom providers)", () => {
+		test("getProviderAuthData includes custom providers with no models", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [{ id: "kilocode" }],
+				getRegisteredProviderIds: () => ["kilocode"],
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => (id === "kilocode" ? "Kilo Code" : id),
+			} as any;
+			// models.json sync read returns the custom provider config
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: { kilocode: {} } });
+
+			const data = await provider["getProviderAuthData"]();
+			const kc = data.find((p: any) => p.provider === "kilocode");
+			assert.ok(kc, "custom provider should appear in the list");
+			assert.strictEqual(kc.name, "Kilo Code");
+			assert.strictEqual(kc.custom, true);
+			assert.strictEqual(kc.configured, false);
+		});
+
+		test("addProvider writes models.json and registers the provider", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const regCalls: any[] = [];
+			const reloadCalls: number[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: (id: string, cfg: any) => {
+					regCalls.push({ id, cfg });
+				},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {
+					reloadCalls.push(1);
+				},
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["addProvider"]({
+				provider: "kilocode",
+				name: "Kilo Code",
+				baseUrl: "https://api.kilocode.ai",
+			});
+
+			assert.ok(written, "models.json should be written");
+			assert.ok(written.providers.kilocode, "provider entry written");
+			assert.strictEqual(written.providers.kilocode.name, "Kilo Code");
+			assert.strictEqual(written.providers.kilocode.baseUrl, "https://api.kilocode.ai");
+			assert.ok(regCalls.some((c) => c.id === "kilocode"), "registerProvider called");
+			assert.strictEqual(reloadCalls.length, 1, "reloadConfig called");
+		});
+
+		test("removeProvider deletes models.json entry and unregisters", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const unregCalls: string[] = [];
+			const reloadCalls: number[] = [];
+			const removeCalls: string[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async (id: string) => {
+					removeCalls.push(id);
+				},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => ["kilocode"],
+				registerProvider: () => {},
+				unregisterProvider: (id: string) => {
+					unregCalls.push(id);
+				},
+				reloadConfig: async () => {
+					reloadCalls.push(1);
+				},
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({
+				providers: { kilocode: { name: "Kilo Code" } },
+			});
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["removeProvider"]("kilocode");
+
+			assert.ok(written, "models.json should be written");
+			assert.ok(!written.providers.kilocode, "provider entry removed");
+			assert.ok(unregCalls.includes("kilocode"), "unregisterProvider called");
+			assert.ok(removeCalls.includes("kilocode"), "removeRuntimeApiKey called");
+			assert.strictEqual(reloadCalls.length, 1, "reloadConfig called");
+		});
+
+		test("addProvider throws when provider ID is empty", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = createMockModelRuntime();
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+			} as any;
+			let threw = false;
+			try {
+				await provider["addProvider"]({ provider: "  " });
+			} catch {
+				threw = true;
+			}
+			assert.ok(threw, "addProvider should reject an empty provider ID");
+		});
+
+		test("addProvider rejects built-in provider IDs", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [{ id: "openai" }],
+				getRegisteredProviderIds: () => [],
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+			} as any;
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			let threw = false;
+			let message = "";
+			try {
+				await provider["addProvider"]({ provider: "openai" });
+			} catch (e) {
+				threw = true;
+				message = e instanceof Error ? e.message : String(e);
+			}
+			assert.ok(threw, "addProvider should reject a built-in provider ID");
+			assert.match(message, /built-in/i);
+		});
+
+		test("removeProvider rejects built-in provider IDs", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: () => {},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {},
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+			} as any;
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			let threw = false;
+			let message = "";
+			try {
+				await provider["removeProvider"]("openai");
+			} catch (e) {
+				threw = true;
+				message = e instanceof Error ? e.message : String(e);
+			}
+			assert.ok(threw, "removeProvider should reject a built-in provider ID");
+			assert.match(message, /built-in/i);
 		});
 	});
 

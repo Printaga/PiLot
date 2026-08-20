@@ -2,8 +2,6 @@
 - Improve default prompt templates
 - Prompt auto-enhancement button
 - More settings exposed in GUI
-- Auto detect available thinking
-- Fix missing token chase number
 - Fix session naming
 - Detect custom tools
 - GUI rules management

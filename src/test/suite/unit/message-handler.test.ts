@@ -62,6 +62,8 @@ function createMockProvider(): {
 		getProviderAuthData: makeSpy("getProviderAuthData", async () => []),
 		setApiKey: makeSpy("setApiKey"),
 		removeAuth: makeSpy("removeAuth"),
+		addProvider: makeSpy("addProvider"),
+		removeProvider: makeSpy("removeProvider"),
 		openConfigFile: makeSpy("openConfigFile"),
 		toggleFavorite: makeSpy("toggleFavorite", async () => []),
 		listSessions: makeSpy("listSessions", async () => []),
@@ -1185,6 +1187,33 @@ suite("MessageHandler", () => {
 			data: { provider: "openai" },
 		});
 		assert.deepStrictEqual(provider.calls.removeAuth[0], ["openai"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("addProvider routes to provider.addProvider with config", async () => {
+		const result = await handler.handle({
+			type: "addProvider",
+			data: { provider: "kilocode", name: "Kilo Code", baseUrl: "https://x" },
+		});
+		assert.deepStrictEqual(provider.calls.addProvider[0], [
+			{
+				provider: "kilocode",
+				name: "Kilo Code",
+				baseUrl: "https://x",
+				apiKey: undefined,
+				api: undefined,
+				headers: undefined,
+			},
+		]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("removeProvider routes to provider.removeProvider", async () => {
+		const result = await handler.handle({
+			type: "removeProvider",
+			data: { provider: "kilocode" },
+		});
+		assert.deepStrictEqual(provider.calls.removeProvider[0], ["kilocode"]);
 		assert.strictEqual(result.success, true);
 	});
 

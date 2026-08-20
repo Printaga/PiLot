@@ -59,11 +59,21 @@ export interface ProviderApi {
 			name: string;
 			configured: boolean;
 			status: string;
+			custom: boolean;
 		}>
 	>;
 	refreshModels(): Promise<void>;
 	setApiKey(provider: string, apiKey: string): Promise<void>;
 	removeAuth(provider: string): Promise<void>;
+	addProvider(input: {
+		provider: string;
+		name?: string;
+		baseUrl?: string;
+		apiKey?: string;
+		api?: string;
+		headers?: Record<string, string>;
+	}): Promise<void>;
+	removeProvider(providerId: string): Promise<void>;
 	openConfigFile(file: "auth" | "models" | "settings"): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
 	listSessions(): Promise<

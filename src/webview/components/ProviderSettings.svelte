@@ -6,6 +6,7 @@
 		name: string;
 		configured: boolean;
 		status: string;
+		custom: boolean;
 	}
 
 	interface Props {
@@ -17,6 +18,19 @@
 	let editingProvider = $state<string | null>(null);
 	let apiKeyInput = $state('');
 	let showApiKey = $state(false);
+
+	let showAddForm = $state(false);
+	let newProviderId = $state('');
+	let newProviderName = $state('');
+	let newProviderBaseUrl = $state('');
+	let newProviderApiKey = $state('');
+	let newProviderApi = $state('');
+	let showNewApiKey = $state(false);
+	let addError = $state<string | null>(null);
+	// While an addProvider request is in flight, its correlation id lets us react
+	// only to THIS request's success/error replies, not unrelated host messages.
+	let pendingAddId = $state<string | null>(null);
+	let pendingRequestId = $state<string | null>(null);
 
 	const sortedProviders = $derived.by(() => {
 		const configured = providers
@@ -30,6 +44,32 @@
 
 	onMount(() => {
 		sendMessage({ type: 'getProviderAuth' });
+		// React only to replies correlated with our in-flight addProvider request:
+		// a success `provider-added` ack resets the form; a correlated `error`
+		// shows the server message and clears the pending state so the user retries.
+		const onHostMessage = (event: MessageEvent) => {
+			const msg = event.data;
+			if (!msg || !msg.type || !pendingRequestId) return;
+			if (
+				msg.type === 'provider-added' &&
+				msg.data?.requestId === pendingRequestId &&
+				typeof msg.data?.provider === 'string'
+			) {
+				resetAddForm();
+			} else if (
+				msg.type === 'error' &&
+				msg.data?.requestId === pendingRequestId
+			) {
+				addError =
+					typeof msg.data?.message === 'string'
+						? msg.data.message
+						: 'Failed to add provider';
+				pendingAddId = null;
+				pendingRequestId = null;
+			}
+		};
+		window.addEventListener('message', onHostMessage);
+		return () => window.removeEventListener('message', onHostMessage);
 	});
 
 	function sendMessage(msg: any) {
@@ -62,6 +102,46 @@
 		apiKeyInput = '';
 	}
 
+	function resetAddForm() {
+		showAddForm = false;
+		newProviderId = '';
+		newProviderName = '';
+		newProviderBaseUrl = '';
+		newProviderApiKey = '';
+		newProviderApi = '';
+		showNewApiKey = false;
+		addError = null;
+		pendingAddId = null;
+		pendingRequestId = null;
+	}
+
+	async function addProvider() {
+		addError = null;
+		const providerId = newProviderId.trim();
+		if (!providerId) {
+			addError = 'Provider ID is required';
+			return;
+		}
+		// Correlate this request so only its success/error replies affect the form.
+		const requestId =
+			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+				? crypto.randomUUID()
+				: `add-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		pendingAddId = providerId;
+		pendingRequestId = requestId;
+		sendMessage({
+			type: 'addProvider',
+			id: requestId,
+			data: {
+				provider: providerId,
+				name: newProviderName.trim() || undefined,
+				baseUrl: newProviderBaseUrl.trim() || undefined,
+				apiKey: newProviderApiKey.trim() || undefined,
+				api: newProviderApi.trim() || undefined
+			}
+		});
+	}
+
 	async function removeAuth(provider: string) {
 		sendMessage({
 			type: 'removeAuth',
@@ -70,6 +150,16 @@
 		providers = providers.map((p) =>
 			p.provider === provider ? { ...p, configured: false, status: 'not_configured' } : p
 		);
+	}
+
+	async function deleteProvider(provider: string) {
+		// Do not mutate local state here: wait for the host's provider-auth refresh
+		// (sent on success) to remove the provider. If the backend fails, the UI
+		// stays consistent with the backend.
+		sendMessage({
+			type: 'removeProvider',
+			data: { provider }
+		});
 	}
 
 	function statusLabel(status: string): string {
@@ -104,6 +194,13 @@
 					</svg>
 				</button>
 				<button
+					class="btn small"
+					onclick={() => (showAddForm = !showAddForm)}
+					title="Add a custom provider"
+				>
+					+ Add provider
+				</button>
+				<button
 					class="btn small config-btn"
 					onclick={() => sendMessage({ type: 'openConfigFile', data: { file: 'auth' } })}
 					title="Open auth.json for manual editing"
@@ -113,6 +210,91 @@
 			</div>
 		</div>
 	</div>
+
+	{#if showAddForm}
+		<div class="auth-card add-provider-card">
+			<div class="auth-main">
+				<div class="auth-icon">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+					</svg>
+				</div>
+				<div class="auth-info">
+					<span class="auth-name">Add custom provider</span>
+					<span class="auth-status">Persisted to models.json (visible in TUI too)</span>
+				</div>
+			</div>
+
+			<div class="add-provider-form">
+				<div class="form-row">
+					<label>
+						<span>Provider ID *</span>
+						<input
+							bind:value={newProviderId}
+							placeholder="e.g. kilocode"
+							onkeydown={(e) => e.key === 'Enter' && addProvider()}
+						/>
+					</label>
+					<label>
+						<span>Display name</span>
+						<input
+							bind:value={newProviderName}
+							placeholder="e.g. Kilo Code"
+							onkeydown={(e) => e.key === 'Enter' && addProvider()}
+						/>
+					</label>
+				</div>
+				<div class="form-row">
+					<label>
+						<span>Base URL</span>
+						<input
+							bind:value={newProviderBaseUrl}
+							placeholder="https://..."
+							onkeydown={(e) => e.key === 'Enter' && addProvider()}
+						/>
+					</label>
+					<label>
+						<span>API (optional)</span>
+						<input
+							bind:value={newProviderApi}
+							placeholder="openai"
+							onkeydown={(e) => e.key === 'Enter' && addProvider()}
+						/>
+					</label>
+				</div>
+				<label class="api-key-label">
+					<span>API key (optional)</span>
+					<div class="input-group">
+						<input
+							type={showNewApiKey ? 'text' : 'password'}
+							bind:value={newProviderApiKey}
+							placeholder="Paste API key here..."
+							onkeydown={(e) => e.key === 'Enter' && addProvider()}
+						/>
+						<button
+							class="vis-toggle"
+							onclick={() => (showNewApiKey = !showNewApiKey)}
+						>
+							{#if showNewApiKey}
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+							{:else}
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+							{/if}
+						</button>
+					</div>
+				</label>
+
+				{#if addError}
+					<div class="form-error">{addError}</div>
+				{/if}
+
+				<div class="auth-actions">
+					<button class="btn primary small" onclick={addProvider} disabled={pendingAddId !== null}>Add provider</button>
+					<button class="btn small" onclick={resetAddForm}>Cancel</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	<div class="auth-list">
 		{#each sortedProviders.configured as p}
@@ -126,6 +308,9 @@
 					</div>
 					<div class="auth-info">
 						<span class="auth-name">{p.name}</span>
+						{#if p.custom}
+							<span class="custom-badge">Custom</span>
+						{/if}
 						<span class="auth-status" class:configured={p.configured}>
 							{statusLabel(p.status)}
 						</span>
@@ -159,7 +344,17 @@
 					</div>
 				{:else}
 					<div class="auth-actions">
-						{#if p.configured}
+						{#if p.custom}
+							<button
+								class="icon-btn danger"
+								onclick={() => deleteProvider(p.provider)}
+								title="Delete provider"
+							>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+									<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+								</svg>
+							</button>
+						{:else if p.configured}
 							<button
 								class="icon-btn danger"
 								onclick={() => removeAuth(p.provider)}
@@ -199,6 +394,9 @@
 					</div>
 					<div class="auth-info">
 						<span class="auth-name">{p.name}</span>
+						{#if p.custom}
+							<span class="custom-badge">Custom</span>
+						{/if}
 						<span class="auth-status" class:configured={p.configured}>
 							{statusLabel(p.status)}
 						</span>
@@ -232,7 +430,17 @@
 					</div>
 				{:else}
 					<div class="auth-actions">
-						{#if p.configured}
+						{#if p.custom}
+							<button
+								class="icon-btn danger"
+								onclick={() => deleteProvider(p.provider)}
+								title="Delete provider"
+							>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+									<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+								</svg>
+							</button>
+						{:else if p.configured}
 							<button
 								class="icon-btn danger"
 								onclick={() => removeAuth(p.provider)}
@@ -374,6 +582,7 @@
 
 	.btn.primary { background: var(--color-primary); color: var(--color-text-inverse); border-color: var(--color-primary); }
 	.btn.small { padding: 4px 12px; font-size: 11px; }
+	.btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 	.icon-btn {
 		width: 28px;
@@ -420,5 +629,80 @@
 		border: none;
 		color: var(--color-text-muted);
 		cursor: pointer;
+	}
+
+	.add-provider-card {
+		border-style: dashed;
+		border-color: var(--color-primary);
+	}
+
+	.add-provider-form {
+		display: flex;
+		flex-direction: column;
+			gap: var(--space-3);
+		padding: var(--space-3);
+		background: var(--color-surface-2);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+	}
+
+	.form-row {
+		display: flex;
+		gap: var(--space-3);
+	}
+
+	.form-row label,
+	.api-key-label {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.add-provider-form label span {
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--color-text-muted);
+	}
+
+	.add-provider-form input {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: 6px 10px;
+		font-size: 11px;
+		color: var(--color-text);
+	}
+
+	.add-provider-form input:focus {
+		outline: none;
+		border-color: var(--color-primary);
+	}
+
+	.api-key-label .input-group {
+		border-color: var(--color-border);
+	}
+
+	.api-key-label .input-group input {
+		border: none;
+	}
+
+	.form-error {
+		font-size: 11px;
+		color: var(--color-error);
+	}
+
+	.custom-badge {
+		margin-left: var(--space-2);
+		padding: 1px 6px;
+		font-size: 9px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-primary);
+		background: oklch(from var(--color-primary) l c h / 0.12);
+		border-radius: var(--radius-sm);
 	}
 </style>
