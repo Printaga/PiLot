@@ -181,7 +181,14 @@ export class ModelRegistryHandler {
 	private resolveCliModelIds(): Promise<Set<string>> {
 		const binaryPath = this.deps.binaryService.getBinaryPath();
 		return execFileAsync(binaryPath, ["--list-models"])
-			.then(({ stdout, stderr }) => {
+			.then(({ code, stdout, stderr }) => {
+				// Treat a failing command as "no models" so shell error text on
+				// stderr is never parsed as a model table.
+				if (code !== 0) {
+					throw new Error(
+						`pi --list-models exited with code ${code}: ${stderr}`,
+					);
+				}
 				const output = (stderr || "") + "\n" + (stdout || "");
 				const models = new Set<string>();
 

@@ -6,9 +6,9 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
-- Support for adding custom OpenAI-compatible providers in the GUI.
-- OAuth provider login support
-- Mermaid diagram support
+- Support for adding custom OpenAI-compatible providers via the GUI.
+- OAuth provider login support.
+- Mermaid diagram support.
 
 ### Changed
 
@@ -20,7 +20,8 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - Fixed a bug where deleting a provider from the GUI did not actually remove the provider from PI.
 - Fixed favorite models not persisting between app restarts.
-- Fixed 3 minor code quality issues found by Fallow
+- Fixed issues with running the test suite for development.
+- Fixed 3 minor code quality issues found by Fallow.
 
 ## [2.3.1] - 2026-07-19
 

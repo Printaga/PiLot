@@ -1,19 +1,118 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { registerHooks } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import Mocha from 'mocha';
 import { glob } from 'glob';
+import * as vscode from 'vscode';
 
 process.env.PI_TEST = "1";
 
 // Inside the VS Code extension host, console output is routed to the Output
 // channel rather than stdout, so the default reporter's results are swallowed.
 // Mirror results to a file we can read back after the run.
-const reportPath = path.resolve(__dirname, 'test-results.log');
+const reportPath = path.resolve(import.meta.dirname, 'test-results.log');
+
+// ── VS Code test facade ─────────────────────────────────────────────────────
+//
+// Unit tests stub the VS Code API through `globalThis.vscode` (see
+// `resetVscodeMocks()` in src/test/mocks/pi-sdk-mocks.ts). The real API
+// namespace is frozen with getter-only properties, so assigning mocks directly
+// throws. Build an overlay facade instead: reads fall through to the real API,
+// writes are captured per property, and nested objects like `workspace.fs`
+// get the same treatment.
+
+function mutableCopy(
+	target: object,
+	bindFunctions = false,
+): Record<string, unknown> {
+	const copy: Record<string, unknown> = {};
+	for (const key of Object.getOwnPropertyNames(target)) {
+		try {
+			const value = (target as any)[key];
+			if (typeof value === 'undefined') {
+				continue;
+			}
+			// Never bind classes/constructors: binding strips statics like
+			// `Uri.file`. Plain host methods keep their receiver via bind().
+			const isConstructor =
+				typeof value === 'function' &&
+				value.prototype?.constructor === value;
+			copy[key] =
+				bindFunctions && typeof value === 'function' && !isConstructor
+					? value.bind(target)
+					: value;
+		} catch {
+			/* proposal-gated property: skip */
+		}
+	}
+	return copy;
+}
+
+function installVscodeFacade(): void {
+	const real = vscode as any;
+	// Mutate the facade IN PLACE so the shim module (which captured the
+	// original object reference at load) keeps observing the same objects that
+	// resetVscodeMocks() patches. Replacing the object would make production
+	// code read stale shim exports under the plain-Node runner.
+	const facade: Record<string, any> =
+		((globalThis as any).__vscodeFacade as Record<string, any> | undefined) ?? {};
+	const assignProps = (target: any, src: any, bind = false): void => {
+		if (!src || typeof src !== 'object') return;
+		for (const key of Object.getOwnPropertyNames(src)) {
+			const value = src[key];
+			if (typeof value === 'undefined') continue;
+			const isCtor =
+				typeof value === 'function' && value.prototype?.constructor === value;
+			target[key] =
+				bind && typeof value === 'function' && !isCtor
+					? value.bind(src)
+					: value;
+		}
+	};
+	assignProps(facade, real, false);
+	const ensureObj = (parent: any, name: string): any => {
+		if (!parent[name] || typeof parent[name] !== 'object') parent[name] = {};
+		return parent[name];
+	};
+	assignProps(ensureObj(facade, 'window'), real.window, true);
+	const ws = ensureObj(facade, 'workspace');
+	assignProps(ws, real.workspace, true);
+	assignProps(ensureObj(ws, 'fs'), real.workspace?.fs, true);
+	facade.commands = facade.commands ?? mutableCopy(real.commands);
+	facade.env = facade.env ?? mutableCopy(real.env);
+	facade.extensions = facade.extensions ?? mutableCopy(real.extensions);
+	facade.languages = facade.languages ?? mutableCopy(real.languages);
+
+	(globalThis as any).__vscodeFacade = facade;
+	(globalThis as any).vscode = facade;
+}
+
+// Modules compiled into dist-tsc must import the facade instead of the real
+// frozen API. Redirect their bare `"vscode"` imports to the mutable shim. The
+// shim must not import `"vscode"` itself.
+function redirectVscodeImportsForCompiledModules(): void {
+	const shimUrl = pathToFileURL(
+		path.resolve(import.meta.dirname, '../mocks/vscode-shim.js'),
+	).href;
+
+	registerHooks({
+		resolve(specifier, context, nextResolve) {
+			if (
+				specifier === 'vscode' &&
+				typeof context.parentURL === 'string' &&
+				context.parentURL.includes('/dist-tsc/')
+			) {
+				return { url: shimUrl, shortCircuit: true };
+			}
+			return nextResolve(specifier, context);
+		},
+	});
+}
 
 export async function run(): Promise<void> {
-	// Inside the VS Code extension host, console output is routed to the
-	// Output channel rather than stdout, so the default reporter's results
-	// are swallowed. Results are mirrored to reportPath (module scope).
+	installVscodeFacade();
+	redirectVscodeImportsForCompiledModules();
 
 	const appendReport = (line: string) => {
 		try {
@@ -33,8 +132,12 @@ export async function run(): Promise<void> {
 		timeout: 10000,
 		reporter: 'spec',
 	});
+	// Optional focused runs: MOCHA_GREP="toggleVoiceCapture" node dist-tsc/test/runTest.js
+	if (process.env.MOCHA_GREP) {
+		mocha.grep(new RegExp(process.env.MOCHA_GREP));
+	}
 
-	const testsRoot = path.resolve(__dirname, '.');
+	const testsRoot = path.resolve(import.meta.dirname, '.');
 	const files = await glob('**/**.test.js', { cwd: testsRoot });
 
 	for (const file of files) {
@@ -74,4 +177,17 @@ export async function run(): Promise<void> {
 			reject(err);
 		}
 	});
+}
+
+// When invoked directly (e.g. `node dist-tsc/test/suite/index.js`) rather than
+// through the VS Code extension-host test runner, run the suite immediately.
+// Under the extension host VS Code calls run() itself, so this guard is a no-op
+// there. This also lets the suite run under plain Node (no Electron host),
+// which avoids the inotify/Agent-Host resource limits of the full IDE.
+const isMain =
+	typeof process !== 'undefined' &&
+	!!process.argv[1] &&
+	pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain) {
+	void run();
 }

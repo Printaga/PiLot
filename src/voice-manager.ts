@@ -63,6 +63,10 @@ const VOICE_MODEL_BASE_URL =
 
 export const voiceManagerInternals = {
 	spawn,
+	// Tests stub filesystem access through this seam; ESM namespaces are frozen.
+	accessSync: (path: string, mode?: number) => fs.accessSync(path, mode),
+	existsSync: (path: fs.PathLike) => fs.existsSync(path),
+	statSync: (path: fs.PathLike) => fs.statSync(path),
 };
 
 // ── Helper path resolution ──────────────────────────────────────────────
@@ -129,7 +133,7 @@ async function downloadVoiceModel(
 	const destPath = path.join(cacheDir, modelDef.cacheFilename);
 
 	// Check if already cached — verify size roughly matches expected
-	if (fs.existsSync(destPath)) {
+	if (voiceManagerInternals.existsSync(destPath)) {
 		const stats = await fs.promises.stat(destPath);
 		const sizeMb = stats.size / (1024 * 1024);
 		if (
@@ -282,7 +286,7 @@ export class VoiceManager {
 			// Check if voice helper exists
 			const helperPath = getVoiceHelperPath(this.deps.extensionUri);
 			try {
-				fs.accessSync(helperPath, fs.constants.X_OK);
+				voiceManagerInternals.accessSync(helperPath, fs.constants.X_OK);
 			} catch {
 				vscode.window.showErrorMessage(
 					`Voice helper not found at ${helperPath}. Please reinstall the extension.`,
@@ -302,7 +306,8 @@ export class VoiceManager {
 			}
 
 			const modelExists =
-				fs.existsSync(modelPath) && fs.statSync(modelPath).size > 1024 * 1024;
+				voiceManagerInternals.existsSync(modelPath) &&
+				voiceManagerInternals.statSync(modelPath).size > 1024 * 1024;
 
 			if (!modelExists) {
 				const modelDef = VOICE_MODELS[this.voiceModel];

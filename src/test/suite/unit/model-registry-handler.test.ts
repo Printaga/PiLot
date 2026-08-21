@@ -1,6 +1,4 @@
 import * as assert from "assert";
-import * as fs from "node:fs";
-import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
@@ -16,8 +14,6 @@ import type {
 import type { BinaryService } from "../../../binary-service.js";
 import { createMockMemento } from "../../mocks/pi-sdk-mocks.js";
 
-const TMP_PREFIX = path.join(os.tmpdir(), "pilot-cli-mock-");
-let scriptCounter = 0;
 let currentNotifyMessages: any[] = [];
 
 function buildDeps(
@@ -41,24 +37,34 @@ function buildDeps(
     return { ...base, ...overrides };
 }
 
+// Stub `pi --list-models` output instead of writing executable scripts:
+// /tmp is often mounted noexec, which made script-based tests env-dependent.
+import * as shellModule from "../../../utils/shell.js";
+
+let savedExecFileAsync:
+    | typeof shellModule.shellInternals.execFileAsync
+    | undefined;
+
 function createCliScript(models: string[]): string {
-    const filePath = `${TMP_PREFIX}${++scriptCounter}.sh`;
+    savedExecFileAsync = shellModule.shellInternals.execFileAsync;
     const content = models
         .map((m) => {
             const [prov, id] = m.split("/") as [string, string];
             return `${prov}  ${id}  123  456  off  false`;
         })
         .join("\n");
-    fs.writeFileSync(filePath, "#!/bin/sh\n" + content + "\n");
-    fs.chmodSync(filePath, 0o755);
-    return filePath;
+    shellModule.shellInternals.execFileAsync = async () => ({
+        code: 0,
+        stdout: content,
+        stderr: "",
+    });
+    return "/stubbed/pi";
 }
 
-async function cleanupCliScript(filePath: string): Promise<void> {
-    try {
-        await fsp.unlink(filePath);
-    } catch {
-        // best-effort cleanup
+async function cleanupCliScript(_filePath: string): Promise<void> {
+    if (savedExecFileAsync) {
+        shellModule.shellInternals.execFileAsync = savedExecFileAsync;
+        savedExecFileAsync = undefined;
     }
 }
 
@@ -445,13 +451,14 @@ suite("ModelRegistryHandler", () => {
                         updated = true;
                     },
                 });
-                handler = new ModelRegistryHandler({
+                const handlerDeps = {
                     ...deps,
                     binaryService: { getBinaryPath: () => scriptPath } as unknown as BinaryService,
-                });
+                };
+                handler = new ModelRegistryHandler(handlerDeps);
 
                 await handler.syncFromCliModels();
-                assert.ok(deps.favoriteModels.includes("openai/gpt-4"));
+                assert.ok(handlerDeps.favoriteModels.includes("openai/gpt-4"));
                 assert.ok(updated, "should notify webview of favorites update");
             } finally {
                 await cleanupCliScript(scriptPath);
@@ -508,15 +515,23 @@ suite("ModelRegistryHandler", () => {
                 },
                 flush: async () => {},
             } as unknown as SettingsManager;
-            deps = buildDeps({
-                getSettingsManager: () => settingsManager,
-                availableModels: [{ id: "openai/gpt-4", provider: "openai", name: "GPT-4" }],
-                favoriteModels: [],
-            });
-            handler = new ModelRegistryHandler(deps);
-            const result = await handler.toggleFavorite("openai/gpt-4", true);
-            assert.ok(result.includes("openai/gpt-4"));
-            assert.ok(written?.includes("openai/gpt-4"), "expected settingsManager to be updated");
+            const scriptPath = createCliScript(["openai/gpt-4"]);
+            try {
+                deps = buildDeps({
+                    getSettingsManager: () => settingsManager,
+                    availableModels: [{ id: "openai/gpt-4", provider: "openai", name: "GPT-4" }],
+                    favoriteModels: [],
+                });
+                handler = new ModelRegistryHandler({
+                    ...deps,
+                    binaryService: { getBinaryPath: () => scriptPath } as unknown as BinaryService,
+                });
+                const result = await handler.toggleFavorite("openai/gpt-4", true);
+                assert.ok(result.includes("openai/gpt-4"));
+                assert.ok(written?.includes("openai/gpt-4"), "expected settingsManager to be updated");
+            } finally {
+                await cleanupCliScript(scriptPath);
+            }
         });
 
         test("removes model from favorites without guard", async () => {

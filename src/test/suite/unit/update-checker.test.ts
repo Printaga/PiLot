@@ -21,6 +21,15 @@ let infoMessages: string[];
 let terminalCalls: any[];
 let globalStateUpdates: Record<string, any>;
 
+/** Restore an env var, deleting it when the saved value was undefined. */
+function restoreEnvVar(key: string, value: string | undefined): void {
+	if (value === undefined) {
+		delete process.env[key];
+	} else {
+		process.env[key] = value;
+	}
+}
+
 function resetMocks() {
 	notifyCalls = [];
 	infoMessages = [];
@@ -142,7 +151,7 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			const result = await fetchLatestPiRelease();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
 		}
 	});
 
@@ -153,7 +162,7 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			const result = await fetchLatestPiRelease();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 
@@ -171,8 +180,8 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			const result = await fetchLatestPiRelease();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -192,8 +201,8 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			const result = await fetchLatestPiRelease();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -213,8 +222,8 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			const result = await fetchLatestPiRelease();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -241,8 +250,8 @@ suite("update-checker: fetchLatestPiRelease", () => {
 			assert.strictEqual(result.packageName, "pi-cli");
 			assert.strictEqual(result.note, "New features");
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -265,8 +274,8 @@ suite("update-checker: checkForPiUpdate", () => {
 			assert.ok(result);
 			assert.strictEqual(result.version, "99.0.0");
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -286,8 +295,8 @@ suite("update-checker: checkForPiUpdate", () => {
 			const result = await checkForPiUpdate();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -307,8 +316,8 @@ suite("update-checker: checkForPiUpdate", () => {
 			const result = await checkForPiUpdate();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -327,8 +336,8 @@ suite("update-checker: checkForPiUpdate", () => {
 			const result = await checkForPiUpdate();
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -342,7 +351,7 @@ suite("update-checker: checkForPackageUpdates", () => {
 			const result = await checkForPackageUpdates({} as any);
 			assert.deepStrictEqual(result, []);
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 
@@ -353,7 +362,7 @@ suite("update-checker: checkForPackageUpdates", () => {
 			const result = await checkForPackageUpdates(undefined);
 			assert.deepStrictEqual(result, []);
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 });
@@ -447,8 +456,8 @@ suite("update-checker: runUpdateCheck", () => {
 				infoMessages.some((m: string) => m.includes("up to date")),
 			);
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -500,8 +509,8 @@ suite("update-checker: runUpdateCheck", () => {
 			// User chose "Update All" so terminal should have "pi update"
 			assert.ok(terminalCalls.some((c: string) => c === "pi update"));
 		} finally {
-			process.env.PI_SKIP_VERSION_CHECK = prev;
-			process.env.PI_OFFLINE = prevOffline;
+			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
+			restoreEnvVar("PI_OFFLINE", prevOffline);
 			delete (global as any).fetch;
 		}
 	});
@@ -575,7 +584,7 @@ suite("update-checker: performCheckWithDeduplication", () => {
 			const result = await performCheckWithDeduplication(context, provider);
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 
@@ -609,7 +618,7 @@ suite("update-checker: performCheckWithDeduplication", () => {
 			const result = await performCheckWithDeduplication(context, provider);
 			assert.strictEqual(result, undefined);
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 
@@ -669,7 +678,7 @@ suite("update-checker: performCheckWithDeduplication", () => {
 				delete (global as any).fetch;
 			}
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 
@@ -732,7 +741,7 @@ suite("update-checker: performCheckWithDeduplication", () => {
 				delete (global as any).fetch;
 			}
 		} finally {
-			process.env.PI_OFFLINE = prev;
+			restoreEnvVar("PI_OFFLINE", prev);
 		}
 	});
 });

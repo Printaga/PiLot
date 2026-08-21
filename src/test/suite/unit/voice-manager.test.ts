@@ -69,9 +69,9 @@ function createMockProcess(): any {
 
 suite("VoiceManager", () => {
 	let originalSpawn: typeof voiceManagerInternals.spawn;
-	let originalAccessSync: typeof fs.accessSync;
-	let originalExistsSync: typeof fs.existsSync;
-	let originalStatSync: typeof fs.statSync;
+	let originalAccessSync: typeof voiceManagerInternals.accessSync;
+	let originalExistsSync: typeof voiceManagerInternals.existsSync;
+	let originalStatSync: typeof voiceManagerInternals.statSync;
 	let notifyCalls: any[];
 	let mockProcess: any;
 
@@ -82,23 +82,23 @@ suite("VoiceManager", () => {
 		originalSpawn = voiceManagerInternals.spawn;
 		voiceManagerInternals.spawn = () => mockProcess as any;
 
-		originalAccessSync = (fs as any).accessSync;
-		(fs as any).accessSync = () => {};
+		originalAccessSync = voiceManagerInternals.accessSync;
+		voiceManagerInternals.accessSync = () => {};
 
-		originalExistsSync = (fs as any).existsSync;
-		(fs as any).existsSync = () => true;
+		originalExistsSync = voiceManagerInternals.existsSync;
+		voiceManagerInternals.existsSync = () => true;
 
-		originalStatSync = (fs as any).statSync;
-		(fs as any).statSync = () => ({ size: 10 * 1024 * 1024 } as fs.Stats);
+		originalStatSync = voiceManagerInternals.statSync;
+		voiceManagerInternals.statSync = () => ({ size: 10 * 1024 * 1024 } as fs.Stats);
 
 		resetVscodeMocks();
 	});
 
 	teardown(() => {
 		voiceManagerInternals.spawn = originalSpawn;
-		(fs as any).accessSync = originalAccessSync;
-		(fs as any).existsSync = originalExistsSync;
-		(fs as any).statSync = originalStatSync;
+		voiceManagerInternals.accessSync = originalAccessSync;
+		voiceManagerInternals.existsSync = originalExistsSync;
+		voiceManagerInternals.statSync = originalStatSync;
 		notifyCalls = [];
 		mockProcess = null;
 	});

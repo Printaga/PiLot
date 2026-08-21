@@ -104,7 +104,7 @@ suite("SessionResources class", () => {
 
 	suite("resolveFileMentions()", () => {
 		const tmpDir = path.join(
-			__dirname,
+			import.meta.dirname,
 			"../../..",
 			"test-tmp-session-resources",
 		);

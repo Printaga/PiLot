@@ -1,5 +1,13 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs/promises";
+
+/**
+ * Mutable seam for tests: ESM namespaces are frozen, so tests stub
+ * filesystem deletion here instead of patching `node:fs/promises` directly.
+ */
+export const sessionManagerInternals = {
+	unlink: (path: string) => fs.unlink(path),
+};
 import {
 	SessionManager as PiSessionManager,
 	type ModelRegistry,
@@ -295,7 +303,7 @@ export class SessionListManager {
 							(s) => s.id === sessionId,
 						);
 						if (targetSessionInfo) {
-							await fs.unlink(targetSessionInfo.path);
+							await sessionManagerInternals.unlink(targetSessionInfo.path);
 						}
 					} catch (error) {
 						this.deps.logError(
@@ -310,7 +318,7 @@ export class SessionListManager {
 			const session = this.deps.getSession();
 			if (session && sessionIds.includes(session.sessionId)) {
 				session.dispose();
-				this.deps.setSession(undefined);
+				this.deps.setSession?.(undefined);
 				await this.deps.onSessionDeleted?.(sessionIds);
 			}
 

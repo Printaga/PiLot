@@ -10,6 +10,9 @@ export interface AgentSessionMock {
 	abort: () => Promise<void>;
 	compact: () => Promise<unknown>;
 	editMessage: (index: number, text: string) => Promise<void>;
+	getContextUsage?: () => unknown;
+	getSessionStats?: () => unknown;
+	_replaceMessageInPlace?: (target: unknown, replacement: unknown) => Promise<unknown>;
 	sessionManager: {
 		getCwd: () => string;
 		getBranch?: (fromId?: string) => any[];
@@ -51,19 +54,26 @@ export function createSessionMock(options?: {
 		sessionId: options?.sessionId ?? "test-session-id",
 		messages: options?.messages ?? [],
 		resourceLoader: options?.resourceLoader ?? createResourceLoaderMock(),
-		extensionRunner: options?.extensionRunner ?? createExtensionRunnerMock(),
+		extensionRunner:
+			options && "extensionRunner" in options
+				? options.extensionRunner
+				: createExtensionRunnerMock(),
 		dispose: () => {},
 		subscribe: () => {},
 		prompt: async () => {},
 		abort: async () => {},
 		compact: async () => ({}),
 		editMessage: async () => {},
+		getContextUsage: () => ({ used: 0, total: 0 }) as any,
+		getSessionStats: () => ({}) as any,
+		_replaceMessageInPlace: async () => ({}) as any,
 		sessionManager: {
 			getCwd: () => "/fake/workspace",
 			getBranch: () => [],
 			getPath: () => [],
 			getEntry: () => undefined,
-		},
+			_rewriteFile: () => {},
+		} as any,
 		events: options?.events ?? [],
 	};
 	mock.subscribe = (handler: any) => {

@@ -698,7 +698,7 @@ export class MessageHandler {
 			}
 
 			if (message.id) {
-				this.sendResponse(message.id, result);
+				this.sendResponse(message.id, result, Boolean(result?.error));
 			}
 
 			return result;

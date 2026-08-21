@@ -6,6 +6,7 @@ import {
     extractTextFromMessage,
     generateSessionName,
     SessionListManager,
+    sessionManagerInternals,
 } from "../../../session-manager.js";
 import type { SessionManagerDeps } from "../../../session-manager.js";
 
@@ -136,14 +137,14 @@ suite("SessionListManager", () => {
 
     setup(() => {
         savedPiList = (piModule.SessionManager as any).list;
-        savedFsUnlink = (fs as any).unlink;
+        savedFsUnlink = sessionManagerInternals.unlink;
         oldWorkspaceFolders = (vscode.workspace as any).workspaceFolders;
         oldShowErrorMessage = (vscode.window as any).showErrorMessage;
     });
 
     teardown(() => {
         if (savedPiList) (piModule.SessionManager as any).list = savedPiList;
-        if (savedFsUnlink) (fs as any).unlink = savedFsUnlink;
+        if (savedFsUnlink) sessionManagerInternals.unlink = savedFsUnlink;
         (vscode.workspace as any).workspaceFolders = oldWorkspaceFolders;
         (vscode.window as any).showErrorMessage = oldShowErrorMessage;
     });
@@ -413,7 +414,7 @@ suite("SessionListManager", () => {
                 }),
             );
 
-            (fs as any).unlink = async (p: string) => {
+            sessionManagerInternals.unlink = async (p: string) => {
                 unlinked.push(p);
             };
 
@@ -439,7 +440,7 @@ suite("SessionListManager", () => {
                 }),
             );
 
-            (fs as any).unlink = async () => {};
+            sessionManagerInternals.unlink = async () => {};
 
             await mgr.deleteSessions(["s1"]);
 
@@ -469,7 +470,7 @@ suite("SessionListManager", () => {
                 }),
             );
 
-            (fs as any).unlink = async () => {};
+            sessionManagerInternals.unlink = async () => {};
 
             await mgr.deleteSessions(["s1"]);
             assert.deepStrictEqual(deletedIds, ["s1"]);
@@ -497,7 +498,7 @@ suite("SessionListManager", () => {
                 }),
             );
 
-            (fs as any).unlink = async () => {
+            sessionManagerInternals.unlink = async () => {
                 throw new Error("disk full");
             };
 
@@ -521,7 +522,7 @@ suite("SessionListManager", () => {
             (piModule.SessionManager as any).list = async () => allSessions;
 
             const unlinked: string[] = [];
-            (fs as any).unlink = async (p: string) => {
+            sessionManagerInternals.unlink = async (p: string) => {
                 unlinked.push(p);
             };
 

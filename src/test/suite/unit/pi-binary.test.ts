@@ -160,8 +160,13 @@ suite("pi-binary: resolvePiBinary", () => {
 	test("returns null when no pi binary is found and spawnSync fails", async () => {
 		const origConfig = (vscodeModule.workspace.getConfiguration as any);
 		const shellModule = await import("../../../utils/shell.js");
-		const origExecFileAsync = (shellModule as any).execFileAsync;
+		const origExecFileAsync = shellModule.shellInternals.execFileAsync;
 		const origSpawnSync = piBinaryInternals.spawnSync;
+		const origAccessSync = piBinaryInternals.accessSync;
+		// Simulate a machine where none of the well-known candidate paths exist.
+		piBinaryInternals.accessSync = () => {
+			throw new Error("ENOENT");
+		};
 
 		(vscodeModule.workspace.getConfiguration as any) = (_section?: string) =>
 			({
@@ -187,13 +192,18 @@ suite("pi-binary: resolvePiBinary", () => {
 		} finally {
 			(vscodeModule.workspace.getConfiguration as any) = origConfig;
 			(piBinaryInternals as any).spawnSync = origSpawnSync;
-			(shellModule as any).execFileAsync = origExecFileAsync;
+			piBinaryInternals.accessSync = origAccessSync;
+			shellModule.shellInternals.execFileAsync = origExecFileAsync;
 		}
 	});
 
 	test("returns null when spawnSync throws an exception", async () => {
 		const origConfig = (vscodeModule.workspace.getConfiguration as any);
 		const origSpawnSync = piBinaryInternals.spawnSync;
+		const origAccessSync2 = piBinaryInternals.accessSync;
+		piBinaryInternals.accessSync = () => {
+			throw new Error("ENOENT");
+		};
 		(piBinaryInternals as any).spawnSync = (
 			_cmd: string,
 			_args: string[],
@@ -214,6 +224,7 @@ suite("pi-binary: resolvePiBinary", () => {
 		} finally {
 			(vscodeModule.workspace.getConfiguration as any) = origConfig;
 			(piBinaryInternals as any).spawnSync = origSpawnSync;
+			piBinaryInternals.accessSync = origAccessSync2;
 		}
 	});
 });

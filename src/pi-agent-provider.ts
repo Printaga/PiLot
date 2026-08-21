@@ -91,6 +91,13 @@ export const piAgentProviderInternals = {
 	createAgentSession,
 	getAgentDir,
 	unlinkFile: (path: string) => fs.unlink(path),
+	mkdir: (dir: string, options?: { recursive?: boolean }) =>
+		fs.mkdir(dir, options),
+	writeFile: (
+		path: string,
+		data: string,
+		options?: { flag?: string } | string,
+	) => fs.writeFile(path, data, options as any),
 	listSessions: (cwd: string, sessionDir?: string) =>
 		SessionManager.list(cwd, sessionDir),
 	// Construct the canonical model/auth runtime from SDK 0.80.x. Replaces the
@@ -145,6 +152,8 @@ export class PiAgentProvider
 	private modelRefreshTimer?: ReturnType<typeof setInterval>;
 	private configFileWatcher?: FSWatcher;
 	private configFileWatcherTimer?: ReturnType<typeof setTimeout>;
+	private configRefreshPromise?: Promise<void>;
+	private configRefreshResolve?: () => void;
 	private availableModels: ModelItem[] = [];
 	private favoriteModels: string[] = [];
 	private currentModelId: string | null = null;
@@ -580,26 +589,34 @@ export class PiAgentProvider
 	 * to the webview via `refreshModels()`.
 	 */
 	private handleExternalConfigChange(filename: string): Promise<void> {
-		return new Promise<void>((resolve) => {
-			if (this.configFileWatcherTimer) {
-				clearTimeout(this.configFileWatcherTimer);
+		// Coalesce rapid bursts: every caller inside the debounce window shares
+		// the same promise, so all of them resolve after the single refresh.
+		if (!this.configRefreshPromise) {
+			this.configRefreshPromise = new Promise<void>((resolve) => {
+				this.configRefreshResolve = resolve;
+			});
+		}
+		if (this.configFileWatcherTimer) {
+			clearTimeout(this.configFileWatcherTimer);
+		}
+		this.configFileWatcherTimer = setTimeout(async () => {
+			this.configFileWatcherTimer = undefined;
+			const resolve = this.configRefreshResolve;
+			this.configRefreshPromise = undefined;
+			this.configRefreshResolve = undefined;
+			this.logDebug(
+				`[PI] ${filename} changed on disk, reloading and refreshing models`,
+			);
+			// ModelRuntime keeps models and credentials fresh in memory;
+			// refresh() is the SDK 0.80+ equivalent of the legacy
+			// AuthStorage.reload() + ModelRegistry.refresh() pair.
+			if (filename === "auth.json" && this.modelRuntime) {
+				await this.modelRuntime.refresh();
 			}
-			this.configFileWatcherTimer = setTimeout(async () => {
-				this.configFileWatcherTimer = undefined;
-				this.logDebug(
-					`[PI] ${filename} changed on disk, reloading and refreshing models`,
-				);
-				// ModelRuntime keeps models and credentials fresh in memory;
-				// refresh() is the SDK 0.80+ equivalent of the legacy
-				// AuthStorage.reload() + ModelRegistry.refresh() pair.
-				if (filename === "auth.json" && this.modelRuntime) {
-					await this.modelRuntime.refresh();
-				}
-				this.modelRegistryHandler.invalidateCliModelIdsCache();
-				await this.refreshModels();
-				resolve();
-			}, 300);
-		});
+			await this.refreshModels(false);
+			resolve?.();
+		}, 300);
+		return this.configRefreshPromise;
 	}
 
 	/** Manually trigger better-sqlite3 rebuild. Called from command palette. */
@@ -2067,17 +2084,17 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
-	async refreshModels(): Promise<void> {
+	async refreshModels(refreshCredentials: boolean = true): Promise<void> {
 		// Re-read auth.json + models.json from disk so external edits (the
 		// "Open auth.json" workflow, package providers, parallel CLI use)
 		// propagate even when the directory watcher hasn't fired (e.g. the
 		// user hit the manual refresh button or the 5-min periodic timer
 		// ticked). In SDK 0.80 the `ModelRuntime` is the single source of
 		// truth for both auth.json and models.json.
-		if (this.modelRuntime) {
+		if (refreshCredentials && this.modelRuntime) {
 			await this.modelRuntime.refresh();
 		}
-		this.modelRegistryHandler.invalidateCliModelIdsCache();
+this.modelRegistryHandler.invalidateCliModelIdsCache();
 		await this.modelRegistryHandler.refreshAvailableModels();
 		// Keep the provider's local copy in sync so internal callers
 		// (getAvailableThinkingLevels, cycleModel) see the refreshed list.
@@ -2134,8 +2151,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		config: Record<string, unknown>,
 	): Promise<void> {
 		const filePath = this.getModelsJsonPath();
-		await fs.mkdir(path.dirname(filePath), { recursive: true });
-		await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf-8");
+		await piAgentProviderInternals.mkdir(path.dirname(filePath), { recursive: true });
+		await piAgentProviderInternals.writeFile(
+			filePath,
+			JSON.stringify(config, null, 2),
+			"utf-8",
+		);
 	}
 
 	/**
@@ -2511,10 +2532,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const agentDir = piAgentProviderInternals.getAgentDir();
 		const filePath = path.join(agentDir, fileName);
 
-		await fs.mkdir(agentDir, { recursive: true });
+		await piAgentProviderInternals.mkdir(agentDir, { recursive: true });
 		// Write only if the file does not already exist (flag "wx").
 		try {
-			await fs.writeFile(filePath, "{}", { flag: "wx" });
+			await piAgentProviderInternals.writeFile(filePath, "{}", { flag: "wx" });
 		} catch (error: unknown) {
 			if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
 				throw error;

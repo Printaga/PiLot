@@ -8,7 +8,7 @@ import {
 	describeABIStatus,
 } from "../../../utils/native-addons.js";
 
-// `out/test` emits CommonJS, where `__dirname` is provided by Node.
+// Tests compile to ESM (NodeNext); use `import.meta.dirname` instead of `__dirname`.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ function createFakeBetterSqlite3(baseDir: string, abi?: number): string {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 suite("native-addons", () => {
-	const tmpDir = path.join(__dirname, "../../..", "test-tmp-native-addons");
+	const tmpDir = path.join(import.meta.dirname, "../../..", "test-tmp-native-addons");
 
 	setup(() => {
 		fs.mkdirSync(tmpDir, { recursive: true });
@@ -47,7 +47,11 @@ suite("native-addons", () => {
 			);
 			const result = checkBetterSqlite3([fakeDir]);
 			assert.strictEqual(result.ok, true);
-			assert.strictEqual(result.moduleABI, Number(process.versions.modules));
+			// moduleABI is only populated for mismatches; check the copy directly.
+			assert.strictEqual(
+				result.copies[0].moduleABI,
+				Number(process.versions.modules),
+			);
 			assert.strictEqual(result.runtimeABI, Number(process.versions.modules));
 		});
 

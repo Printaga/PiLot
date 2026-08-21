@@ -308,9 +308,9 @@ suite("BinaryService: getCliVersion", () => {
 		try {
 			const { service } = makeBinaryService({ cachedVersion: null });
 			const shell = await importShell();
-			const origExecFileAsync = (shell as any).execFileAsync;
+			const origExecFileAsync = shell.shellInternals.execFileAsync;
 			let called = false;
-			(shell as any).execFileAsync = async () => {
+			shell.shellInternals.execFileAsync = async () => {
 				called = true;
 				return { code: 0, stdout: "1.2.3-cached\n", stderr: "" };
 			};
@@ -325,14 +325,14 @@ suite("BinaryService: getCliVersion", () => {
 
 				// Reset spy — second call must not invoke execFileAsync
 				called = false;
-				(shell as any).execFileAsync = async () => {
+				shell.shellInternals.execFileAsync = async () => {
 					throw new Error("should not reach here");
 				};
 
 				const v2 = await service.getCliVersion();
 				assert.strictEqual(v2, "1.2.3-cached");
 			} finally {
-				(shell as any).execFileAsync = origExecFileAsync;
+				shell.shellInternals.execFileAsync = origExecFileAsync;
 				binaryServiceInternals.findPiBinary = origFind;
 				(service as any).cachedVersion = null;
 			}
@@ -344,8 +344,8 @@ suite("BinaryService: getCliVersion", () => {
 	test("returns null and does not cache on command failure", async () => {
 		const { service } = makeBinaryService({ cachedVersion: null });
 		const shell = await importShell();
-		const origExecFileAsync = (shell as any).execFileAsync;
-		(shell as any).execFileAsync = async () => {
+		const origExecFileAsync = shell.shellInternals.execFileAsync;
+		shell.shellInternals.execFileAsync = async () => {
 			return { code: 1, stdout: "some error", stderr: "some error" };
 		};
 
@@ -361,7 +361,7 @@ suite("BinaryService: getCliVersion", () => {
 				"version should not be cached on failure",
 			);
 		} finally {
-			(shell as any).execFileAsync = origExecFileAsync;
+			shell.shellInternals.execFileAsync = origExecFileAsync;
 			binaryServiceInternals.findPiBinary = origFind;
 			(service as any).cachedVersion = null;
 		}
@@ -370,8 +370,8 @@ suite("BinaryService: getCliVersion", () => {
 	test("returns null when command exits 0 but output is empty", async () => {
 		const { service } = makeBinaryService({ cachedVersion: null });
 		const shell = await importShell();
-		const origExecFileAsync = (shell as any).execFileAsync;
-		(shell as any).execFileAsync = async () => ({
+		const origExecFileAsync = shell.shellInternals.execFileAsync;
+		shell.shellInternals.execFileAsync = async () => ({
 			code: 0,
 			stdout: "",
 			stderr: "",
@@ -384,7 +384,7 @@ suite("BinaryService: getCliVersion", () => {
 			const result = await service.getCliVersion();
 			assert.strictEqual(result, null);
 		} finally {
-			(shell as any).execFileAsync = origExecFileAsync;
+			shell.shellInternals.execFileAsync = origExecFileAsync;
 			binaryServiceInternals.findPiBinary = origFind;
 			(service as any).cachedVersion = null;
 		}
@@ -426,7 +426,7 @@ suite("BinaryService: resolveGitBranch", () => {
 		const { service } = makeBinaryService({});
 		try {
 			const branch = service.resolveGitBranch(tmpDir);
-			assert.strictEqual(branch, "refs/heads/main");
+			assert.strictEqual(branch, "main");
 		} finally {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
 		}
@@ -477,7 +477,7 @@ suite("BinaryService: resolveGitBranch", () => {
 		const { service } = makeBinaryService({});
 		try {
 			const branch = service.resolveGitBranch(tmpDir);
-			assert.strictEqual(branch, "refs/heads/feature");
+			assert.strictEqual(branch, "feature");
 		} finally {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
 		}

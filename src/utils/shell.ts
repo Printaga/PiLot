@@ -2,6 +2,20 @@
 
 import { execFile } from "node:child_process";
 
+/**
+ * Mutable holder for process execution. ESM module namespaces are frozen, so
+ * tests stub `execFileAsync` here instead of patching the module namespace.
+ */
+export const shellInternals = {
+	execFileAsync: (
+		_command: string,
+		_args: string[],
+		_timeoutMs?: number,
+	): Promise<CommandResult> => {
+		throw new Error("shellInternals.execFileAsync not initialized");
+	},
+};
+
 type CommandResult = { code: number | null; stdout: string; stderr: string };
 
 /** Strip ANSI escape sequences from a string */
@@ -33,7 +47,15 @@ export function getShellCommand(
 
 /** Execute a command via execFile with shell: true and return a CommandResult promise.
  * Times out after the specified duration (default 15s) to prevent indefinite hangs. */
-export function execFileAsync(
+export async function execFileAsync(
+	command: string,
+	args: string[],
+	timeoutMs = 15_000,
+): Promise<CommandResult> {
+	return shellInternals.execFileAsync(command, args, timeoutMs);
+}
+
+async function execFileAsyncImpl(
 	command: string,
 	args: string[],
 	timeoutMs = 15_000,
@@ -79,3 +101,5 @@ export function execFileAsync(
 		child.on?.("close", () => clearTimeout(timer));
 	});
 }
+
+shellInternals.execFileAsync = execFileAsyncImpl;

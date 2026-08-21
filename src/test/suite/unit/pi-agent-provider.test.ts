@@ -91,7 +91,7 @@ function setupPiSdkMocks() {
 	piAgentProviderInternals.createModelRegistry = () => createMockModelRegistry();
 	savedCreateSettingsManager = piAgentProviderInternals.createSettingsManager;
 	piAgentProviderInternals.createSettingsManager = () =>
-		({}) as SettingsManager;
+		createMockSettingsManager();
 	savedCreateSessionManager = piAgentProviderInternals.createSessionManager;
 	piAgentProviderInternals.createSessionManager = () =>
 		({}) as SessionManagerType;
@@ -131,6 +131,11 @@ function createTestConfig(
 		...overrides,
 	};
 }
+
+// Providers built by buildProvider(); disposed after the suite so leaked
+// fs watchers / refresh timers from initialize() tests cannot crash the
+// extension host during shutdown.
+const createdProviders: any[] = [];
 
 function buildProvider(
 	overrides: Partial<PiAgentConfig> = {},
@@ -241,8 +246,10 @@ function buildProvider(
 	(provider as any)._webview = view.webview;
 	(provider as any).isInitialized = true;
 
+	createdProviders.push(provider);
 	return provider;
 }
+// Tests
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -267,6 +274,19 @@ suite("PiAgentProvider", () => {
 
 	teardown(() => {
 		restorePiSdkMocks();
+	});
+
+	suiteTeardown(() => {
+		// Dispose providers created by buildProvider() so fs watchers and
+		// refresh timers from initialize() tests do not outlive the suite and
+		// crash the extension host during shutdown.
+		for (const p of createdProviders.splice(0)) {
+			try {
+				p.dispose?.();
+			} catch {
+				/* best effort */
+			}
+		}
 	});
 
 	suite("constructor", () => {
@@ -398,9 +418,19 @@ suite("PiAgentProvider", () => {
 				flush: async () => {},
 			};
 			(provider as any).settingsManager = mockSettings as any;
-
-			await provider["initialize"]();
-			assert.strictEqual((provider as any).currentModelId, "openai/gpt-4o");
+			// initialize() re-creates the settings manager through the internals
+			// seam; return the mock so the restore path reads its values.
+			const savedCreateSm = piAgentProviderInternals.createSettingsManager;
+			piAgentProviderInternals.createSettingsManager = () => mockSettings as any;
+			try {
+				await provider["initialize"]();
+				assert.strictEqual(
+					(provider as any).currentModelId,
+					"openai/gpt-4o",
+				);
+			} finally {
+				piAgentProviderInternals.createSettingsManager = savedCreateSm;
+			}
 		});
 
 		test("on failure restores PATH and shows error", async () => {
@@ -941,11 +971,11 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 				refresh: async () => {
 					refreshCalls.push(1);
 				},
-				getProviders: () => [],
-				getRegisteredProviderIds: () => [],
 				registerProvider: () => {},
 				unregisterProvider: () => {},
 				isUsingOAuth: () => false,
@@ -989,11 +1019,11 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => ["kilocode"],
 				refresh: async () => {
 					refreshCalls.push(1);
 				},
-				getProviders: () => [],
-				getRegisteredProviderIds: () => ["kilocode"],
 				registerProvider: () => {},
 				unregisterProvider: (id: string) => {
 					unregCalls.push(id);
@@ -1079,12 +1109,12 @@ suite("PiAgentProvider", () => {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
 				refresh: async () => ({}),
-				getProviders: () => [],
-				getRegisteredProviderIds: () => [],
 				registerProvider: () => {},
 				unregisterProvider: () => {},
-				reloadConfig: async () => {},
-			} as any;
+			reloadConfig: async () => {},
+			getProviders: () => [],
+			getRegisteredProviderIds: () => [],
+		} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {},
 			} as any;
@@ -1111,6 +1141,8 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 				refresh: async () => {
 					refreshCalls.push("refresh");
 					return {};
@@ -1151,6 +1183,8 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 				refresh: async () => {
 					refreshCalls.push("refresh");
 					return {};
@@ -1194,6 +1228,8 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 				refresh: async () => {
 					refreshCalls.push("refresh");
 					return {};
@@ -1230,6 +1266,8 @@ suite("PiAgentProvider", () => {
 			(provider as any).modelRuntime = {
 				setRuntimeApiKey: async () => {},
 				removeRuntimeApiKey: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 				refresh: async () => {
 					refreshCalls.push("refresh");
 					return {};
@@ -1272,13 +1310,13 @@ suite("PiAgentProvider", () => {
 
 			const writeCalls: any[] = [];
 			const openCalls: any[] = [];
-			const savedMkdir = fsPromises.mkdir;
-			const savedWrite = fsPromises.writeFile;
+			const savedMkdir = piAgentProviderInternals.mkdir;
+			const savedWrite = piAgentProviderInternals.writeFile;
 			const savedOpen = vscode.workspace.openTextDocument;
 			const savedShow = vscode.window.showTextDocument;
 
-			(fsPromises as any).mkdir = async () => undefined;
-			(fsPromises as any).writeFile = async (
+			piAgentProviderInternals.mkdir = async () => undefined;
+			piAgentProviderInternals.writeFile = async (
 				p: string,
 				content: string,
 				opts: any,
@@ -1306,8 +1344,8 @@ suite("PiAgentProvider", () => {
 					"opens models.json",
 				);
 			} finally {
-				(fsPromises as any).mkdir = savedMkdir;
-				(fsPromises as any).writeFile = savedWrite;
+				piAgentProviderInternals.mkdir = savedMkdir;
+				piAgentProviderInternals.writeFile = savedWrite;
 				vscode.workspace.openTextDocument = savedOpen;
 				vscode.window.showTextDocument = savedShow;
 			}
@@ -1318,13 +1356,13 @@ suite("PiAgentProvider", () => {
 			(provider as any).isInitialized = true;
 
 			let writeAttempted = false;
-			const savedMkdir = fsPromises.mkdir;
-			const savedWrite = fsPromises.writeFile;
+			const savedMkdir = piAgentProviderInternals.mkdir;
+			const savedWrite = piAgentProviderInternals.writeFile;
 			const savedOpen = vscode.workspace.openTextDocument;
 			const savedShow = vscode.window.showTextDocument;
 
-			(fsPromises as any).mkdir = async () => undefined;
-			(fsPromises as any).writeFile = async () => {
+			piAgentProviderInternals.mkdir = async () => undefined;
+			piAgentProviderInternals.writeFile = async () => {
 				writeAttempted = true;
 			};
 			// openDocument rejects, simulating the file already existing when
@@ -1336,7 +1374,7 @@ suite("PiAgentProvider", () => {
 
 			try {
 				// Force an EEXIST error to exercise the guard branch.
-				(fsPromises as any).writeFile = async () => {
+				piAgentProviderInternals.writeFile = async () => {
 					const err: any = new Error("exists");
 					err.code = "EEXIST";
 					throw err;
@@ -1348,8 +1386,8 @@ suite("PiAgentProvider", () => {
 					"no write attempted when EEXIST path used",
 				);
 			} finally {
-				(fsPromises as any).mkdir = savedMkdir;
-				(fsPromises as any).writeFile = savedWrite;
+				piAgentProviderInternals.mkdir = savedMkdir;
+				piAgentProviderInternals.writeFile = savedWrite;
 				vscode.workspace.openTextDocument = savedOpen;
 				vscode.window.showTextDocument = savedShow;
 			}
@@ -1465,6 +1503,7 @@ suite("PiAgentProvider", () => {
 				},
 			};
 			(provider as any).sessionListManager = mockListManager as any;
+			(provider as any).session = createSessionMock();
 
 			const messages: any[] = [];
 			(provider as any).notifyWebview = (msg: any) => {
@@ -2140,6 +2179,7 @@ suite("PiAgentProvider", () => {
 
 		test("returns undefined when not set", () => {
 			const provider = buildProvider();
+			(provider as any).settingsManager = undefined;
 			assert.strictEqual(provider["getSettingsManager"](), undefined);
 		});
 	});
@@ -2200,12 +2240,20 @@ suite("PiAgentProvider", () => {
 
 		test("setPiUISetting throws when settings manager missing", async () => {
 			const provider = buildProvider();
-			(provider as any).isInitialized = true;
+			(provider as any).isInitialized = false;
 			(provider as any).settingsManager = undefined;
-			await assert.rejects(
-				provider["setPiUISetting"]("showCacheMissNotices", true),
-				/not initialized/,
-			);
+			// initialize() re-creates the settings manager through this seam;
+			// return undefined so the missing-manager error path is reached.
+			const savedCreateSm = piAgentProviderInternals.createSettingsManager;
+			piAgentProviderInternals.createSettingsManager = () => undefined as any;
+			try {
+				await assert.rejects(
+					provider["setPiUISetting"]("showCacheMissNotices", true),
+					/not initialized/,
+				);
+			} finally {
+				piAgentProviderInternals.createSettingsManager = savedCreateSm;
+			}
 		});
 	});
 
@@ -2787,14 +2835,17 @@ suite("PiAgentProvider", () => {
 
 		test("setModel re-validates thinking level against the new model", async () => {
 			const provider = buildProvider();
-			(provider as any).availableModels = [
-				{
-					id: "anthropic/claude-x",
-					provider: "anthropic",
-					name: "Claude X",
-					availableThinkingLevels: ["off", "low"],
-				},
-			];
+			await settleInitialize(provider);
+			// Mutate in place: modelRegistryHandler captured the array reference at
+			// build time, so replacing the property would leave it stale.
+			const models: any[] = (provider as any).availableModels;
+			models.length = 0;
+			models.push({
+				id: "anthropic/claude-x",
+				provider: "anthropic",
+				name: "Claude X",
+				availableThinkingLevels: ["off", "low"],
+			});
 			(provider as any).currentModelId = "openai/gpt-4o-mini";
 			(provider as any).session = {
 				setModel: async () => {},

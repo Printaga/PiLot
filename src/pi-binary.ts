@@ -21,6 +21,8 @@ type PackageSettingEntry = string | { source?: string };
 
 export const piBinaryInternals = {
 	spawnSync: childProcess.spawnSync,
+	// Tests stub filesystem access through this seam; ESM namespaces are frozen.
+	accessSync: (p: string, mode?: number) => fs.accessSync(p, mode),
 };
 
 // ── Binary resolution ───────────────────────────────────────────────────
@@ -34,7 +36,7 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 
 	if (path.isAbsolute(trimmed)) {
 		try {
-			fs.accessSync(
+			piBinaryInternals.accessSync(
 				trimmed,
 				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
 			);
@@ -44,7 +46,7 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 			if (process.platform === "win32") {
 				for (const ext of [".exe", ".cmd"]) {
 					try {
-						fs.accessSync(trimmed + ext, fs.constants.F_OK);
+						piBinaryInternals.accessSync(trimmed + ext, fs.constants.F_OK);
 						return trimmed + ext;
 					} catch {
 						/* suffix not found, try next */
@@ -63,7 +65,7 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 		const basePath = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		const resolvedPath = path.join(basePath, trimmed);
 		try {
-			fs.accessSync(
+			piBinaryInternals.accessSync(
 				resolvedPath,
 				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
 			);
@@ -129,7 +131,7 @@ export function findPiBinary(): string {
 
 	for (const c of candidates) {
 		try {
-			fs.accessSync(
+			piBinaryInternals.accessSync(
 				c,
 				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
 			);
@@ -147,7 +149,7 @@ export function resolvePiBinary(): string | null {
 	const binary = findPiBinary();
 	if (path.isAbsolute(binary)) {
 		try {
-			fs.accessSync(
+			piBinaryInternals.accessSync(
 				binary,
 				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
 			);
@@ -168,8 +170,8 @@ export function resolvePiBinary(): string | null {
 			}
 			return null;
 		} else {
-			const result = piBinaryInternals.spawnSync(`command -v "${binary.replace(/"/g, '\\"')}"`, {
-				shell: true,
+			const result = piBinaryInternals.spawnSync("command", ["-v", binary], {
+				shell: false,
 				timeout: 1000,
 			});
 			if (result.status === 0 && result.stdout) {
@@ -190,7 +192,14 @@ export function parseInstalledPackages(output: string): InstalledPackage[] {
 	const packages: InstalledPackage[] = [];
 	const lines = stripAnsi(output).split("\n");
 
-	let pendingSource: string | null = null;
+	let currentSource: string | null = null;
+	let sawPackageForSource = false;
+
+	const flushEmptySource = () => {
+		if (currentSource && !sawPackageForSource) {
+			packages.push({ source: currentSource, path: "" });
+		}
+	};
 
 	for (const rawLine of lines) {
 		const line = rawLine.replace(/\r/g, "");
@@ -199,28 +208,28 @@ export function parseInstalledPackages(output: string): InstalledPackage[] {
 		if (
 			!trimmed ||
 			trimmed === "No packages installed." ||
-			/packages:\s*$/i.test(trimmed)
+			/^(packages?|pkgs?):\s*$/i.test(trimmed)
 		) {
 			continue;
 		}
 
-		if (/^\s{4,}\S/.test(line) && pendingSource) {
-			packages.push({ source: pendingSource, path: trimmed });
-			pendingSource = null;
+		// Package paths are indented deeper than their source line.
+		if (/^\s{4,}\S/.test(line)) {
+			if (currentSource) {
+				packages.push({ source: currentSource, path: trimmed });
+				sawPackageForSource = true;
+			}
 			continue;
 		}
 
 		if (/^\s{2,}\S/.test(line)) {
-			if (pendingSource) {
-				packages.push({ source: pendingSource, path: "" });
-			}
-			pendingSource = trimmed.replace(/\s+\(filtered\)$/, "");
+			flushEmptySource();
+			currentSource = trimmed.replace(/\s+\(filtered\)$/, "");
+			sawPackageForSource = false;
 		}
 	}
 
-	if (pendingSource) {
-		packages.push({ source: pendingSource, path: "" });
-	}
+	flushEmptySource();
 
 	return packages;
 }

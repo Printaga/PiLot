@@ -42,6 +42,9 @@ export function createMockAgentSession(options?: {
 		abort: async () => {},
 		compact: async () => ({}),
 		editMessage: async () => ({} as unknown),
+		getContextUsage: () => ({ used: 0, total: 0 }),
+		getSessionStats: () => ({}) as any,
+		_replaceMessageInPlace: async () => ({}) as any,
 		sessionManager: {
 			getCwd: () => "/fake/workspace",
 		} as any,
@@ -111,23 +114,49 @@ export function createMockModelRegistry(): ModelRegistry {
 	return {
 		getAvailable: async () => [],
 		getAll: () => [],
+		refresh: async () => ({}) as any,
 	} as unknown as ModelRegistry;
 }
 
 export function createMockSettingsManager(): SettingsManager {
-	return {
+	const base: Record<string, unknown> = {
 		getDefaultModel: () => null,
 		getDefaultProvider: () => "",
 		getDefaultThinkingLevel: () => "medium",
 		setDefaultThinkingLevel: async () => {},
+		setDefaultModelAndProvider: async () => {},
 		getEnabledModels: () => [],
 		setEnabledModels: async () => {},
 		getShowCacheMissNotices: () => false,
 		setShowCacheMissNotices: () => {},
+		reload: async () => {},
 		flush: async () => {},
+		getGlobalSettings: () => ({}) as any,
+		getProjectSettings: () => ({}) as any,
+		isProjectTrusted: () => true,
+		getRetrySettings: () => ({}) as any,
+		getCompactionSettings: () => ({}) as any,
+		getProviderRetrySettings: () => ({}) as any,
+		getSteeringMode: () => undefined,
+		getShellPath: () => undefined,
+		getShellCommandPrefix: () => undefined,
+		setProjectPackages: async () => {},
+		setPackages: async () => {},
+		setProjectTrusted: async () => {},
 		get: () => undefined,
 		update: async () => {},
-	} as unknown as SettingsManager;
+	};
+	// The SDK surface keeps growing; unknown method access becomes an async
+	// no-op so resource-loader calls never explode in tests.
+	return new Proxy(base, {
+		get(target, prop) {
+			if (prop === "then") return undefined;
+			if (typeof prop === "string" && prop in target) {
+				return target[prop];
+			}
+			return async () => undefined;
+		},
+	}) as unknown as SettingsManager;
 }
 
 export function createMockSessionManager(cwd = "/fake"): any {
@@ -204,7 +233,7 @@ export function resetVscodeMocks(): void {
 	];
 	(vscode.workspace.getConfiguration as any) = () =>
 		({
-			get: <T>(_key: string, defaultValue?: T): T => (defaultValue as T) || ({} as T),
+			get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,
 			update: async () => {},
 		}) as unknown as any;
 	(vscode.workspace.asRelativePath as any) = (uri: any) => uri.fsPath || "/fake";

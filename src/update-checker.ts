@@ -49,7 +49,8 @@ export function parsePackageVersion(version: string): ParsedVersion | undefined 
 export function isNewerVersion(candidate: string, current: string): boolean {
 	const c = parsePackageVersion(candidate);
 	const r = parsePackageVersion(current);
-	if (!c || !r) return candidate.trim() !== current.trim();
+	// Fallback to plain string comparison when either side is unparseable.
+	if (!c || !r) return candidate.trim() > current.trim();
 
 	if (c.major !== r.major) return c.major > r.major;
 	if (c.minor !== r.minor) return c.minor > r.minor;
