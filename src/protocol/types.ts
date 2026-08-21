@@ -33,6 +33,8 @@ export interface ProviderApi {
 	setThinkingLevel(
 		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
 	): Promise<void>;
+	getPiUISettings(): Promise<{ showCacheMissNotices: boolean }>;
+	setPiUISetting(key: "showCacheMissNotices", value: boolean): Promise<void>;
 	steer(text: string, images?: unknown[]): Promise<void>;
 	followUp(text: string, images?: unknown[]): Promise<void>;
 	abort(): Promise<void>;
@@ -60,11 +62,32 @@ export interface ProviderApi {
 			configured: boolean;
 			status: string;
 			custom: boolean;
+			credentialType: "oauth" | "api_key" | null;
+			/** Provider offers an OAuth login flow (mirrors the PI CLI's /login list). */
+			oauthLogin: boolean;
 		}>
 	>;
+	checkProviderAuth(providerId: string): Promise<{
+		provider: string;
+		configured: boolean;
+		credentialType: "oauth" | "api_key" | null;
+	}>;
 	refreshModels(): Promise<void>;
 	setApiKey(provider: string, apiKey: string): Promise<void>;
 	removeAuth(provider: string): Promise<void>;
+	/** Start an interactive OAuth login flow (PI CLI /login parity). */
+	loginProvider(providerId: string): Promise<void>;
+	/** Abort an in-flight OAuth login and reject its pending prompts. */
+	cancelProviderLogin(providerId: string): void;
+	/** Answer a login prompt previously sent to the webview. */
+	resolveLoginPrompt(
+		providerId: string,
+		promptId: string,
+		value: string | undefined,
+		cancelled: boolean,
+	): void;
+	/** Open an external URL (login links) in the system browser. */
+	openExternalUrl(url: string): Promise<void>;
 	addProvider(input: {
 		provider: string;
 		name?: string;

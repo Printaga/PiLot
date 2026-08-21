@@ -18,7 +18,7 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const vscodeModule = await import("vscode");
+import * as vscodeModule from "vscode";
 
 function withTmpDir(prefix: string, fn: (tmpDir: string) => void) {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));

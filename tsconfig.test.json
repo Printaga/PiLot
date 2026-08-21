@@ -3,15 +3,17 @@
 		"target": "ES2022",
 		"module": "commonjs",
 		"moduleResolution": "node",
-		"outDir": "./out/test",
-		"rootDir": "./src/test",
+		"lib": ["ES2022", "ES2015", "DOM"],
+		"outDir": "./dist-tsc",
+		"rootDir": "./src",
 		"sourceMap": true,
 		"strict": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"resolveJsonModule": true
+		"resolveJsonModule": true,
+		"ignoreDeprecations": "6.0"
 	},
 	"include": ["src/test/**/*"],
-	"exclude": ["node_modules", "dist", "src/webview"]
+	"exclude": ["node_modules", "dist", "out", "src/webview"]
 }

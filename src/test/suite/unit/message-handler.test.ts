@@ -62,6 +62,10 @@ function createMockProvider(): {
 		getProviderAuthData: makeSpy("getProviderAuthData", async () => []),
 		setApiKey: makeSpy("setApiKey"),
 		removeAuth: makeSpy("removeAuth"),
+		loginProvider: makeSpy("loginProvider", async () => {}),
+		cancelProviderLogin: makeSpy("cancelProviderLogin"),
+		resolveLoginPrompt: makeSpy("resolveLoginPrompt"),
+		openExternalUrl: makeSpy("openExternalUrl", async () => {}),
 		addProvider: makeSpy("addProvider"),
 		removeProvider: makeSpy("removeProvider"),
 		openConfigFile: makeSpy("openConfigFile"),
@@ -88,6 +92,10 @@ function createMockProvider(): {
 		getExtraSkillPaths: makeSpy("getExtraSkillPaths", () => []),
 		sendSkillsList: makeSpy("sendSkillsList"),
 	};
+
+	// Tests assert on `provider.calls.<name>`; expose the shared call log so
+	// those assertions can see what the spies recorded.
+	provider.calls = calls;
 
 	return { provider, webviewMessages };
 }
@@ -480,6 +488,103 @@ suite("MessageHandler", () => {
 			caught = e as Error;
 		}
 		assert.ok(caught);
+	});
+
+	test("getPiUISettings success", async () => {
+		provider.getPiUISettings = () =>
+			Promise.resolve({ showCacheMissNotices: true });
+		const result = await handler.handle({ type: "getPiUISettings" });
+		assert.strictEqual(result.success, true);
+		const msg = webviewMessages.find(
+			(m: any) => m.type === "pi-settings-changed",
+		);
+		assert.ok(msg);
+		assert.deepStrictEqual(msg.data, { showCacheMissNotices: true });
+	});
+
+	test("getPiUISettings error - posts error and re-throws", async () => {
+		const err = new Error("get pi settings failed");
+		provider.getPiUISettings = () => Promise.reject(err);
+		let caught: Error | undefined;
+		try {
+			await handler.handle({ type: "getPiUISettings" });
+		} catch (e) {
+			caught = e as Error;
+		}
+		assert.ok(caught);
+		assert.ok(webviewMessages.some((m: any) => m.type === "error"));
+	});
+
+	test("setPiUISetting success", async () => {
+		provider.setPiUISetting = () => Promise.resolve();
+		const result = await handler.handle({
+			type: "setPiUISetting",
+			data: { key: "showCacheMissNotices", value: true },
+		});
+		assert.deepStrictEqual(provider.calls.setPiUISetting[0], [
+			"showCacheMissNotices",
+			true,
+		]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("setPiUISetting rejects invalid payload", async () => {
+		provider.setPiUISetting = () => Promise.resolve();
+		let caught: Error | undefined;
+		try {
+			await handler.handle({
+				type: "setPiUISetting",
+				data: { key: "showCacheMissNotices" },
+			});
+		} catch (e) {
+			caught = e as Error;
+		}
+		assert.ok(caught);
+		assert.strictEqual(provider.calls.setPiUISetting.length, 0);
+	});
+
+	test("checkProviderAuth success", async () => {
+		provider.checkProviderAuth = () =>
+			Promise.resolve({
+				provider: "openai",
+				configured: true,
+				credentialType: "api_key",
+			});
+		const result = await handler.handle({
+			type: "checkProviderAuth",
+			data: { provider: "openai" },
+		});
+		assert.deepStrictEqual(provider.calls.checkProviderAuth[0], ["openai"]);
+		assert.strictEqual(result.success, true);
+		const msg = webviewMessages.find(
+			(m: any) => m.type === "provider-auth-check-result",
+		);
+		assert.ok(msg);
+		assert.deepStrictEqual(msg.data, {
+			provider: "openai",
+			configured: true,
+			credentialType: "api_key",
+		});
+	});
+
+	test("checkProviderAuth error - posts error and re-throws", async () => {
+		const err = new Error("check auth failed");
+		provider.checkProviderAuth = () => Promise.reject(err);
+		let caught: Error | undefined;
+		try {
+			await handler.handle({
+				type: "checkProviderAuth",
+				data: { provider: "openai" },
+			});
+		} catch (e) {
+			caught = e as Error;
+		}
+		assert.ok(caught);
+		const resultMsg = webviewMessages.find(
+			(m: any) => m.type === "provider-auth-check-result",
+		);
+		assert.ok(!resultMsg, "no result message on failure");
+		assert.ok(webviewMessages.some((m: any) => m.type === "error"));
 	});
 
 	test("installPackage success", async () => {
@@ -1188,6 +1293,107 @@ suite("MessageHandler", () => {
 		});
 		assert.deepStrictEqual(provider.calls.removeAuth[0], ["openai"]);
 		assert.strictEqual(result.success, true);
+	});
+
+	test("loginProvider routes to provider.loginProvider", async () => {
+		const result = await handler.handle({
+			type: "loginProvider",
+			data: { provider: "anthropic" },
+		});
+		assert.deepStrictEqual(provider.calls.loginProvider[0], ["anthropic"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("loginProvider validates the provider payload", async () => {
+		const result = await handler.handle({
+			type: "loginProvider",
+			data: {},
+		});
+		assert.ok(result.error, "missing provider should be rejected");
+		assert.strictEqual(provider.calls.loginProvider, undefined);
+	});
+
+	test("loginProvider failure posts a string error to the webview", async () => {
+		provider.loginProvider = () =>
+			Promise.reject(new Error("OAuth not supported"));
+		const result = await handler.handle({
+			type: "loginProvider",
+			data: { provider: "anthropic" },
+		});
+		assert.strictEqual(result.success, true);
+		await new Promise((r) => setImmediate(r));
+		const msg = webviewMessages.find(
+			(m: any) => m.type === "provider-login-result",
+		);
+		assert.ok(msg, "expected a provider-login-result message");
+		assert.strictEqual(msg.data.success, false);
+		assert.strictEqual(msg.data.error, "OAuth not supported");
+	});
+
+	test("cancelProviderLogin routes to provider.cancelProviderLogin", async () => {
+		const result = await handler.handle({
+			type: "cancelProviderLogin",
+			data: { provider: "anthropic" },
+		});
+		assert.deepStrictEqual(provider.calls.cancelProviderLogin[0], [
+			"anthropic",
+		]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("providerLoginPromptResponse routes value answers", async () => {
+		const result = await handler.handle({
+			type: "providerLoginPromptResponse",
+			data: {
+				provider: "anthropic",
+				promptId: "login-prompt-1",
+				value: "123-456",
+			},
+		});
+		assert.deepStrictEqual(provider.calls.resolveLoginPrompt[0], [
+			"anthropic",
+			"login-prompt-1",
+			"123-456",
+			false,
+		]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("providerLoginPromptResponse routes cancellations", async () => {
+		await handler.handle({
+			type: "providerLoginPromptResponse",
+			data: {
+				provider: "anthropic",
+				promptId: "login-prompt-2",
+				cancelled: true,
+			},
+		});
+		assert.deepStrictEqual(provider.calls.resolveLoginPrompt[0], [
+			"anthropic",
+			"login-prompt-2",
+			undefined,
+			true,
+		]);
+	});
+
+	test("openLoginUrl routes http(s) URLs to provider.openExternalUrl", async () => {
+		const result = await handler.handle({
+			type: "openLoginUrl",
+			data: { url: "https://auth.example/start" },
+		});
+		assert.deepStrictEqual(provider.calls.openExternalUrl[0], [
+			"https://auth.example/start",
+		]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("openLoginUrl rejects non-http URLs", async () => {
+		const result = await handler.handle({
+			type: "openLoginUrl",
+			data: { url: "file:///etc/passwd" },
+		});
+		assert.ok(result.error, "non-http URLs should be rejected");
+		assert.strictEqual(provider.calls.openExternalUrl, undefined);
 	});
 
 	test("addProvider routes to provider.addProvider with config", async () => {

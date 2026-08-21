@@ -22,7 +22,7 @@
 - TypeScript `6.0.3` with NodeNext/ESM-style resolution for extension sources
 - Svelte `5.56.2` + Vite `8.0.16` for the webview UI
 - ESLint `10.4.1`, esbuild `0.28.0`, Mocha `11.7.6`, `@vscode/test-electron` `2.5.2`
-- Runtime dependency: `@earendil-works/pi-coding-agent` `0.78.1` loaded externally at runtime
+- Runtime dependency: `@earendil-works/pi-coding-agent` `^0.84.2` devDependency (types + tests), resolved at runtime from the user's globally installed PI CLI via `src/loader.cjs`
 - Package manager: `pnpm@11.8.0`
 
 ## Project Structure

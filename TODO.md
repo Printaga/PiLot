@@ -1,16 +1,13 @@
 - Slash command support for packages
+- System prompt display/extend/replace
 - Improve default prompt templates
 - Prompt auto-enhancement button
-- More settings exposed in GUI
 - Fix session naming
-- Detect custom tools
+- Detect all custom tools
 - GUI rules management
-- Persistant expand
-- Pause packages
+- Persistant chat expand
 - Session tabs
 - Diff view
-- Search
-- Oauth authentication
-- Detect standalone extentions
-- Fix favourite remember feature
-- Latest version compatibility
+- Search chat history
+- Detect standalone packages
+- Pause packages (temp disable)

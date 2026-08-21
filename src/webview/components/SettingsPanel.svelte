@@ -5,13 +5,22 @@
 		autoContext: boolean;
 		appVersion: string;
 		thinkingLevel: string;
+		availableThinkingLevels?: string[];
+		showCacheMissNotices?: boolean;
 		onAutoContextChange: (value: boolean) => void;
 		onThinkingLevelChange: (level: string) => void;
+		onShowCacheMissNoticesChange?: (value: boolean) => void;
 	}
 
-	let { autoContext, appVersion, thinkingLevel, onAutoContextChange, onThinkingLevelChange }: Props = $props();
+	let { autoContext, appVersion, thinkingLevel, availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], showCacheMissNotices = false, onAutoContextChange, onThinkingLevelChange, onShowCacheMissNoticesChange }: Props = $props();
 
-  const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const allThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const levels = $derived.by(() => (availableThinkingLevels && availableThinkingLevels.length > 0 ? availableThinkingLevels : allThinkingLevels));
+  // The level actually applied, clamped to what the selected model supports.
+  const effectiveThinkingLevel = $derived.by(() => {
+    if (levels.includes(thinkingLevel)) return thinkingLevel;
+    return levels[0] ?? 'off';
+  });
 
 	function handleThinkingLevelChange(level: string) {
 		onThinkingLevelChange(level);
@@ -19,6 +28,12 @@
 
 	function handleAutoContextChange() {
 		onAutoContextChange(!autoContext);
+	}
+
+	function handleShowCacheMissNoticesChange() {
+		if (onShowCacheMissNoticesChange) {
+			onShowCacheMissNoticesChange(!showCacheMissNotices);
+		}
 	}
 
 	function showTour() {
@@ -72,6 +87,26 @@
 					<span class="toggle-slider"></span>
 				</label>
 			</div>
+
+			<div class="setting-item">
+				<div class="setting-info">
+					<div class="setting-label-row">
+						<span class="setting-label">Cache Miss Notices</span>
+						<HelpTooltip text="When enabled, PI surfaces cache-miss notices so you can see when a cached response could not be reused." title="Cache Miss Notices" />
+					</div>
+					<span class="setting-description">
+						Show cache-miss notices in replies
+					</span>
+				</div>
+				<label class="toggle">
+					<input
+						type="checkbox"
+						checked={showCacheMissNotices}
+						onchange={handleShowCacheMissNoticesChange}
+					/>
+					<span class="toggle-slider"></span>
+				</label>
+			</div>
 		</section>
 
 		<section class="settings-section">
@@ -82,10 +117,10 @@
 			</div>
 
 			<div class="thinking-options">
-				{#each thinkingLevels as level}
+				{#each levels as level}
 					<button
 						class="thinking-option"
-						class:selected={thinkingLevel === level}
+						class:selected={effectiveThinkingLevel === level}
 						onclick={() => handleThinkingLevelChange(level)}
 					>
 						<span class="level-name">{level}</span>

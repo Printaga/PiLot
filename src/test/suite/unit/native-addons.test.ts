@@ -8,6 +8,8 @@ import {
 	describeABIStatus,
 } from "../../../utils/native-addons.js";
 
+// `out/test` emits CommonJS, where `__dirname` is provided by Node.
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function createFakeBetterSqlite3(baseDir: string, abi?: number): string {

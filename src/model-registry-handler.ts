@@ -5,14 +5,58 @@ import {
 	type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { type BinaryService } from "./binary-service.js";
+import { type ThinkingLevel } from "./webview/types/index.js";
 import { execFileAsync } from "./utils/shell.js";
 
-type RegistryModel = { provider: string; id: string; name?: string };
+/**
+ * Pi's thinking levels in ascending intensity. "off" disables reasoning.
+ * Shared with the extension host so the webview and host agree on ordering.
+ */
+export const THINKING_LEVELS: ThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
+
+/**
+ * Maps a pi thinking level to a provider/model-specific value. A `null` value
+ * marks the level as unsupported by that model; missing keys fall back to the
+ * provider default (i.e. supported).
+ */
+export type ThinkingLevelMap = Partial<Record<string, string | null>>;
+
+type RegistryModel = {
+	provider: string;
+	id: string;
+	name?: string;
+	reasoning?: boolean;
+	thinkingLevelMap?: ThinkingLevelMap;
+};
 
 export interface ModelItem {
 	id: string;
 	provider: string;
 	name: string;
+	/** Thinking levels the model actually supports, derived from its SDK model. */
+	availableThinkingLevels?: ThinkingLevel[];
+}
+
+/**
+ * Derive the thinking levels a model supports from its SDK metadata.
+ * A model with `reasoning: false` only supports "off"; otherwise any level not
+ * explicitly mapped to `null` is considered supported.
+ */
+export function deriveAvailableThinkingLevels(
+	model: { reasoning?: boolean; thinkingLevelMap?: ThinkingLevelMap },
+): ThinkingLevel[] {
+	if (model.reasoning === false) return ["off"];
+	const map = model.thinkingLevelMap;
+	if (!map) return [...THINKING_LEVELS];
+	return THINKING_LEVELS.filter((level) => map[level] !== null);
 }
 
 export interface ModelRegistryHandlerDeps {
@@ -50,6 +94,21 @@ export class ModelRegistryHandler {
 		return this.deps.favoriteModels;
 	}
 
+	/** Sync the live favorites list from the host into the handler. */
+	setFavorites(favorites: string[]): void {
+		this.deps.favoriteModels = favorites;
+	}
+
+	/** Sync the live available-models list from the host into the handler. */
+	setAvailableModels(models: ModelItem[]): void {
+		this.deps.availableModels = models;
+	}
+
+	/** Sync the live current-model id from the host into the handler. */
+	setCurrentModelId(id: string | null): void {
+		this.deps.currentModelId = id;
+	}
+
 	async getMergedModels(): Promise<RegistryModel[]> {
 		const modelRegistry = this.deps.getModelRegistry();
 		if (!modelRegistry) return [];
@@ -74,6 +133,7 @@ export class ModelRegistryHandler {
 				id: m.provider + "/" + m.id,
 				provider: m.provider,
 				name: m.name || m.id,
+				availableThinkingLevels: deriveAvailableThinkingLevels(m),
 			}))
 			.sort(
 				(a, b) =>
@@ -86,7 +146,9 @@ export class ModelRegistryHandler {
 		if (!modelRegistry) return;
 		// Reload models from disk (re-reads models.json and re-applies registered providers).
 		// Without this, getMergedModels() returns stale data from initial construction.
-		modelRegistry.refresh();
+		// Must be awaited: SDK 0.84+ reloads models.json asynchronously in refresh()
+		// and synchronous getAll()/getAvailable() reads race it otherwise.
+		await modelRegistry.refresh();
 		const models = await this.getMergedModels();
 		this.deps.availableModels = this.buildModelList(models);
 		this.deps.notifyWebview({

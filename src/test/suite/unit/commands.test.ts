@@ -2,13 +2,13 @@
 
 import * as assert from "node:assert";
 import * as vscode from "vscode";
+import { registerCommands } from "../../../commands/index.js";
 import {
 	logDiagnostics,
 	setDiagnosticsEnabled,
-	registerCommands,
 	resetDiagnosticsStateForTests,
 	getDiagnosticsBuffer,
-} from "../../../commands/index.js";
+} from "../../../commands/diagnostics.js";
 import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 
 suite("commands: logDiagnostics", () => {

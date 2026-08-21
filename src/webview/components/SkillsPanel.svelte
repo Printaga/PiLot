@@ -60,16 +60,21 @@
     }, 2000);
   }
 
+  // Normalize a raw skill record into the panel's SkillInfo shape
+  function toSkillInfo(s: any): SkillInfo {
+    return {
+      name: s.name,
+      description: s.description || "",
+      sourceName: s.sourceName || null,
+      path: s.path || "",
+      sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
+    };
+  }
+
   // Apply skills from sessionResources prop (initial load + updates from parent)
   function applySessionResources(data: any) {
     if (data?.skills) {
-      skills = data.skills.map((s: any) => ({
-        name: s.name,
-        description: s.description || "",
-        sourceName: s.sourceName || null,
-        path: s.path || "",
-        sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
-      }));
+      skills = data.skills.map(toSkillInfo);
       isLoading = false;
     }
   }
@@ -151,24 +156,12 @@
     function handleMessage(event: MessageEvent) {
       const { type, data } = event.data;
       if (type === "skills-list") {
-        skills = (data?.skills || []).map((s: any) => ({
-          name: s.name,
-          description: s.description || "",
-          sourceName: s.sourceName || null,
-          path: s.path || "",
-          sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
-        }));
+        skills = (data?.skills || []).map(toSkillInfo);
         isLoading = false;
       }
       if (type === "session-resources") {
         if (data?.skills) {
-          skills = data.skills.map((s: any) => ({
-            name: s.name,
-            description: s.description || "",
-            sourceName: s.sourceName || null,
-            path: s.path || "",
-            sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
-          }));
+          skills = data.skills.map(toSkillInfo);
           isLoading = false;
         }
       }

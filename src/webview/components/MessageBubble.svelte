@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ImageContent, Message, ToolCallMessage } from "../types/index";
+  import MermaidDiagram from "./MermaidDiagram.svelte";
 
   interface CodeBlock {
     language: string;
@@ -752,7 +753,7 @@
               {@html renderMarkdown(part, searchRegex)}
             {:else if part.isMermaid}
               <div class="mermaid-container">
-                <pre class="mermaid">{part.code}</pre>
+                <MermaidDiagram code={part.code} />
                 <span class="mermaid-label">Diagram</span>
               </div>
             {:else}

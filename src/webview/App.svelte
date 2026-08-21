@@ -34,6 +34,16 @@
   let favoriteModels = $state<string[]>([]);
   let thinkingLevel = $state<string>("medium");
   let autoContext = $state(true);
+  let showCacheMissNotices = $state(false);
+
+  // Thinking levels supported by the currently selected model (falls back to the
+  // full set when the model carries no capability metadata).
+  const ALL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const availableThinkingLevels = $derived.by(() => {
+    const m = models.find((x) => x.id === currentModel);
+    const a = m?.availableThinkingLevels;
+    return Array.isArray(a) && a.length > 0 ? a : ALL_THINKING_LEVELS;
+  });
   let contextPercent = $state<number | null>(null);
   let contextTokens = $state<number | null>(null);
   let contextWindow = $state(0);
@@ -50,6 +60,8 @@
       configured: boolean;
       status: string;
       custom: boolean;
+      credentialType?: "oauth" | "api_key" | null;
+      oauthLogin?: boolean;
     }>
   >([]);
   let isListening = $state(false);
@@ -122,6 +134,7 @@
 
       window.addEventListener("message", handleVSCodeMessage);
       vscode.postMessage({ type: "ready" });
+      vscode.postMessage({ type: "getPiUISettings" });
 
       return () => {
         window.removeEventListener("message", handleVSCodeMessage);
@@ -345,6 +358,12 @@
 
       case "settings-response":
         toolPreset = data?.toolPreset ?? null;
+        break;
+
+      case "pi-settings-changed":
+        if (typeof data?.showCacheMissNotices === "boolean") {
+          showCacheMissNotices = data.showCacheMissNotices;
+        }
         break;
 
       case "switchTab":
@@ -1159,6 +1178,7 @@
     {piCliVersion}
     providerName={currentModel?.split("/")[0] || ""}
     {thinkingLevel}
+    {availableThinkingLevels}
     onNewSession={handleNewSession}
     {favoriteModels}
     {models}
@@ -1386,11 +1406,20 @@
           {autoContext}
           {appVersion}
           {thinkingLevel}
+          {availableThinkingLevels}
           onAutoContextChange={(value) => {
             autoContext = value;
             sendMessage({ type: "setAutoContext", data: { enabled: value } });
           }}
           onThinkingLevelChange={handleSetThinkingLevel}
+          {showCacheMissNotices}
+          onShowCacheMissNoticesChange={(value) => {
+            showCacheMissNotices = value;
+            sendMessage({
+              type: "setPiUISetting",
+              data: { key: "showCacheMissNotices", value },
+            });
+          }}
         />
       {/if}
     </main>

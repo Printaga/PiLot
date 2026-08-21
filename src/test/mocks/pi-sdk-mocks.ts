@@ -86,20 +86,31 @@ export function createMockAuthStorage(): unknown {
 }
 
 export function createMockModelRuntime(): ModelRuntime {
-	// Defaults match the SDK 0.80 surface used by PiAgentProvider:
+	// Defaults match the SDK 0.80+ surface used by PiAgentProvider:
 	// setRuntimeApiKey/removeRuntimeApiKey for auth management,
-	// refresh for disk re-reads (auth.json + models.json).
+	// refresh for disk re-reads (auth.json + models.json). OAuth login/
+	// logout exist on 0.84; stub them so tests that do not exercise the
+	// flow still type-check and fail with clear errors if they do.
 	return {
 		setRuntimeApiKey: async (_provider: string, _apiKey: string) => {},
 		removeRuntimeApiKey: async (_provider: string) => {},
 		refresh: async () => ({}),
+		checkAuth: async (_provider: string) => undefined,
+		isUsingOAuth: () => false,
+		getProviders: () => [],
+		getRegisteredProviderIds: () => [],
+		login: async (_providerId: string, _type: string, _interaction: unknown) => {
+			throw new Error("login not stubbed in this test");
+		},
+		logout: async (_providerId: string) => {},
 	} as unknown as ModelRuntime;
 }
 
 export function createMockModelRegistry(): ModelRegistry {
+	// getAll() is synchronous on the real ModelRegistry; getAvailable() is async.
 	return {
 		getAvailable: async () => [],
-		getAll: async () => [],
+		getAll: () => [],
 	} as unknown as ModelRegistry;
 }
 
@@ -107,8 +118,12 @@ export function createMockSettingsManager(): SettingsManager {
 	return {
 		getDefaultModel: () => null,
 		getDefaultProvider: () => "",
+		getDefaultThinkingLevel: () => "medium",
+		setDefaultThinkingLevel: async () => {},
 		getEnabledModels: () => [],
 		setEnabledModels: async () => {},
+		getShowCacheMissNotices: () => false,
+		setShowCacheMissNotices: () => {},
 		flush: async () => {},
 		get: () => undefined,
 		update: async () => {},

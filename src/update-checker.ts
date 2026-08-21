@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { VERSION, getAgentDir, DefaultPackageManager, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PiAgentProvider } from "./pi-agent-provider.js";
-import { logDiagnostics } from "./commands/index.js";
+import { logDiagnostics } from "./commands/diagnostics.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ export async function showUpdateNotification(
 /**
  * Open a VS Code terminal to run `pi update`.
  */
-export async function runPiUpdateInTerminal(): Promise<void> {
+async function runPiUpdateInTerminal(): Promise<void> {
 	const terminal = vscode.window.createTerminal({
 		name: "PI Update",
 		message: "Running pi update…",
@@ -202,7 +202,7 @@ export async function runPiUpdateInTerminal(): Promise<void> {
 /**
  * Open a VS Code terminal to run `pi update --extensions`.
  */
-export async function runPiExtensionsUpdateInTerminal(): Promise<void> {
+async function runPiExtensionsUpdateInTerminal(): Promise<void> {
 	const terminal = vscode.window.createTerminal({
 		name: "PI Extension Update",
 		message: "Running pi update --extensions…",

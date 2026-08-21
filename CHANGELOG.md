@@ -2,19 +2,25 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [2.4.0] - 2026-08-20
+## [2.4.0] - 2026-08-21
 
 ### Added
 
 - Support for adding custom OpenAI-compatible providers in the GUI.
+- OAuth provider login support
+- Mermaid diagram support
 
 ### Changed
 
 - The thinking level setting now actually considers the available thinking levels for the selected model.
+- Several minor adjustments to keep pace with the past 30 days of PI CLI changes.
+- Migrated PiLot to the SDK 0.84.x API surface.
 
 ### Fixed
 
 - Fixed a bug where deleting a provider from the GUI did not actually remove the provider from PI.
+- Fixed favorite models not persisting between app restarts.
+- Fixed 3 minor code quality issues found by Fallow
 
 ## [2.3.1] - 2026-07-19
 

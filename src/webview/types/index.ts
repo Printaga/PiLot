@@ -47,6 +47,8 @@ export interface Model {
 	id: string; // "provider/id"
 	provider: string;
 	name: string;
+	/** Thinking levels this model supports; absent when unknown (full set assumed). */
+	availableThinkingLevels?: ThinkingLevel[];
 }
 
 /** Session list item */

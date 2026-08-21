@@ -7,6 +7,25 @@
 		configured: boolean;
 		status: string;
 		custom: boolean;
+		credentialType?: "oauth" | "api_key" | null;
+		/** Provider offers an interactive OAuth login flow (PI CLI /login parity). */
+		oauthLogin?: boolean;
+	}
+
+	interface LoginPromptState {
+		promptId: string;
+		type: 'text' | 'secret' | 'select' | 'manual_code';
+		message: string;
+		placeholder?: string;
+		options?: Array<{ id: string; label: string; description?: string }>;
+	}
+
+	interface LoginState {
+		message: string;
+		instructions?: string;
+		authUrl?: string;
+		userCode?: string;
+		prompt: LoginPromptState | null;
 	}
 
 	interface Props {
@@ -18,6 +37,12 @@
 	let editingProvider = $state<string | null>(null);
 	let apiKeyInput = $state('');
 	let showApiKey = $state(false);
+	// provider -> last live auth-check result
+	let authCheckResults = $state<Record<string, { configured: boolean; credentialType: "oauth" | "api_key" | null }>>(
+		{}
+	);
+	// provider -> check in flight
+	let checkingProvider = $state<Record<string, boolean>>({});
 
 	let showAddForm = $state(false);
 	let newProviderId = $state('');
@@ -31,6 +56,13 @@
 	// only to THIS request's success/error replies, not unrelated host messages.
 	let pendingAddId = $state<string | null>(null);
 	let pendingRequestId = $state<string | null>(null);
+
+	// ── OAuth login state (mirrors the PI CLI's /login dialog) ────────────────
+	let loginStates = $state<Record<string, LoginState>>({});
+	let loginResults = $state<
+		Record<string, { success: boolean; message?: string; error?: string }>
+	>({});
+	let promptInputs = $state<Record<string, string>>({});
 
 	const sortedProviders = $derived.by(() => {
 		const configured = providers
@@ -69,8 +101,78 @@
 			}
 		};
 		window.addEventListener('message', onHostMessage);
-		return () => window.removeEventListener('message', onHostMessage);
+
+		const onCheckResult = (event: MessageEvent) => {
+			const msg = event.data;
+			if (!msg || msg.type !== 'provider-auth-check-result') return;
+			const d = msg.data;
+			if (!d || typeof d.provider !== 'string') return;
+			if (typeof d.configured === 'boolean') {
+				authCheckResults[d.provider] = {
+					configured: d.configured,
+					credentialType: d.credentialType ?? null,
+				};
+			}
+			checkingProvider[d.provider] = false;
+		};
+		window.addEventListener('message', onCheckResult);
+
+		// OAuth login flow: progress events, prompts awaiting an answer, and the
+		// final result all arrive as provider-login-* messages from the host.
+		const onLoginMessage = (event: MessageEvent) => {
+			const msg = event.data;
+			if (!msg || !msg.type) return;
+			const d = msg.data ?? {};
+			if (msg.type === 'provider-login-event' && typeof d.provider === 'string') {
+				const login = loginStates[d.provider] ?? { message: '', prompt: null };
+				const ev = d.event ?? {};
+				if (ev.type === 'auth_url') {
+					login.authUrl = ev.url;
+					login.instructions = ev.instructions ?? undefined;
+					login.message = 'Authorization required — your browser opened automatically.';
+				} else if (ev.type === 'device_code') {
+					login.userCode = ev.userCode;
+					login.authUrl = ev.verificationUri;
+					login.message = 'Waiting for authentication…';
+				} else if (ev.type === 'info' || ev.type === 'progress') {
+					login.message = ev.message ?? '';
+				}
+				loginStates[d.provider] = login;
+			} else if (
+				msg.type === 'provider-login-prompt' &&
+				typeof d.provider === 'string' &&
+				d.prompt
+			) {
+				const login = loginStates[d.provider] ?? { message: '', prompt: null };
+				login.prompt = d.prompt as LoginPromptState;
+				loginStates[d.provider] = login;
+				promptInputs[d.provider] = '';
+			} else if (
+				msg.type === 'provider-login-result' &&
+				typeof d.provider === 'string'
+			) {
+				delete loginStates[d.provider];
+				if (d.success !== true || d.message) {
+					loginResults[d.provider] = {
+						success: d.success === true,
+						message: d.message,
+						error: d.error
+					};
+				}
+			}
+		};
+		window.addEventListener('message', onLoginMessage);
+		return () => {
+			window.removeEventListener('message', onHostMessage);
+			window.removeEventListener('message', onCheckResult);
+			window.removeEventListener('message', onLoginMessage);
+		};
 	});
+
+	function checkAuth(provider: string) {
+		checkingProvider[provider] = true;
+		sendMessage({ type: 'checkProviderAuth', data: { provider } });
+	}
 
 	function sendMessage(msg: any) {
 		if (typeof (window as any).vscode?.postMessage === 'function') {
@@ -162,6 +264,53 @@
 		});
 	}
 
+	// ── OAuth login actions ────────────────────────────────────────────────────
+
+	function startLogin(provider: string) {
+		delete loginResults[provider];
+		loginStates[provider] = { message: 'Starting OAuth login…', prompt: null };
+		sendMessage({ type: 'loginProvider', data: { provider } });
+	}
+
+	function cancelLogin(provider: string) {
+		sendMessage({ type: 'cancelProviderLogin', data: { provider } });
+	}
+
+	function respondPrompt(provider: string, promptId: string, value: string) {
+		const login = loginStates[provider];
+		if (login) login.prompt = null;
+		sendMessage({
+			type: 'providerLoginPromptResponse',
+			data: { provider, promptId, value }
+		});
+	}
+
+	function cancelPrompt(provider: string, promptId: string) {
+		const login = loginStates[provider];
+		if (login) login.prompt = null;
+		sendMessage({
+			type: 'providerLoginPromptResponse',
+			data: { provider, promptId, cancelled: true }
+		});
+	}
+
+	function openLoginUrl(url: string) {
+		sendMessage({ type: 'openLoginUrl', data: { url } });
+	}
+
+	async function copyText(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			// Clipboard API unavailable in this webview; the text is also shown
+			// inline for manual copy.
+		}
+	}
+
+	function dismissLoginResult(provider: string) {
+		delete loginResults[provider];
+	}
+
 	function statusLabel(status: string): string {
 		switch (status) {
 			case 'stored': return 'API Key saved';
@@ -210,6 +359,98 @@
 			</div>
 		</div>
 	</div>
+
+	{#each Object.entries(loginStates) as [providerId, login] (providerId)}
+		{@const providerName = providers.find((p) => p.provider === providerId)?.name ?? providerId}
+		<div class="auth-card login-card">
+			<div class="login-body">
+				<div class="login-title">
+					<span class="auth-name">Sign in to {providerName}</span>
+					<span class="login-badge">OAuth</span>
+				</div>
+				{#if login.message}
+					<div class="login-message">{login.message}</div>
+				{/if}
+				{#if login.instructions}
+					<div class="login-instructions">{login.instructions}</div>
+				{/if}
+				{#if login.userCode}
+					<div class="login-device-code">
+						<span class="code">{login.userCode}</span>
+						<button class="btn small" onclick={() => copyText(login.userCode ?? '')}>Copy code</button>
+					</div>
+				{/if}
+				{#if login.authUrl}
+					<div class="login-url">
+						<span class="url">{login.authUrl}</span>
+						<button class="btn small" onclick={() => openLoginUrl(login.authUrl ?? '')}>Open</button>
+					</div>
+				{/if}
+				{#if login.prompt}
+					<div class="login-prompt">
+						<div class="prompt-message">{login.prompt.message}</div>
+						{#if login.prompt.type === 'select'}
+							<div class="prompt-options">
+								{#each login.prompt.options ?? [] as opt (opt.id)}
+									<button
+										class="btn small"
+										onclick={() => respondPrompt(providerId, login.prompt?.promptId ?? '', opt.id)}
+									>
+										{opt.label}{opt.description ? ` — ${opt.description}` : ''}
+									</button>
+								{/each}
+							</div>
+						{:else}
+							<div class="input-group">
+								<input
+									type={login.prompt.type === 'secret' ? 'password' : 'text'}
+									bind:value={promptInputs[providerId]}
+									placeholder={login.prompt.placeholder ?? ''}
+									onkeydown={(e) => {
+										if (e.key === 'Enter') {
+											respondPrompt(providerId, login.prompt?.promptId ?? '', promptInputs[providerId] ?? '');
+										}
+										}}
+								/>
+							</div>
+							<div class="prompt-actions">
+								<button
+									class="btn primary small"
+									onclick={() => respondPrompt(providerId, login.prompt?.promptId ?? '', promptInputs[providerId] ?? '')}
+								>Submit</button
+								>
+								<button
+									class="btn small"
+									onclick={() => cancelPrompt(providerId, login.prompt?.promptId ?? '')}
+								>Cancel</button
+								>
+							</div>
+						{/if}
+					</div>
+				{/if}
+				<div class="login-actions">
+					<button class="btn small" onclick={() => cancelLogin(providerId)}>Cancel login</button>
+				</div>
+			</div>
+		</div>
+	{/each}
+
+	{#each Object.entries(loginResults) as [providerId, res] (providerId)}
+		{@const providerName = providers.find((p) => p.provider === providerId)?.name ?? providerId}
+		<div class="auth-card login-card" class:failed={!res.success}>
+			<div class="login-body">
+				<div class="login-title">
+					<span class="auth-name">{res.success ? 'Logged in to' : 'Login failed:'} {providerName}</span>
+					<button class="icon-btn" onclick={() => dismissLoginResult(providerId)} title="Dismiss">✕</button>
+				</div>
+				{#if res.error}
+					<div class="login-message error">{res.error}</div>
+				{:else if res.message}
+					<div class="login-message">{res.message}</div>
+				{/if}
+			</div>
+		</div>
+	{/each}
 
 	{#if showAddForm}
 		<div class="auth-card add-provider-card">
@@ -311,6 +552,11 @@
 						{#if p.custom}
 							<span class="custom-badge">Custom</span>
 						{/if}
+						{#if authCheckResults[p.provider]?.credentialType === 'oauth'}
+							<span class="auth-badge oauth">OAuth</span>
+						{:else if (authCheckResults[p.provider]?.credentialType ?? p.credentialType) === 'api_key'}
+							<span class="auth-badge api-key">API key</span>
+						{/if}
 						<span class="auth-status" class:configured={p.configured}>
 							{statusLabel(p.status)}
 						</span>
@@ -372,6 +618,30 @@
 						>
 							{p.configured ? 'Update' : 'Configure'}
 						</button>
+						{#if p.oauthLogin}
+							{#if loginStates[p.provider]}
+								<button class="btn small" onclick={() => cancelLogin(p.provider)}>Cancel login</button>
+							{:else}
+								<button
+									class="btn small"
+									class:primary={!p.configured}
+									onclick={() => startLogin(p.provider)}
+										title="Sign in with your provider account (OAuth)"
+									>
+										Sign in
+									</button>
+							{/if}
+						{/if}
+						{#if p.configured}
+							<button
+								class="btn small"
+								onclick={() => checkAuth(p.provider)}
+								disabled={checkingProvider[p.provider]}
+								title="Verify credentials with the provider"
+							>
+								{checkingProvider[p.provider] ? 'Checking…' : 'Check auth'}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -458,6 +728,30 @@
 						>
 							{p.configured ? 'Update' : 'Configure'}
 						</button>
+						{#if p.oauthLogin}
+							{#if loginStates[p.provider]}
+								<button class="btn small" onclick={() => cancelLogin(p.provider)}>Cancel login</button>
+							{:else}
+								<button
+									class="btn small"
+									class:primary={!p.configured}
+									onclick={() => startLogin(p.provider)}
+										title="Sign in with your provider account (OAuth)"
+									>
+										Sign in
+									</button>
+							{/if}
+						{/if}
+						{#if p.configured}
+							<button
+								class="btn small"
+								onclick={() => checkAuth(p.provider)}
+								disabled={checkingProvider[p.provider]}
+								title="Verify credentials with the provider"
+							>
+								{checkingProvider[p.provider] ? 'Checking…' : 'Check auth'}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -704,5 +998,124 @@
 		color: var(--color-primary);
 		background: oklch(from var(--color-primary) l c h / 0.12);
 		border-radius: var(--radius-sm);
+	}
+
+	.auth-badge {
+		margin-left: var(--space-2);
+		padding: 1px 6px;
+		font-size: 9px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		border-radius: var(--radius-sm);
+	}
+	.auth-badge.oauth {
+		color: var(--color-primary);
+		background: oklch(from var(--color-primary) l c h / 0.12);
+	}
+	.auth-badge.api-key {
+		color: var(--color-warning);
+		background: oklch(from var(--color-warning) l c h / 0.12);
+	}
+
+	/* ── OAuth login cards ─────────────────────────────────────────────── */
+
+	.login-card {
+		align-items: flex-start;
+	}
+
+	.login-card.failed {
+		border-color: var(--color-error, #f14c4c);
+	}
+
+	.login-body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		width: 100%;
+	}
+
+	.login-title {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+	}
+
+	.login-badge {
+		padding: 1px 6px;
+		font-size: 9px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-primary);
+		background: oklch(from var(--color-primary) l c h / 0.12);
+		border-radius: var(--radius-sm);
+	}
+
+	.login-message {
+		font-size: var(--text-sm);
+		color: var(--color-text-muted);
+	}
+
+	.login-message.error {
+		color: var(--color-error, #f14c4c);
+	}
+
+	.login-instructions {
+		font-size: var(--text-sm);
+		color: var(--color-warning);
+	}
+
+	.login-device-code,
+	.login-url {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	.login-device-code .code {
+		font-family: var(--font-mono, monospace);
+		font-size: var(--text-lg);
+		font-weight: 700;
+		letter-spacing: 0.08em;
+	}
+
+	.login-url .url {
+		font-family: var(--font-mono, monospace);
+		font-size: var(--text-sm);
+		color: var(--color-primary);
+		word-break: break-all;
+	}
+
+	.login-prompt {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-2);
+		background: var(--color-surface-3, var(--color-surface-2));
+		border-radius: var(--radius-md);
+	}
+
+	.prompt-message {
+		font-size: var(--text-sm);
+	}
+
+	.prompt-options {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		align-items: stretch;
+	}
+
+	.prompt-actions {
+		display: flex;
+		gap: var(--space-2);
+	}
+
+	.login-actions {
+		display: flex;
+		justify-content: flex-end;
 	}
 </style>

@@ -33,7 +33,11 @@ import {
 import { BinaryService } from "./binary-service.js";
 import { FooterManager } from "./footer-manager.js";
 import { ExtensionUIContext } from "./extension-ui-context.js";
-import { ModelRegistryHandler } from "./model-registry-handler.js";
+import {
+	ModelRegistryHandler,
+	type ModelItem,
+	THINKING_LEVELS,
+} from "./model-registry-handler.js";
 import { PackageManager } from "./package-manager.js";
 import { SessionListManager, type SessionItem } from "./session-manager.js";
 
@@ -41,15 +45,47 @@ import { type EnrichedPackage } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
 import { serializeMessages } from "./message-serializer.js";
 
-const THINKING_LEVELS = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-] as const;
+// THINKING_LEVELS is imported from ./model-registry-handler.js so the host and
+// webview share a single ordered source of truth for the thinking-level list.
+
+// ── OAuth login interaction shapes ───────────────────────────────────────────
+// Structural mirrors of @earendil-works/pi-ai's AuthPrompt/AuthEvent (the SDK
+// entry point does not re-export them). Keep in sync with pi-ai 0.84.
+
+export type LoginPromptKind =
+	| "text"
+	| "secret"
+	| "select"
+	| "manual_code";
+
+export interface LoginPrompt {
+	type: LoginPromptKind;
+	message: string;
+	placeholder?: string;
+	options?: ReadonlyArray<{
+		id: string;
+		label: string;
+		description?: string;
+	}>;
+}
+
+export type LoginEvent =
+	| { type: "info"; message: string; links?: ReadonlyArray<{ url: string; label?: string }> }
+	| { type: "auth_url"; url: string; instructions?: string }
+	| {
+			type: "device_code";
+			userCode: string;
+			verificationUri: string;
+			intervalSeconds?: number;
+			expiresInSeconds?: number;
+	  }
+	| { type: "progress"; message: string };
+
+export interface LoginInteraction {
+	signal: AbortSignal;
+	prompt(prompt: LoginPrompt & { signal?: AbortSignal }): Promise<string>;
+	notify(event: LoginEvent): void;
+}
 
 export const piAgentProviderInternals = {
 	createAgentSession,
@@ -109,13 +145,17 @@ export class PiAgentProvider
 	private modelRefreshTimer?: ReturnType<typeof setInterval>;
 	private configFileWatcher?: FSWatcher;
 	private configFileWatcherTimer?: ReturnType<typeof setTimeout>;
-	private availableModels: Array<{
-		id: string;
-		provider: string;
-		name: string;
-	}> = [];
+	private availableModels: ModelItem[] = [];
 	private favoriteModels: string[] = [];
 	private currentModelId: string | null = null;
+	// In-flight OAuth logins (one per provider) and their unanswered webview
+	// prompts, keyed by prompt id.
+	private activeLogins = new Map<string, AbortController>();
+	private pendingLoginPrompts = new Map<
+		string,
+		{ provider: string; resolve: (value: string) => void; reject: (error: Error) => void }
+	>();
+	private loginPromptSeq = 0;
 	private _onDidChangeTreeData = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -278,16 +318,25 @@ export class PiAgentProvider
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
 
-			const models = await this.modelRegistryHandler.getMergedModels();
-			this.availableModels = this.modelRegistryHandler.buildModelList(models);
+			// Refresh the registry first so the model list is complete. Without
+			// this the handler's `deps.availableModels` stayed empty at startup,
+			// which made `toggleFavorite`'s guard silently reject new favorites
+			// and `syncFromCliModels` a no-op — favorites then appeared to be
+			// forgotten after reopening the app.
+			await this.modelRegistryHandler.refreshAvailableModels();
+			this.availableModels = this.modelRegistryHandler.getAvailableModels();
 
 			const savedFavorites = this.context.globalState.get<string[]>(
 				"favoriteModels",
 				[],
 			);
-			this.favoriteModels = savedFavorites.filter((pattern) =>
-				this.availableModels.some((m) => m.id === pattern),
-			);
+			// Keep every saved favorite verbatim. Previously favorites were
+			// filtered against the (possibly still-incomplete) registry at
+			// startup, dropping valid favorites and losing them on next open.
+			// The handler validates against the registry when a favorite is
+			// toggled, so we no longer need to prune here.
+			this.favoriteModels = [...savedFavorites];
+			this.modelRegistryHandler.setFavorites(this.favoriteModels);
 
 			// Merge with PI CLI scoped models (bidirectional sync)
 			this.modelRegistryHandler.syncFromCliModels().catch(() => {});
@@ -303,6 +352,9 @@ export class PiAgentProvider
 					null,
 				);
 			}
+
+			// Keep the handler's view of the current model in sync with the host.
+			this.modelRegistryHandler.setCurrentModelId(this.currentModelId);
 
 			this.isInitialized = true;
 
@@ -1252,6 +1304,45 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
+	/**
+	 * Read PI settings surfaced in the GUI (synchronized with the PI CLI/TUI).
+	 */
+	async getPiUISettings(): Promise<{ showCacheMissNotices: boolean }> {
+		if (!this.isInitialized || !this.settingsManager) {
+			await this.initialize();
+		}
+		if (!this.settingsManager) {
+			return { showCacheMissNotices: false };
+		}
+		return {
+			showCacheMissNotices: this.settingsManager.getShowCacheMissNotices(),
+		};
+	}
+
+	/**
+	 * Persist a PI setting from the GUI through the SDK SettingsManager, keeping
+	 * the value synchronized with the PI CLI/TUI.
+	 */
+	async setPiUISetting(
+		key: "showCacheMissNotices",
+		value: boolean,
+	): Promise<void> {
+		if (!this.isInitialized || !this.settingsManager) {
+			await this.initialize();
+		}
+		if (!this.settingsManager) {
+			throw new Error("Settings manager not initialized");
+		}
+		if (key === "showCacheMissNotices") {
+			this.settingsManager.setShowCacheMissNotices(value);
+		}
+		await this.settingsManager.flush();
+		this.notifyWebview({
+			type: "pi-settings-changed",
+			data: { [key]: value },
+		});
+	}
+
 	async navigateTree(nodeId: string) {
 		if (this.session) {
 			await this.session.navigateTree(nodeId);
@@ -1575,6 +1666,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.settingsManager.flush();
 		}
 
+		// The newly selected model may not support the previously active thinking
+		// level. Re-validate and clamp so the UI/session never hold an unsupported
+		// level for the current model.
+		const level = this.getThinkingLevel();
+		const available = this.getAvailableThinkingLevels(modelId);
+		if (!available.includes(level)) {
+			const clamped = this.clampThinkingLevel(level, available);
+			if (this.settingsManager) {
+				this.settingsManager.setDefaultThinkingLevel(clamped as any);
+				await this.settingsManager.flush();
+			}
+			this.notifyWebview({
+				type: "thinking-level-changed",
+				data: { level: clamped },
+			});
+		}
+
 		// Broadcast to webview
 		this.notifyWebview({ type: "model-changed", data: { modelId } });
 	}
@@ -1582,13 +1690,24 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	async setThinkingLevel(
 		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
 	) {
+		// Clamp to a level the currently selected model actually supports so we
+		// never send an unsupported level to the session or persist it.
+		const available = this.getAvailableThinkingLevels(this.currentModelId);
+		const clamped = this.clampThinkingLevel(level, available);
 		if (this.session) {
-			this.session.setThinkingLevel(level as any);
+			this.session.setThinkingLevel(clamped as any);
 		}
 		// Persist to settings.json so PI TUI reads same value
 		if (this.settingsManager) {
-			this.settingsManager.setDefaultThinkingLevel(level as any);
+			this.settingsManager.setDefaultThinkingLevel(clamped as any);
 			await this.settingsManager.flush();
+		}
+		if (clamped !== level) {
+			// Inform the UI when we had to adjust the requested level.
+			this.notifyWebview({
+				type: "thinking-level-changed",
+				data: { level: clamped },
+			});
 		}
 	}
 
@@ -1716,7 +1835,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.isInitialized) {
 			await this.initialize();
 		}
-		return this.availableModels;
+		return this.modelRegistryHandler.getAvailableModels();
 	}
 
 	/** @internal Exposed for the update checker and other extension internals. */
@@ -1767,8 +1886,41 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.config.thinkingLevel;
 	}
 
+	/**
+	 * Return the thinking levels the given model supports, falling back to the
+	 * full set when the model is unknown or carries no capability metadata.
+	 */
+	getAvailableThinkingLevels(modelId: string | null): ThinkingLevel[] {
+		if (!modelId) return [...THINKING_LEVELS];
+		const model = this.availableModels.find((m) => m.id === modelId);
+		const available = model?.availableThinkingLevels;
+		if (available && available.length > 0) return available;
+		return [...THINKING_LEVELS];
+	}
+
+	/** Clamp a requested level to the nearest level the model supports. */
+	private clampThinkingLevel(
+		level: ThinkingLevel,
+		available: ThinkingLevel[],
+	): ThinkingLevel {
+		if (available.includes(level)) return level;
+		const idx = THINKING_LEVELS.indexOf(level);
+		if (idx === -1 || available.length === 0) return available[0] ?? "off";
+		let best = available[0] ?? "off";
+		let bestDist = Infinity;
+		for (const a of available) {
+			const ai = THINKING_LEVELS.indexOf(a);
+			const dist = Math.abs(ai - idx);
+			if (dist < bestDist) {
+				bestDist = dist;
+				best = a;
+			}
+		}
+		return best;
+	}
+
 	getFavorites(): string[] {
-		return this.favoriteModels;
+		return this.modelRegistryHandler.getFavorites();
 	}
 
 	// Model methods delegated to modelRegistryHandler
@@ -1780,6 +1932,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			configured: boolean;
 			status: string;
 			custom: boolean;
+			credentialType: "oauth" | "api_key" | null;
+			oauthLogin: boolean;
 		}>
 	> {
 		if (!this.isInitialized || !this.modelRegistry) {
@@ -1794,6 +1948,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			configured: boolean;
 			status: string;
 			custom: boolean;
+			credentialType: "oauth" | "api_key" | null;
+			oauthLogin: boolean;
 		}> = [];
 
 		// Seed from any model's provider (builtins/config/extension that expose models).
@@ -1804,9 +1960,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// providers, and extension-registered providers — even when they expose no
 		// models. This is how the PI TUI lists custom providers such as Kilo Code,
 		// which otherwise never appear in the GUI provider list.
+		const oauthProviders = new Set<string>();
 		if (this.modelRuntime) {
 			for (const provider of this.modelRuntime.getProviders()) {
 				seen.add(provider.id);
+				// Providers offering an OAuth login flow (the PI CLI lists these for
+				// its /login provider selector).
+				if ((provider as { auth?: { oauth?: unknown } }).auth?.oauth) {
+					oauthProviders.add(provider.id);
+				}
 			}
 		}
 
@@ -1821,6 +1983,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			const displayName = this.modelRegistry.getProviderDisplayName(
 				providerId,
 			);
+			const isOAuth =
+				typeof this.modelRuntime?.isUsingOAuth === "function"
+					? this.modelRuntime.isUsingOAuth(providerId)
+					: false;
 			result.push({
 				provider: providerId,
 				name: displayName || providerId,
@@ -1829,10 +1995,40 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					authStatus.source ||
 					(authStatus.configured ? "configured" : "not_configured"),
 				custom: customIds.has(providerId),
+				credentialType: isOAuth
+					? "oauth"
+					: authStatus.configured
+						? "api_key"
+						: null,
+				oauthLogin: oauthProviders.has(providerId),
 			});
 		}
 
 		return result.sort((a, b) => a.provider.localeCompare(b.provider));
+	}
+
+	/**
+	 * Run a live credential check for a single provider via the SDK's
+	 * ModelRuntime.checkAuth(). Returns the resolved auth method and whether
+	 * credentials are configured. Never returns credential material.
+	 */
+	async checkProviderAuth(providerId: string): Promise<{
+		provider: string;
+		configured: boolean;
+		credentialType: "oauth" | "api_key" | null;
+	}> {
+		if (!this.isInitialized || !this.modelRuntime) {
+			await this.initialize();
+		}
+		if (!this.modelRuntime) {
+			throw new Error("Model runtime not initialized");
+		}
+		const authCheck = await this.modelRuntime.checkAuth(providerId);
+		return {
+			provider: providerId,
+			configured: authCheck !== undefined,
+			credentialType: authCheck?.type ?? null,
+		};
 	}
 
 	/**
@@ -1883,6 +2079,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		await this.modelRegistryHandler.refreshAvailableModels();
+		// Keep the provider's local copy in sync so internal callers
+		// (getAvailableThinkingLevels, cycleModel) see the refreshed list.
+		this.availableModels = this.modelRegistryHandler.getAvailableModels();
 		// Send the refreshed model list so the webview UI can reflect changes
 		this.notifyWebview({
 			type: "models-updated",
@@ -1902,7 +2101,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
 		await this.modelRuntime.setRuntimeApiKey(provider, apiKey);
-		await this.modelRegistryHandler.refreshAvailableModels();
+		await this.refreshModels();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
@@ -1937,6 +2136,26 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const filePath = this.getModelsJsonPath();
 		await fs.mkdir(path.dirname(filePath), { recursive: true });
 		await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf-8");
+	}
+
+	/**
+	 * Re-read models.json so the composed provider set (config + builtins +
+	 * extensions) matches disk after add/removeProvider.
+	 *
+	 * SDK 0.84 removed `ModelRuntime.reloadConfig()`; `refresh()` now reloads
+	 * models.json itself. Feature-detect so we keep working against both the
+	 * 0.80.x and 0.84.x runtimes resolved by the loader.
+	 */
+	private async reloadRuntimeConfig(): Promise<void> {
+		const runtime = this.modelRuntime as (ModelRuntime & {
+			reloadConfig?: () => Promise<void>;
+		}) | undefined;
+		if (!runtime) return;
+		if (typeof runtime.reloadConfig === "function") {
+			await runtime.reloadConfig();
+		} else {
+			await runtime.refresh();
+		}
 	}
 
 	/**
@@ -1991,7 +2210,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// Re-read disk so the composed set (config + builtins + extensions) is
 		// authoritative. reloadConfig also composes config providers from models.json.
-		await this.modelRuntime.reloadConfig();
+		await this.reloadRuntimeConfig();
 
 		// Best-effort: keep an in-memory registration so the provider is usable
 		// this session even if the models.json write did not take effect.
@@ -2009,7 +2228,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			);
 		}
 
-		await this.modelRegistryHandler.refreshAvailableModels();
+		await this.refreshModels();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
@@ -2050,9 +2269,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.modelRuntime.unregisterProvider(id);
 
 		// Re-read disk so the composed provider set is authoritative.
-		await this.modelRuntime.reloadConfig();
+		await this.reloadRuntimeConfig();
 
-		await this.modelRegistryHandler.refreshAvailableModels();
+		await this.refreshModels();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
@@ -2065,13 +2284,223 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
-		await this.modelRuntime.removeRuntimeApiKey(provider);
-		await this.modelRegistryHandler.refreshAvailableModels();
+		// OAuth credentials live in the SDK credential store (auth.json); only
+		// logout() removes them — parity with the PI CLI's /logout. API-key
+		// providers keep the previous behavior (drop the runtime override).
+		const runtime = this.modelRuntime as ModelRuntime & {
+			logout?: (providerId: string) => Promise<void>;
+		};
+		const isOAuth =
+			typeof this.modelRuntime.isUsingOAuth === "function" &&
+			this.modelRuntime.isUsingOAuth(provider);
+		if (isOAuth && typeof runtime.logout === "function") {
+			await runtime.logout(provider);
+		} else {
+			await this.modelRuntime.removeRuntimeApiKey(provider);
+		}
+		await this.refreshModels();
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
 		});
+	}
+
+	/**
+	 * Open a URL in the system browser (OAuth login links).
+	 */
+	async openExternalUrl(url: string): Promise<void> {
+		try {
+			const uri = vscode.Uri.parse(url);
+			if (uri.scheme !== "http" && uri.scheme !== "https") {
+				this.logDebug(
+					"[PI] Refusing to open non-http(s) external URL:",
+					url,
+				);
+				return;
+			}
+			await vscode.env.openExternal(uri);
+		} catch (error) {
+			this.logDebug("[PI] Failed to open external URL:", url, error);
+		}
+	}
+
+	/**
+	 * Start an interactive OAuth login for a provider, mirroring the PI CLI's
+	 * /login flow: ModelRuntime.login() drives the provider's OAuth method
+	 * while we surface its events/prompts in the webview. Completion is
+	 * reported via `provider-login-result` messages; flow errors do not
+	 * reject (validation problems do).
+	 */
+	async loginProvider(providerId: string): Promise<void> {
+		const id = providerId?.trim();
+		if (!id) throw new Error("Provider ID is required");
+
+		if (!this.isInitialized || !this.modelRuntime) {
+			await this.initialize();
+		}
+		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
+
+		const runtime = this.modelRuntime as ModelRuntime & {
+			login?: (
+				providerId: string,
+				type: "oauth",
+				interaction: LoginInteraction,
+			) => Promise<unknown>;
+		};
+		if (typeof runtime.login !== "function") {
+			throw new Error(
+				"OAuth login requires PI CLI 0.84 or newer. Update the PI CLI, then reload the window.",
+			);
+		}
+
+		const providerInfo = runtime
+			.getProviders()
+			.find((p) => p.id === id) as
+			| { id: string; auth?: { oauth?: unknown } }
+			| undefined;
+		if (!providerInfo?.auth?.oauth) {
+			throw new Error(`"${id}" does not offer OAuth login.`);
+		}
+
+		if (this.activeLogins.has(id)) {
+			throw new Error(`A login for "${id}" is already in progress.`);
+		}
+
+		const controller = new AbortController();
+		this.activeLogins.set(id, controller);
+		controller.signal.addEventListener(
+			"abort",
+			() => this.rejectPendingLoginPrompts(id, "Login cancelled"),
+			{ once: true },
+		);
+
+		const sendResult = (data: {
+			provider: string;
+			success: boolean;
+			message?: string;
+			error?: string;
+			cancelled?: boolean;
+		}) => this.notifyWebview({ type: "provider-login-result", data });
+
+		const cleanup = () => {
+			this.activeLogins.delete(id);
+			this.rejectPendingLoginPrompts(id, "Login cancelled");
+		};
+
+		try {
+			await runtime.login(id, "oauth", {
+				signal: controller.signal,
+				notify: (event) => {
+					// The CLI opens the browser automatically on auth/device-code
+					// events; do the same via the system browser.
+					if (event.type === "auth_url") {
+						void this.openExternalUrl(event.url);
+					} else if (event.type === "device_code") {
+						void this.openExternalUrl(event.verificationUri);
+					}
+					this.notifyWebview({
+						type: "provider-login-event",
+						data: { provider: id, event },
+					});
+				},
+				prompt: (prompt) => this.requestLoginPrompt(id, prompt),
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			cleanup();
+			if (
+					error instanceof Error &&
+					error.name === "CredentialSynchronizationError"
+			) {
+				// Login itself succeeded; only local model state failed to sync —
+				// the CLI reports this the same way after /login.
+					sendResult({
+					provider: id,
+					success: true,
+					message: `Logged in, but local model state could not be synchronized: ${message}`,
+				});
+			} else {
+				sendResult({
+					provider: id,
+					success: false,
+					error: message,
+					cancelled: message === "Login cancelled",
+				});
+			}
+			return;
+		}
+
+		cleanup();
+
+		// Credentials are now on disk; refresh model/provider lists so the new
+		// auth state shows up everywhere (mirrors the CLI's post-login refresh).
+		try {
+			await this.refreshModels();
+		} catch (error) {
+			this.logError("[PI] Post-login model refresh failed:", error);
+		}
+		sendResult({ provider: id, success: true });
+	}
+
+	/** Abort an in-flight OAuth login and reject its pending prompts. */
+	cancelProviderLogin(providerId: string): void {
+		const controller = this.activeLogins.get(providerId);
+		if (controller) {
+			controller.abort();
+		} else {
+			this.rejectPendingLoginPrompts(providerId, "Login cancelled");
+		}
+	}
+
+	/** Answer a login prompt previously sent to the webview. */
+	resolveLoginPrompt(
+		providerId: string,
+		promptId: string,
+		value: string | undefined,
+		cancelled: boolean,
+	): void {
+		const entry = this.pendingLoginPrompts.get(promptId);
+		if (!entry || entry.provider !== providerId) return;
+		this.pendingLoginPrompts.delete(promptId);
+		if (cancelled || typeof value !== "string") {
+			entry.reject(new Error("Login cancelled"));
+		} else {
+			entry.resolve(value);
+		}
+	}
+
+	/**
+	 * Send a login prompt to the webview and await the user's answer.
+	 * Cancellation is handled by the login's AbortController, which rejects
+	 * all pending prompts for the provider (same race the CLI dialog runs).
+	 */
+	private requestLoginPrompt(
+		providerId: string,
+		prompt: LoginPrompt & { signal?: AbortSignal },
+	): Promise<string> {
+		const promptId = `login-prompt-${++this.loginPromptSeq}`;
+		const { signal: _signal, ...serializable } = prompt;
+		this.notifyWebview({
+			type: "provider-login-prompt",
+			data: { provider: providerId, promptId, prompt: serializable },
+		});
+		return new Promise<string>((resolve, reject) => {
+			this.pendingLoginPrompts.set(promptId, {
+				provider: providerId,
+				resolve,
+				reject,
+			});
+		});
+	}
+
+	/** Reject every unanswered login prompt for a provider. */
+	private rejectPendingLoginPrompts(providerId: string, message: string): void {
+		for (const [promptId, entry] of this.pendingLoginPrompts) {
+			if (entry.provider !== providerId) continue;
+			this.pendingLoginPrompts.delete(promptId);
+			entry.reject(new Error(message));
+		}
 	}
 
 	async openConfigFile(file: "auth" | "models" | "settings"): Promise<void> {
@@ -2550,11 +2979,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.initialize();
 		}
 
-		const currentIndex = THINKING_LEVELS.indexOf(
-			this.config.thinkingLevel as any,
-		);
+		const available = this.getAvailableThinkingLevels(this.currentModelId);
+		const current = this.getThinkingLevel();
+		const currentIndex = available.indexOf(current);
 		const nextLevel =
-			THINKING_LEVELS[(currentIndex + 1) % THINKING_LEVELS.length] || "medium";
+			available[(currentIndex + 1) % available.length] || available[0] || "off";
 
 		await this.setThinkingLevel(nextLevel);
 		this.notifyWebview({

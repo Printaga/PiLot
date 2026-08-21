@@ -7,6 +7,7 @@ import {
     ModelRegistryHandler,
     ModelRegistryHandlerDeps,
     type ModelItem,
+    deriveAvailableThinkingLevels,
 } from "../../../model-registry-handler.js";
 import type {
     ModelRegistry,
@@ -173,7 +174,20 @@ suite("ModelRegistryHandler", () => {
                 { provider: "openai", id: "gpt-4", name: "GPT-4" },
             ]);
             assert.deepStrictEqual(result, [
-                { id: "openai/gpt-4", provider: "openai", name: "GPT-4" },
+                {
+                    id: "openai/gpt-4",
+                    provider: "openai",
+                    name: "GPT-4",
+                    availableThinkingLevels: [
+                        "off",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                    ],
+                },
             ]);
         });
 
@@ -216,6 +230,7 @@ suite("ModelRegistryHandler", () => {
             const registry: ModelRegistry = {
                 getAvailable: async () => registryModels,
                 getAll: () => [],
+                refresh: async () => ({}) as any,
             } as any;
 
             deps = buildDeps({ getModelRegistry: () => registry });
@@ -513,6 +528,46 @@ suite("ModelRegistryHandler", () => {
             const result = await handler.toggleFavorite("openai/gpt-4", false);
             assert.ok(!result.includes("openai/gpt-4"));
         });
+
+        test("removing one favorite keeps the others (no data loss)", async () => {
+            const settingsManager = {
+                getEnabledModels: () => [],
+                setEnabledModels: async () => {},
+                flush: async () => {},
+            } as unknown as SettingsManager;
+            deps = buildDeps({
+                getSettingsManager: () => settingsManager,
+                availableModels: [
+                    { id: "a/b", provider: "a", name: "B" },
+                    { id: "c/d", provider: "c", name: "D" },
+                ],
+                favoriteModels: ["a/b", "c/d"],
+            });
+            handler = new ModelRegistryHandler(deps);
+            const result = await handler.toggleFavorite("a/b", false);
+            assert.deepStrictEqual(result, ["c/d"]);
+            assert.deepStrictEqual(deps.favoriteModels, ["c/d"]);
+        });
+
+        test("adding a new favorite keeps existing favorites", async () => {
+            const settingsManager = {
+                getEnabledModels: () => [],
+                setEnabledModels: async () => {},
+                flush: async () => {},
+            } as unknown as SettingsManager;
+            deps = buildDeps({
+                getSettingsManager: () => settingsManager,
+                availableModels: [
+                    { id: "a/b", provider: "a", name: "B" },
+                    { id: "e/f", provider: "e", name: "F" },
+                ],
+                favoriteModels: ["a/b"],
+            });
+            handler = new ModelRegistryHandler(deps);
+            const result = await handler.toggleFavorite("e/f", true);
+            assert.ok(result.includes("a/b"), "existing favorite must be retained");
+            assert.ok(result.includes("e/f"), "new favorite must be added");
+        });
     });
 
     suite("cycleModel", () => {
@@ -578,6 +633,55 @@ suite("ModelRegistryHandler", () => {
             handler = new ModelRegistryHandler(deps);
             await handler.cycleModel();
             assert.strictEqual(deps.currentModelId, "p/m1");
+        });
+    });
+
+    suite("deriveAvailableThinkingLevels", () => {
+        test("returns all levels when reasoning is unsupported-free and no map", () => {
+            assert.deepStrictEqual(deriveAvailableThinkingLevels({}), [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+            ]);
+        });
+
+        test("returns only 'off' when reasoning is false", () => {
+            assert.deepStrictEqual(
+                deriveAvailableThinkingLevels({ reasoning: false }),
+                ["off"],
+            );
+        });
+
+        test("excludes levels explicitly mapped to null", () => {
+            assert.deepStrictEqual(
+                deriveAvailableThinkingLevels({
+                    reasoning: true,
+                    thinkingLevelMap: {
+                        off: "off",
+                        minimal: "minimal",
+                        low: "low",
+                        medium: "medium",
+                        high: "high",
+                        xhigh: null,
+                        max: null,
+                    },
+                }),
+                ["off", "minimal", "low", "medium", "high"],
+            );
+        });
+
+        test("keeps levels with a provider value and falls back for missing keys", () => {
+            assert.deepStrictEqual(
+                deriveAvailableThinkingLevels({
+                    reasoning: true,
+                    thinkingLevelMap: { off: null },
+                }),
+                ["minimal", "low", "medium", "high", "xhigh", "max"],
+            );
         });
     });
 });

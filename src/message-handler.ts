@@ -160,6 +160,16 @@ export class MessageHandler {
 					this.sendProviderAuth(result);
 					break;
 
+				case "checkProviderAuth":
+					result = await this.withErrorReporting(async () => {
+						const authResult =
+							await this.provider.checkProviderAuth(
+								message.data.provider,
+							);
+						this.sendProviderAuthCheckResult(authResult);
+					});
+					break;
+
 				case "setApiKey":
 					await this.provider.setApiKey(
 						message.data.provider,
@@ -172,6 +182,79 @@ export class MessageHandler {
 					await this.provider.removeAuth(message.data.provider);
 					result = { success: true };
 					break;
+
+				case "loginProvider": {
+					const providerId = message.data?.provider;
+					if (typeof providerId !== "string" || !providerId.trim()) {
+						result = { error: "loginProvider requires a provider" };
+						break;
+					}
+					// Interactive OAuth flow: can run for minutes (browser + device-code
+					// polling). Kick it off and stream progress to the webview as
+					// provider-login-* messages instead of blocking this handler.
+					void this.provider.loginProvider(providerId).catch((error: unknown) => {
+						this.provider.logError(
+							"[MessageHandler] loginProvider failed:",
+							error,
+						);
+						this.provider.webview?.postMessage({
+							type: "provider-login-result",
+							data: {
+								provider: providerId,
+								success: false,
+								error:
+									error instanceof Error
+										? error.message
+										: String(error),
+							},
+						});
+					});
+					result = { success: true };
+					break;
+				}
+
+				case "cancelProviderLogin": {
+					const providerId = message.data?.provider;
+					if (typeof providerId !== "string") {
+						result = { error: "cancelProviderLogin requires a provider" };
+						break;
+					}
+					this.provider.cancelProviderLogin(providerId);
+					result = { success: true };
+					break;
+				}
+
+				case "providerLoginPromptResponse": {
+					const data = message.data ?? {};
+					if (
+						typeof data.provider !== "string" ||
+						typeof data.promptId !== "string"
+					) {
+						result = {
+							error: "providerLoginPromptResponse requires provider and promptId",
+						};
+						break;
+					}
+					this.provider.resolveLoginPrompt(
+						data.provider,
+						data.promptId,
+						typeof data.value === "string" ? data.value : undefined,
+						data.cancelled === true,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "openLoginUrl": {
+					const url = message.data?.url;
+					if (typeof url === "string" && /^https?:\/\//i.test(url)) {
+						void this.provider.openExternalUrl(url);
+						result = { success: true };
+					} else {
+						result = { error: "openLoginUrl requires an http(s) URL" };
+					}
+					break;
+				}
 
 				case "addProvider":
 					await this.withErrorReporting(
@@ -583,6 +666,32 @@ export class MessageHandler {
 					});
 					break;
 
+				case "getPiUISettings":
+					result = await this.withErrorReporting(async () => {
+						const piSettings = await this.provider.getPiUISettings();
+						this.provider.webview?.postMessage({
+							type: "pi-settings-changed",
+							data: piSettings,
+						});
+					});
+					break;
+
+				case "setPiUISetting":
+					result = await this.withErrorReporting(async () => {
+						const data = message.data as {
+							key?: "showCacheMissNotices";
+							value?: boolean;
+						};
+						if (
+							!data.key ||
+							typeof data.value !== "boolean"
+						) {
+							throw new Error("Invalid pi settings payload");
+						}
+						await this.provider.setPiUISetting(data.key, data.value);
+					});
+					break;
+
 				default:
 					this.provider.logDebug("Unknown message type:", message.type);
 					result = { error: `Unknown message type: ${message.type}` };
@@ -743,6 +852,15 @@ export class MessageHandler {
 	private sendProviderAuth(data: any) {
 		this.provider.webview?.postMessage({
 			type: "provider-auth",
+			data,
+		});
+	}
+
+	private sendProviderAuthCheckResult(
+		data: Awaited<ReturnType<ProviderApi["checkProviderAuth"]>>,
+	) {
+		this.provider.webview?.postMessage({
+			type: "provider-auth-check-result",
 			data,
 		});
 	}

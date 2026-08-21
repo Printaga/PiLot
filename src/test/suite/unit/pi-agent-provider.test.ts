@@ -38,10 +38,11 @@ function createMockWebviewView(): vscode.WebviewView {
 	const emitter = new vscode.EventEmitter<boolean>();
 	return {
 		webview: {
-			postMessage: () => {},
+			postMessage: () => Promise.resolve(),
 			options: {},
 			asWebviewUri: (uri: vscode.Uri) => uri,
 			html: "",
+			onDidReceiveMessage: () => ({ dispose: () => {} }),
 		},
 		title: "",
 		description: undefined,
@@ -246,6 +247,18 @@ function buildProvider(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/**
+ * buildProvider() starts a background initialize(); let it settle before
+ * installing test mocks so it cannot stomp them mid-test.
+ */
+async function settleInitialize(provider: any) {
+	for (let i = 0; i < 25 && !provider.isInitialized; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+	// Neutralize any later re-initialization.
+	provider.initialize = async () => {};
+}
 
 suite("PiAgentProvider", () => {
 	setup(() => {
@@ -727,6 +740,8 @@ suite("PiAgentProvider", () => {
 				},
 				removeRuntimeApiKey: async () => {},
 				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 			} as any;
 
 			const refreshCalls: any[] = [];
@@ -734,6 +749,7 @@ suite("PiAgentProvider", () => {
 				refreshAvailableModels: async () => {
 					refreshCalls.push("refresh");
 				},
+				getAvailableModels: () => [],
 				buildModelList: (m: any) => m,
 				getMergedModels: async () => [],
 				invalidateCliModelIdsCache: () => {},
@@ -762,6 +778,8 @@ suite("PiAgentProvider", () => {
 					removeCalls.push(provider);
 				},
 				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
 			} as any;
 
 			const refreshCalls: any[] = [];
@@ -769,6 +787,7 @@ suite("PiAgentProvider", () => {
 				refreshAvailableModels: async () => {
 					refreshCalls.push("refresh");
 				},
+				getAvailableModels: () => [],
 				buildModelList: (m: any) => m,
 				getMergedModels: async () => [],
 				invalidateCliModelIdsCache: () => {},
@@ -794,6 +813,7 @@ suite("PiAgentProvider", () => {
 				refresh: async () => ({}),
 				getProviders: () => [{ id: "kilocode" }],
 				getRegisteredProviderIds: () => ["kilocode"],
+				isUsingOAuth: () => false,
 			} as any;
 			(provider as any).modelRegistry = {
 				getAll: () => [],
@@ -813,7 +833,7 @@ suite("PiAgentProvider", () => {
 
 		test("addProvider writes models.json and registers the provider", async () => {
 			const provider = buildProvider();
-			(provider as any).isInitialized = true;
+			await settleInitialize(provider);
 			const regCalls: any[] = [];
 			const reloadCalls: number[] = [];
 			(provider as any).modelRuntime = {
@@ -829,6 +849,7 @@ suite("PiAgentProvider", () => {
 				reloadConfig: async () => {
 					reloadCalls.push(1);
 				},
+				isUsingOAuth: () => false,
 			} as any;
 			(provider as any).modelRegistry = {
 				getAll: () => [],
@@ -837,6 +858,8 @@ suite("PiAgentProvider", () => {
 			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
 			} as any;
 			let written: any = null;
 			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
@@ -861,7 +884,7 @@ suite("PiAgentProvider", () => {
 
 		test("removeProvider deletes models.json entry and unregisters", async () => {
 			const provider = buildProvider();
-			(provider as any).isInitialized = true;
+			await settleInitialize(provider);
 			const unregCalls: string[] = [];
 			const reloadCalls: number[] = [];
 			const removeCalls: string[] = [];
@@ -880,6 +903,7 @@ suite("PiAgentProvider", () => {
 				reloadConfig: async () => {
 					reloadCalls.push(1);
 				},
+				isUsingOAuth: () => false,
 			} as any;
 			(provider as any).modelRegistry = {
 				getAll: () => [],
@@ -888,6 +912,8 @@ suite("PiAgentProvider", () => {
 			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
 			} as any;
 			let written: any = null;
 			(provider as any).readModelsJsonConfig = async () => ({
@@ -905,6 +931,103 @@ suite("PiAgentProvider", () => {
 			assert.ok(unregCalls.includes("kilocode"), "unregisterProvider called");
 			assert.ok(removeCalls.includes("kilocode"), "removeRuntimeApiKey called");
 			assert.strictEqual(reloadCalls.length, 1, "reloadConfig called");
+		});
+
+		test("addProvider falls back to refresh() when reloadConfig is missing (SDK 0.84+)", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			const refreshCalls: number[] = [];
+			// SDK 0.84 removed ModelRuntime.reloadConfig(); refresh() now reloads models.json.
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push(1);
+				},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: () => {},
+				unregisterProvider: () => {},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				invalidateCliModelIdsCache: () => {},
+				getAvailableModels: () => [],
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+					written = cfg;
+			};
+
+			await provider["addProvider"]({
+				provider: "kilocode",
+				name: "Kilo Code",
+				baseUrl: "https://api.kilocode.ai",
+			});
+
+			assert.ok(written?.providers?.kilocode, "models.json should be written");
+			assert.strictEqual(
+				refreshCalls.length,
+				2,
+				"refresh() used as reloadConfig replacement, then again by refreshModels()",
+			);
+		});
+
+		test("removeProvider falls back to refresh() when reloadConfig is missing (SDK 0.84+)", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			const refreshCalls: number[] = [];
+			const unregCalls: string[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => {
+					refreshCalls.push(1);
+				},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => ["kilocode"],
+				registerProvider: () => {},
+				unregisterProvider: (id: string) => {
+					unregCalls.push(id);
+				},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				invalidateCliModelIdsCache: () => {},
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({
+				providers: { kilocode: { name: "Kilo Code" } },
+			});
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["removeProvider"]("kilocode");
+
+			assert.ok(!written.providers.kilocode, "provider entry removed");
+			assert.ok(unregCalls.includes("kilocode"), "unregisterProvider called");
+			assert.strictEqual(
+				refreshCalls.length,
+				2,
+				"refresh() used as reloadConfig replacement, then again by refreshModels()",
+			);
 		});
 
 		test("addProvider throws when provider ID is empty", async () => {
@@ -2021,6 +2144,459 @@ suite("PiAgentProvider", () => {
 		});
 	});
 
+	suite("pi UI settings", () => {
+		test("getPiUISettings reads showCacheMissNotices from settings manager", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).settingsManager = {
+				getShowCacheMissNotices: () => true,
+			} as any;
+			const result = await provider["getPiUISettings"]();
+			assert.deepStrictEqual(result, { showCacheMissNotices: true });
+		});
+
+		test("getPiUISettings returns default false when unset", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).settingsManager = {
+				getShowCacheMissNotices: () => false,
+			} as any;
+			const result = await provider["getPiUISettings"]();
+			assert.deepStrictEqual(result, { showCacheMissNotices: false });
+		});
+
+		test("getPiUISettings returns false when settings manager missing", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).settingsManager = undefined;
+			const result = await provider["getPiUISettings"]();
+			assert.deepStrictEqual(result, { showCacheMissNotices: false });
+		});
+
+		test("setPiUISetting persists and notifies webview", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const calls: unknown[] = [];
+			const flushCalls: unknown[] = [];
+			(provider as any).settingsManager = {
+				setShowCacheMissNotices: (v: boolean) => calls.push(v),
+				flush: async () => flushCalls.push(true),
+			} as any;
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
+
+			await provider["setPiUISetting"]("showCacheMissNotices", true);
+
+			assert.deepStrictEqual(calls, [true]);
+			assert.strictEqual(flushCalls.length, 1);
+			assert.ok(
+				webviewMessages.some(
+					(m: any) =>
+						m.type === "pi-settings-changed" &&
+						m.data.showCacheMissNotices === true,
+				),
+			);
+		});
+
+		test("setPiUISetting throws when settings manager missing", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).settingsManager = undefined;
+			await assert.rejects(
+				provider["setPiUISetting"]("showCacheMissNotices", true),
+				/not initialized/,
+			);
+		});
+	});
+
+	suite("provider auth check", () => {
+		test("checkProviderAuth returns configured api_key", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				checkAuth: async () => ({ type: "api_key", source: "auth.json" }),
+			} as any;
+			const result = await provider["checkProviderAuth"]("openai");
+			assert.deepStrictEqual(result, {
+				provider: "openai",
+				configured: true,
+				credentialType: "api_key",
+			});
+		});
+
+		test("checkProviderAuth returns configured oauth", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				checkAuth: async () => ({ type: "oauth", source: "env" }),
+			} as any;
+			const result = await provider["checkProviderAuth"]("anthropic");
+			assert.deepStrictEqual(result, {
+				provider: "anthropic",
+				configured: true,
+				credentialType: "oauth",
+			});
+		});
+
+		test("checkProviderAuth reports unconfigured when checkAuth undefined", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				checkAuth: async () => undefined,
+			} as any;
+			const result = await provider["checkProviderAuth"]("openai");
+			assert.deepStrictEqual(result, {
+				provider: "openai",
+				configured: false,
+				credentialType: null,
+			});
+		});
+
+		test("checkProviderAuth throws when runtime missing", async () => {
+			const provider: any = buildProvider();
+			await settleInitialize(provider);
+			provider.isInitialized = true;
+			provider.modelRuntime = undefined;
+			await assert.rejects(
+				provider["checkProviderAuth"]("openai"),
+				/not initialized/,
+			);
+		});
+	});
+
+	suite("provider oauth login", () => {
+		/** Build a provider whose runtime/handler mocks cover the login flow. */
+		async function buildLoginProvider(runtimeOverrides: Record<string, unknown>) {
+			const provider: any = buildProvider();
+			await settleInitialize(provider);
+			provider.isInitialized = true;
+			const webviewMessages: any[] = [];
+			provider.notifyWebview = (m: any) => webviewMessages.push(m);
+			const openedUrls: string[] = [];
+			provider.openExternalUrl = async (url: string) => {
+				openedUrls.push(url);
+			};
+			provider.modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [
+					{ id: "anthropic", auth: { oauth: {} } },
+					{ id: "openai", auth: { apiKey: {} } },
+				],
+				getRegisteredProviderIds: () => [],
+				isUsingOAuth: () => false,
+				login: async () => {
+					throw new Error("login stub should not run");
+				},
+				...runtimeOverrides,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+			(provider as any).getCustomProviderIds = () => new Set<string>();
+			return { provider, webviewMessages, openedUrls };
+		}
+
+		test("loginProvider streams events, opens the browser, and resolves prompts", async () => {
+			const { provider, webviewMessages, openedUrls } = await buildLoginProvider({
+				login: async (
+					_id: string,
+					_type: string,
+					interaction: any,
+				) => {
+					interaction.notify({
+						type: "auth_url",
+						url: "https://auth.example/start",
+						instructions: "Visit to authorize",
+					});
+					const code = await interaction.prompt({
+						type: "text",
+						message: "Enter the code",
+						placeholder: "code",
+					});
+					assert.strictEqual(code, "123-456");
+				},
+			});
+
+			const done = provider["loginProvider"]("anthropic");
+			// Let the flow run until it blocks on the pending prompt.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			const promptMsg = webviewMessages.find(
+					(m: any) => m.type === "provider-login-prompt",
+				);
+			assert.ok(promptMsg, "prompt message should be sent to the webview");
+			assert.strictEqual(promptMsg.data.prompt.type, "text");
+			assert.strictEqual(promptMsg.data.prompt.message, "Enter the code");
+
+			const eventMsg = webviewMessages.find(
+					(m: any) =>
+						m.type === "provider-login-event" &&
+						m.data.event.type === "auth_url",
+				);
+			assert.ok(eventMsg, "auth_url event should be forwarded");
+			assert.strictEqual(eventMsg.data.event.url, "https://auth.example/start");
+			assert.ok(
+					openedUrls.includes("https://auth.example/start"),
+					"browser should open the auth URL",
+			);
+
+			provider["resolveLoginPrompt"](
+					"anthropic",
+				promptMsg.data.promptId,
+				"123-456",
+				false,
+			);
+			await done;
+
+			const resultMsg = webviewMessages.find(
+					(m: any) => m.type === "provider-login-result",
+				);
+			assert.ok(resultMsg, "result message should be sent");
+			assert.strictEqual(resultMsg.data.success, true);
+			assert.strictEqual(
+					(provider as any).activeLogins.size,
+					0,
+					"login state should be cleaned up",
+				);
+			assert.strictEqual(
+					(provider as any).pendingLoginPrompts.size,
+					0,
+					"prompt state should be cleaned up",
+				);
+			// Success refreshes the provider list so the new auth state shows.
+			assert.ok(
+					webviewMessages.some((m: any) => m.type === "provider-auth"),
+					"provider-auth refresh should follow a successful login",
+				);
+		});
+
+		test("loginProvider forwards device_code events with the verification URL", async () => {
+			const { provider, webviewMessages, openedUrls } = await buildLoginProvider({
+				login: async (_id: string, _type: string, interaction: any) => {
+					interaction.notify({
+						type: "device_code",
+					userCode: "ABCD-1234",
+					verificationUri: "https://example.com/device",
+					});
+				},
+			});
+
+			await provider["loginProvider"]("anthropic");
+
+			const eventMsg = webviewMessages.find(
+					(m: any) =>
+						m.type === "provider-login-event" &&
+						m.data.event.type === "device_code",
+				);
+			assert.ok(eventMsg, "device_code event should be forwarded");
+			assert.strictEqual(eventMsg.data.event.userCode, "ABCD-1234");
+			assert.ok(
+					openedUrls.includes("https://example.com/device"),
+					"verification URL should be opened in the browser",
+				);
+		});
+
+		test("loginProvider reports flow failures as result messages without rejecting", async () => {
+			const { provider, webviewMessages } = await buildLoginProvider({
+				login: async () => {
+					throw new Error("invalid_grant");
+				},
+			});
+
+			await provider["loginProvider"]("anthropic");
+
+			const resultMsg = webviewMessages.find(
+					(m: any) => m.type === "provider-login-result",
+				);
+			assert.ok(resultMsg, "result message should be sent");
+			assert.strictEqual(resultMsg.data.success, false);
+			assert.strictEqual(resultMsg.data.error, "invalid_grant");
+			assert.strictEqual(
+					(provider as any).activeLogins.size,
+					0,
+					"failed login should be cleaned up",
+				);
+		});
+
+		test("loginProvider throws for providers without OAuth support", async () => {
+			const { provider } = await buildLoginProvider({});
+			await assert.rejects(
+				provider["loginProvider"]("openai"),
+				/does not offer OAuth login/,
+			);
+		});
+
+		test("loginProvider rejects duplicate concurrent logins", async () => {
+			const { provider, webviewMessages } = await buildLoginProvider({
+				login: (_id: string, _type: string, interaction: any) =>
+					new Promise((_resolve, reject) => {
+						interaction.signal.addEventListener("abort", () =>
+							reject(new Error("Login cancelled")),
+						);
+					}),
+			});
+
+			const first = provider["loginProvider"]("anthropic");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			await assert.rejects(
+				provider["loginProvider"]("anthropic"),
+				/already in progress/,
+			);
+
+			provider["cancelProviderLogin"]("anthropic");
+			await first;
+
+			const resultMsg = webviewMessages.find(
+					(m: any) => m.type === "provider-login-result",
+				);
+			assert.ok(resultMsg, "cancelled login should report a result");
+			assert.strictEqual(resultMsg.data.success, false);
+			assert.strictEqual(resultMsg.data.cancelled, true);
+		});
+
+		test("cancelProviderLogin rejects pending prompts as cancelled", async () => {
+			const { provider, webviewMessages } = await buildLoginProvider({
+				login: async (_id: string, _type: string, interaction: any) => {
+					await interaction.prompt({
+						type: "manual_code",
+						message: "Paste the callback URL",
+					});
+					assert.fail("prompt should be rejected before resolving");
+				},
+			});
+
+			const done = provider["loginProvider"]("anthropic");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			provider["cancelProviderLogin"]("anthropic");
+			await done;
+
+			const resultMsg = webviewMessages.find(
+					(m: any) => m.type === "provider-login-result",
+				);
+			assert.ok(resultMsg);
+			assert.strictEqual(resultMsg.data.success, false);
+			assert.strictEqual(resultMsg.data.cancelled, true);
+		});
+
+		test("resolveLoginPrompt ignores unknown prompt ids", async () => {
+			const { provider } = await buildLoginProvider({});
+			// Must not throw for stale/unknown prompts.
+			provider["resolveLoginPrompt"]("anthropic", "no-such-prompt", "x", false);
+		});
+
+		test("removeAuth logs out OAuth providers and drops runtime keys for others", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			const logoutCalls: string[] = [];
+			const removeCalls: string[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async (id: string) => removeCalls.push(id),
+				logout: async (id: string) => logoutCalls.push(id),
+				isUsingOAuth: (id: string) => id === "anthropic",
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: true }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+
+			await provider["removeAuth"]("anthropic");
+			await provider["removeAuth"]("openai");
+
+			assert.deepStrictEqual(logoutCalls, ["anthropic"], "oauth provider logs out");
+			assert.deepStrictEqual(
+				removeCalls,
+				["openai"],
+				"api-key provider keeps removeRuntimeApiKey behavior",
+			);
+		});
+
+		test("getProviderAuthData flags providers that offer OAuth login", async () => {
+			const { provider } = await buildLoginProvider({});
+			(provider as any).modelRegistry = {
+				getAll: () => [
+					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
+				],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+
+			const data = await provider["getProviderAuthData"]();
+			const anthropic = data.find((p: any) => p.provider === "anthropic");
+			const openai = data.find((p: any) => p.provider === "openai");
+			assert.ok(anthropic, "oauth provider should be listed");
+			assert.strictEqual(anthropic.oauthLogin, true);
+			assert.ok(openai);
+			assert.strictEqual(openai.oauthLogin, false);
+		});
+	});
+
+	suite("provider auth data credential type", () => {
+		test("getProviderAuthData includes oauth credential type", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRegistry = {
+				getAll: () => [
+					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
+				],
+				getProviderAuthStatus: () => ({
+					configured: true,
+					source: "configured",
+				}),
+				getProviderDisplayName: () => "OpenAI",
+			} as any;
+			(provider as any).modelRuntime = {
+				getProviders: () => [],
+				isUsingOAuth: () => true,
+			} as any;
+			(provider as any).getCustomProviderIds = () => new Set<string>();
+			const result = await provider["getProviderAuthData"]();
+			assert.strictEqual(result[0].credentialType, "oauth");
+		});
+
+		test("getProviderAuthData reports null credential type when unconfigured", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRegistry = {
+				getAll: () => [
+					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
+				],
+				getProviderAuthStatus: () => ({
+					configured: false,
+					source: undefined,
+				}),
+				getProviderDisplayName: () => "OpenAI",
+			} as any;
+			(provider as any).modelRuntime = {
+				getProviders: () => [],
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).getCustomProviderIds = () => new Set<string>();
+			const result = await provider["getProviderAuthData"]();
+			assert.strictEqual(result[0].credentialType, null);
+		});
+	});
+
 	suite("dispose - edge cases", () => {
 		test("dispose without session completes without error", () => {
 			const provider = buildProvider();
@@ -2109,6 +2685,146 @@ suite("PiAgentProvider", () => {
 				"@file:/fake/file.ts hello",
 			);
 			assert.ok(result.includes("/resolved/path"));
+		});
+	});
+
+	suite("thinking level per-model support", () => {
+		function setupProviderWithModel(
+			provider: any,
+			modelId: string,
+			availableThinkingLevels: string[],
+		) {
+			provider.availableModels = [
+				{
+					id: modelId,
+					provider: modelId.split("/")[0],
+					name: modelId,
+					availableThinkingLevels,
+				},
+			];
+			provider.currentModelId = modelId;
+			const setThinkingCalls: string[] = [];
+			provider.session = {
+				setThinkingLevel: (l: string) => {
+					setThinkingCalls.push(l);
+				},
+			};
+			let persistedLevel: string | undefined;
+			provider.settingsManager.getDefaultThinkingLevel = () => "medium";
+			provider.settingsManager.setDefaultThinkingLevel = async (l: string) => {
+				persistedLevel = l;
+			};
+			return {
+				setThinkingCalls,
+				getPersisted: () => persistedLevel,
+			};
+		}
+
+		test("getAvailableThinkingLevels returns model's list when known", () => {
+			const provider = buildProvider();
+			(provider as any).availableModels = [
+				{
+					id: "openai/gpt-4",
+					provider: "openai",
+					name: "GPT-4",
+					availableThinkingLevels: ["off", "low", "high"],
+				},
+			];
+			assert.deepStrictEqual(
+				(provider as any).getAvailableThinkingLevels("openai/gpt-4"),
+				["off", "low", "high"],
+			);
+		});
+
+		test("getAvailableThinkingLevels falls back to full set for unknown model", () => {
+			const provider = buildProvider();
+			assert.deepStrictEqual(
+				(provider as any).getAvailableThinkingLevels("unknown/model"),
+				["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+			);
+		});
+
+		test("setThinkingLevel clamps an unsupported level to the nearest supported", async () => {
+			const provider = buildProvider();
+			const ctx = setupProviderWithModel(
+				provider as any,
+				"openai/gpt-4",
+				["off", "low", "high"],
+			);
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
+
+			await (provider as any).setThinkingLevel("max");
+
+			assert.deepStrictEqual(ctx.setThinkingCalls, ["high"]);
+			assert.strictEqual(ctx.getPersisted(), "high");
+			const changed = webviewMessages.find(
+				(m) => m.type === "thinking-level-changed",
+			);
+			assert.ok(changed, "should notify thinking-level-changed");
+			assert.strictEqual(changed.data.level, "high");
+		});
+
+		test("setThinkingLevel accepts a supported level unchanged", async () => {
+			const provider = buildProvider();
+			const ctx = setupProviderWithModel(
+				provider as any,
+				"openai/gpt-4",
+				["off", "low", "high"],
+			);
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
+
+			await (provider as any).setThinkingLevel("low");
+
+			assert.deepStrictEqual(ctx.setThinkingCalls, ["low"]);
+			assert.strictEqual(ctx.getPersisted(), "low");
+			assert.ok(
+				!webviewMessages.some((m) => m.type === "thinking-level-changed"),
+				"should not notify when level is unchanged",
+			);
+		});
+
+		test("setModel re-validates thinking level against the new model", async () => {
+			const provider = buildProvider();
+			(provider as any).availableModels = [
+				{
+					id: "anthropic/claude-x",
+					provider: "anthropic",
+					name: "Claude X",
+					availableThinkingLevels: ["off", "low"],
+				},
+			];
+			(provider as any).currentModelId = "openai/gpt-4o-mini";
+			(provider as any).session = {
+				setModel: async () => {},
+				setThinkingLevel: (_l: string) => {},
+			};
+			(provider as any).modelRegistry.find = () => ({});
+			let persistedLevel: string | undefined;
+			(provider as any).settingsManager.getDefaultThinkingLevel = () =>
+				"medium";
+			(provider as any).settingsManager.setDefaultThinkingLevel = async (
+				l: string,
+			) => {
+				persistedLevel = l;
+			};
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
+
+			await (provider as any).setModel("anthropic/claude-x");
+
+			assert.strictEqual(persistedLevel, "low");
+			const changed = webviewMessages.find(
+				(m) => m.type === "thinking-level-changed",
+			);
+			assert.ok(changed, "should notify thinking-level-changed on model switch");
+			assert.strictEqual(changed.data.level, "low");
+			const modelChanged = webviewMessages.find(
+				(m) => m.type === "model-changed",
+			);
+			assert.ok(modelChanged, "should notify model-changed");
+			assert.strictEqual(modelChanged.data.modelId, "anthropic/claude-x");
 		});
 	});
 });

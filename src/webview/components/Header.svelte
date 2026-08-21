@@ -3,6 +3,7 @@
     id: string;
     provider: string;
     name: string;
+    availableThinkingLevels?: string[];
   }
 
   interface Props {
@@ -12,6 +13,7 @@
     piCliVersion: string | null;
     providerName: string;
     thinkingLevel: string;
+    availableThinkingLevels: string[];
     onNewSession?: () => void;
     favoriteModels: string[];
     models: Model[];
@@ -33,6 +35,7 @@
     piCliVersion = null,
     providerName = "",
     thinkingLevel = "medium",
+    availableThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
     onNewSession,
     favoriteModels = [],
     models = [],
@@ -52,7 +55,11 @@
   let showThinkDropdown = $state(false);
   let thinkWrapperEl = $state<HTMLElement | null>(null);
 
-  const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  // The level actually applied, clamped to what the selected model supports.
+  const effectiveThinkingLevel = $derived.by(() => {
+    if (availableThinkingLevels.includes(thinkingLevel)) return thinkingLevel;
+    return availableThinkingLevels[0] ?? "off";
+  });
 
   $effect(() => {
     if (!showThinkDropdown) return;
@@ -135,7 +142,7 @@
     {#if currentModel}
       <div
         class="model-info"
-        title={`Model: ${modelName}\nProvider: ${providerName}\nThinking: ${thinkingLevel}\n\nClick to change model`}
+        title={`Model: ${modelName}\nProvider: ${providerName}\nThinking: ${effectiveThinkingLevel}\n\nClick to change model`}
         onclick={onSwitchToModels}
         role="button"
         tabindex="0"
@@ -294,7 +301,7 @@
           />
           <path d="M12 6v6l4 2" />
         </svg>
-        <span class="think-value">{thinkingLevel}</span>
+        <span class="think-value">{effectiveThinkingLevel}</span>
         <svg
           width="10"
           height="10"
@@ -312,10 +319,10 @@
         <div class="dropdown think-dropdown">
           <div class="dropdown-header">Thinking Intensity</div>
           <div class="dropdown-content">
-            {#each thinkingLevels as level}
+            {#each availableThinkingLevels as level}
               <button
                 class="dropdown-item"
-                class:active={thinkingLevel === level}
+                class:active={effectiveThinkingLevel === level}
                 onclick={() => {
                   onThinkingLevelChange(level);
                   showThinkDropdown = false;

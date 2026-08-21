@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import { SessionResources } from "../../../session-resources.js";
 import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 
+// `out/test` emits CommonJS, where `__dirname` is provided by Node.
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function createDeps() {
