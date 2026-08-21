@@ -57,23 +57,69 @@ function installVscodeFacade(): void {
 	// code read stale shim exports under the plain-Node runner.
 	const facade: Record<string, any> =
 		((globalThis as any).__vscodeFacade as Record<string, any> | undefined) ?? {};
+	const isPlainObject = (v: any): boolean =>
+		!!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
+	// Nested API namespaces are composed explicitly below; copying them here
+	// would put the REAL frozen namespaces (getter-only props on newer VS Code)
+	// on the facade and break every mock assignment.
+	const namespaceKeys = new Set([
+		'window',
+		'workspace',
+		'commands',
+		'env',
+		'extensions',
+		'languages',
+	]);
 	const assignProps = (target: any, src: any, bind = false): void => {
 		if (!src || typeof src !== 'object') return;
 		for (const key of Object.getOwnPropertyNames(src)) {
-			const value = src[key];
+			if (namespaceKeys.has(key)) continue;
+			// Proposed-API accessors (e.g. window.linkPresentationRules on newer
+			// VS Code) throw on read when the proposal isn't enabled; skip them.
+			let value: any;
+			try {
+				value = src[key];
+			} catch {
+				continue;
+			}
 			if (typeof value === 'undefined') continue;
 			const isCtor =
 				typeof value === 'function' && value.prototype?.constructor === value;
-			target[key] =
+			// Skip nested API namespaces (e.g. workspace.fs): they are composed
+			// explicitly and copying the real frozen namespace breaks mocks.
+			if (
+				!isCtor &&
+				typeof value === 'object' &&
+				!isPlainObject(value)
+			) {
+				continue;
+			}
+			const assigned =
 				bind && typeof value === 'function' && !isCtor
 					? value.bind(src)
 					: value;
+			// Newer VS Code APIs expose getter-only properties (e.g.
+			// window.visibleTextEditors); skip them so reads still fall through
+			// to the real API instead of crashing the whole suite.
+			try {
+				target[key] = assigned;
+			} catch {
+				/* getter-only property: leave as-is */
+			}
 		}
 	};
 	assignProps(facade, real, false);
 	const ensureObj = (parent: any, name: string): any => {
-		if (!parent[name] || typeof parent[name] !== 'object') parent[name] = {};
-		return parent[name];
+		// Never keep a non-plain object (e.g. the real frozen API namespace):
+		// mocks must be able to assign arbitrary props on it.
+		if (!isPlainObject(parent[name])) {
+			try {
+				parent[name] = {};
+			} catch {
+				/* unreplaceable: fall through */
+			}
+		}
+		return isPlainObject(parent[name]) ? parent[name] : {};
 	};
 	assignProps(ensureObj(facade, 'window'), real.window, true);
 	const ws = ensureObj(facade, 'workspace');

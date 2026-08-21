@@ -9,6 +9,7 @@
 		provider: string;
 		name: string;
 		configured: boolean;
+		custom: boolean;
 		status: string;
 	}
 
@@ -26,7 +27,7 @@
 	let { models, currentModel, favoriteModels, providers = [], onSelect, onToggleFavorite, onOpenConfigFile, onRefresh }: Props = $props();
 
 	const configuredProviderNames = $derived(
-		new Set(providers.filter((p) => p.configured).map((p) => p.provider))
+		new Set(providers.filter((p) => p.configured || p.custom).map((p) => p.provider))
 	);
 
 	const configuredModels = $derived(

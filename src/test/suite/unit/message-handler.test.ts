@@ -1377,9 +1377,29 @@ suite("MessageHandler", () => {
 				apiKey: undefined,
 				api: undefined,
 				headers: undefined,
+				models: undefined,
 			},
 		]);
 		assert.strictEqual(result.success, true);
+	});
+
+	test("addProvider forwards models to provider.addProvider", async () => {
+		const models = [{ id: "m1" }, { id: "m2", name: "M2" }];
+		await handler.handle({
+			type: "addProvider",
+			data: { provider: "kilocode", models },
+		});
+		assert.deepStrictEqual(provider.calls.addProvider[0], [
+			{
+				provider: "kilocode",
+				name: undefined,
+				baseUrl: undefined,
+				apiKey: undefined,
+				api: undefined,
+				headers: undefined,
+				models,
+			},
+		]);
 	});
 
 	test("removeProvider routes to provider.removeProvider", async () => {
@@ -1389,6 +1409,50 @@ suite("MessageHandler", () => {
 		});
 		assert.deepStrictEqual(provider.calls.removeProvider[0], ["kilocode"]);
 		assert.strictEqual(result.success, true);
+	});
+
+	test("fetchProviderModels routes to provider and posts correlated provider-models", async () => {
+		provider.fetchProviderModels = async () => [
+			{ id: "m1" },
+			{ id: "m2", name: "M2" },
+		];
+		const result = await handler.handle({
+			type: "fetchProviderModels",
+			id: "req-fetch-1",
+			data: { baseUrl: "https://x/v1", api: "openai-completions", apiKey: "k" },
+		});
+		assert.deepStrictEqual(provider.calls.fetchProviderModels[0], [
+			{
+				baseUrl: "https://x/v1",
+				api: "openai-completions",
+				apiKey: "k",
+			},
+		]);
+		const posted = webviewMessages.find((m: any) => m.type === "provider-models");
+		assert.ok(posted, "provider-models message posted to webview");
+		assert.deepStrictEqual(posted.data.models, [
+			{ id: "m1" },
+			{ id: "m2", name: "M2" },
+		]);
+		assert.strictEqual(posted.data.requestId, "req-fetch-1");
+		assert.strictEqual(result.success, true);
+	});
+
+	test("fetchProviderModels failure posts correlated error to webview", async () => {
+		provider.fetchProviderModels = async () => {
+			throw new Error("boom");
+		};
+		const result = await handler.handle({
+			type: "fetchProviderModels",
+			id: "req-fetch-2",
+			data: { baseUrl: "https://x/v1" },
+		});
+		assert.strictEqual(result.error, "boom");
+		const posted = webviewMessages.find(
+			(m: any) => m.type === "error" && m.data?.requestId === "req-fetch-2",
+		);
+		assert.ok(posted, "correlated error posted to webview");
+		assert.strictEqual(posted.data.message, "boom");
 	});
 
 	test("openConfigFile routes to provider.openConfigFile with file", async () => {

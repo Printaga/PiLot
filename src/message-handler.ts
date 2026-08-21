@@ -266,6 +266,7 @@ export class MessageHandler {
 								apiKey: message.data.apiKey,
 								api: message.data.api,
 								headers: message.data.headers,
+								models: message.data.models,
 							}),
 						message.id,
 					);
@@ -285,6 +286,26 @@ export class MessageHandler {
 					);
 					result = { success: true };
 					break;
+
+				case "fetchProviderModels": {
+					const models = await this.withErrorReporting(
+						() =>
+							this.provider.fetchProviderModels({
+								baseUrl: message.data.baseUrl,
+								api: message.data.api,
+								apiKey: message.data.apiKey,
+							}),
+						message.id,
+					);
+					// Correlated success reply so the webview can populate the form
+					// only in response to THIS request (not unrelated host messages).
+					this.provider.webview?.postMessage({
+						type: "provider-models",
+						data: { models, requestId: message.id },
+					});
+					result = { success: true };
+					break;
+				}
 
 			case "openConfigFile": {
 					const file = message.data?.file;

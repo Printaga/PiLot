@@ -1951,12 +1951,29 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			custom: boolean;
 			credentialType: "oauth" | "api_key" | null;
 			oauthLogin: boolean;
+			baseUrl?: string;
+			api?: string;
+			models?: Array<{ id: string; name?: string }>;
 		}>
 	> {
 		if (!this.isInitialized || !this.modelRegistry) {
 			await this.initialize();
 		}
 		if (!this.modelRegistry) return [];
+		// Capture the registry before any await: a concurrent initialize() may
+		// otherwise swap this.modelRegistry mid-flight and yield an empty list.
+		const modelRegistry = this.modelRegistry;
+		const modelRuntime = this.modelRuntime;
+
+		// Read models.json once so custom providers can expose their stored
+		// baseUrl/api/models for re-editing in the GUI.
+		let configProviders: Record<string, Record<string, unknown>> = {};
+		try {
+			const cfg = await this.readModelsJsonConfig();
+			if (cfg.providers) configProviders = cfg.providers as Record<string, Record<string, unknown>>;
+		} catch {
+			// Ignore unreadable models.json; fall back to runtime-derived data only.
+		}
 
 		const seen = new Set<string>();
 		const result: Array<{
@@ -1967,10 +1984,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			custom: boolean;
 			credentialType: "oauth" | "api_key" | null;
 			oauthLogin: boolean;
+			baseUrl?: string;
+			api?: string;
+			models?: Array<{ id: string; name?: string }>;
 		}> = [];
 
 		// Seed from any model's provider (builtins/config/extension that expose models).
-		const models = this.modelRegistry.getAll();
+		const models = modelRegistry.getAll();
 		for (const model of models) seen.add(model.provider);
 
 		// Also include every composed provider — builtins, models.json config
@@ -1978,8 +1998,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// models. This is how the PI TUI lists custom providers such as Kilo Code,
 		// which otherwise never appear in the GUI provider list.
 		const oauthProviders = new Set<string>();
-		if (this.modelRuntime) {
-			for (const provider of this.modelRuntime.getProviders()) {
+		if (modelRuntime) {
+			for (const provider of modelRuntime.getProviders()) {
 				seen.add(provider.id);
 				// Providers offering an OAuth login flow (the PI CLI lists these for
 				// its /login provider selector).
@@ -1994,17 +2014,30 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const customIds = this.getCustomProviderIds();
 
 		for (const providerId of seen) {
-			const authStatus = this.modelRegistry.getProviderAuthStatus(
+			const authStatus = modelRegistry.getProviderAuthStatus(
 				providerId,
 			);
-			const displayName = this.modelRegistry.getProviderDisplayName(
+			const displayName = modelRegistry.getProviderDisplayName(
 				providerId,
 			);
 			const isOAuth =
-				typeof this.modelRuntime?.isUsingOAuth === "function"
-					? this.modelRuntime.isUsingOAuth(providerId)
+				typeof modelRuntime?.isUsingOAuth === "function"
+					? modelRuntime.isUsingOAuth(providerId)
 					: false;
-			result.push({
+			const cfg =
+				customIds.has(providerId) ? configProviders[providerId] : undefined;
+			const entry: {
+				provider: string;
+				name: string;
+				configured: boolean;
+				status: string;
+				custom: boolean;
+				credentialType: "oauth" | "api_key" | null;
+				oauthLogin: boolean;
+				baseUrl?: string;
+				api?: string;
+				models?: Array<{ id: string; name?: string }>;
+			} = {
 				provider: providerId,
 				name: displayName || providerId,
 				configured: authStatus.configured,
@@ -2018,7 +2051,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 						? "api_key"
 						: null,
 				oauthLogin: oauthProviders.has(providerId),
-			});
+			};
+			if (cfg) {
+				if (typeof cfg.baseUrl === "string") entry.baseUrl = cfg.baseUrl;
+				if (typeof cfg.api === "string") entry.api = cfg.api;
+				if (Array.isArray(cfg.models)) {
+					entry.models = (cfg.models as Array<Record<string, unknown>>)
+						.filter((m) => m && typeof m.id === "string")
+						.map((m) => ({
+							id: String(m.id),
+							name: typeof m.name === "string" ? m.name : undefined,
+						}));
+				}
+			}
+			result.push(entry);
 		}
 
 		return result.sort((a, b) => a.provider.localeCompare(b.provider));
@@ -2221,7 +2267,10 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		// Default to openai-completions so a custom provider has a known wire
 		// protocol even when the UI leaves the API field at its default.
 		providerConfig.api = input.api?.trim() || "openai-completions";
-		if (Array.isArray(input.models) && input.models.length > 0) {
+		// Models are replaced whenever the caller provides a list (including an
+		// empty one, so editing can clear the list). name/baseUrl/apiKey remain
+		// set-if-nonempty: they cannot be cleared via this path.
+		if (Array.isArray(input.models)) {
 			providerConfig.models = input.models
 				.filter((m) => m && typeof m.id === "string" && m.id.trim())
 				.map((m) => {
@@ -2267,6 +2316,80 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
 		});
+	}
+
+	/**
+	 * Fetch the models advertised by a custom (OpenAI-compatible) provider.
+	 * Queries `GET {baseUrl}/models` with an optional Bearer API key and maps
+	 * the response's `data[].id` entries to `{ id, name }` model descriptors.
+	 * This lets the GUI offer a model picker when adding a custom provider.
+	 */
+	async fetchProviderModels(input: {
+		baseUrl: string;
+		api?: string;
+		apiKey?: string;
+	}): Promise<Array<{ id: string; name?: string }>> {
+		const baseUrl = input.baseUrl?.trim();
+		if (!baseUrl) {
+			throw new Error("Base URL is required to list provider models");
+		}
+		// OpenAI-compatible providers expose a `/models` listing.
+		const modelsUrl = baseUrl.replace(/\/+$/, "") + "/models";
+		const headers: Record<string, string> = { Accept: "application/json" };
+		if (input.apiKey?.trim()) {
+			headers["Authorization"] = `Bearer ${input.apiKey.trim()}`;
+		}
+
+		let res: Response;
+		try {
+			res = await fetch(modelsUrl, { method: "GET", headers });
+		} catch (error) {
+			throw new Error(
+				`Failed to reach ${modelsUrl}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				{ cause: error },
+			);
+		}
+		if (!res.ok) {
+			throw new Error(
+				`Provider returned ${res.status} ${res.statusText} when listing models`,
+			);
+		}
+
+		const json = (await res.json().catch(() => null)) as
+			| { data?: unknown }
+			| unknown[]
+			| null;
+		const rawItems = Array.isArray(json)
+			? json
+			: json && typeof json === "object" && Array.isArray((json as { data?: unknown }).data)
+				? (json as { data?: unknown[] }).data
+				: null;
+		if (!rawItems) {
+			throw new Error(
+				"Unexpected response format from provider /models endpoint (expected { data: [...] })",
+			);
+		}
+
+		const models: Array<{ id: string; name?: string }> = [];
+		const seen = new Set<string>();
+		for (const item of rawItems) {
+			const id =
+				item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+					? (item as { id: string }).id
+					: typeof item === "string"
+						? item
+						: null;
+			if (!id || seen.has(id)) continue;
+			seen.add(id);
+			const name =
+				item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string"
+					? (item as { name: string }).name
+					: undefined;
+			models.push(name ? { id, name } : { id });
+		}
+		return models;
 	}
 
 	/**

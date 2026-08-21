@@ -10,6 +10,10 @@
 		credentialType?: "oauth" | "api_key" | null;
 		/** Provider offers an interactive OAuth login flow (PI CLI /login parity). */
 		oauthLogin?: boolean;
+		/** Stored models.json config (custom providers) for re-editing. */
+		baseUrl?: string;
+		api?: string;
+		models?: Array<{ id: string; name?: string }>;
 	}
 
 	interface LoginPromptState {
@@ -45,6 +49,7 @@
 	let checkingProvider = $state<Record<string, boolean>>({});
 
 	let showAddForm = $state(false);
+	let editingProviderId = $state<string | null>(null);
 	let newProviderId = $state('');
 	let newProviderName = $state('');
 	let newProviderBaseUrl = $state('');
@@ -57,6 +62,12 @@
 	// only to THIS request's success/error replies, not unrelated host messages.
 	let pendingAddId = $state<string | null>(null);
 	let pendingRequestId = $state<string | null>(null);
+	// Model discovery from the provider's own `/models` endpoint.
+	let fetchingModels = $state(false);
+	let fetchError = $state<string | null>(null);
+	let pendingFetchId = $state<string | null>(null);
+
+	const isEditingProvider = $derived(editingProviderId !== null);
 
 	// ── OAuth login state (mirrors the PI CLI's /login dialog) ────────────────
 	let loginStates = $state<Record<string, LoginState>>({});
@@ -157,6 +168,41 @@
 		};
 		window.addEventListener('message', onCheckResult);
 
+		// Model discovery replies for the add/edit form: a correlated
+		// `provider-models` fills the models textarea; a correlated `error`
+		// surfaces the failure so the user can retry.
+		const onFetchModelsMessage = (event: MessageEvent) => {
+			const msg = event.data;
+			if (!msg || !msg.type || !pendingFetchId) return;
+			if (
+				msg.type === 'provider-models' &&
+				msg.data?.requestId === pendingFetchId &&
+				Array.isArray(msg.data?.models)
+			) {
+				fetchingModels = false;
+				fetchError = null;
+				pendingFetchId = null;
+				const lines = (msg.data.models as Array<{ id: string; name?: string }>).map(
+					(m) => (m.name ? `${m.id}, ${m.name}` : m.id)
+				);
+				// Assign unconditionally so an empty provider response clears any
+				// stale entries in the textarea.
+				newProviderModels = lines.join('\n');				(window as any).__toast?.showToast({
+					type: 'success',
+					title: 'Models fetched',
+					message: `Found ${lines.length} model${lines.length === 1 ? '' : 's'} from the provider`,
+				});
+			} else if (msg.type === 'error' && msg.data?.requestId === pendingFetchId) {
+				fetchingModels = false;
+				pendingFetchId = null;
+				fetchError =
+					typeof msg.data?.message === 'string'
+						? msg.data.message
+						: 'Failed to fetch models';
+			}
+		};
+		window.addEventListener('message', onFetchModelsMessage);
+
 		// OAuth login flow: progress events, prompts awaiting an answer, and the
 		// final result all arrive as provider-login-* messages from the host.
 		const onLoginMessage = (event: MessageEvent) => {
@@ -206,6 +252,7 @@
 			window.removeEventListener('message', onHostMessage);
 			window.removeEventListener('message', onCheckResult);
 			window.removeEventListener('message', onLoginMessage);
+			window.removeEventListener('message', onFetchModelsMessage);
 		};
 	});
 
@@ -246,6 +293,7 @@
 
 	function resetAddForm() {
 		showAddForm = false;
+		editingProviderId = null;
 		newProviderId = '';
 		newProviderName = '';
 		newProviderBaseUrl = '';
@@ -256,6 +304,71 @@
 		addError = null;
 		pendingAddId = null;
 		pendingRequestId = null;
+		fetchingModels = false;
+		fetchError = null;
+		pendingFetchId = null;
+	}
+
+	/** Open the form in add mode (fresh provider). */
+	function openAddForm() {
+		if (showAddForm && !isEditingProvider) {
+			resetAddForm();
+			return;
+		}
+		resetAddForm();
+		showAddForm = true;
+	}
+
+	/**
+	 * Open the form in edit mode for an existing custom provider, prefilled
+	 * from its stored models.json config so name/baseUrl/api/models can all be
+	 * changed (not just the API key). Submitting re-sends `addProvider`, which
+	 * replaces the entry in place.
+	 */
+	function startEditProvider(p: {
+		provider: string;
+		name: string;
+		baseUrl?: string;
+		api?: string;
+		models?: Array<{ id: string; name?: string }>;
+	}) {
+		resetAddForm();
+		editingProviderId = p.provider;
+		showAddForm = true;
+		newProviderId = p.provider;
+		newProviderName = p.name === p.provider ? '' : p.name;
+		newProviderBaseUrl = p.baseUrl ?? '';
+		newProviderApi = p.api ?? 'openai-completions';
+		newProviderModels = (p.models ?? [])
+			.map((m) => (m.name ? `${m.id}, ${m.name}` : m.id))
+			.join('\n');
+	}
+
+	/** Query the provider's own `/models` endpoint to discover available models. */
+	function fetchModels() {
+		const baseUrl = newProviderBaseUrl.trim();
+		if (!baseUrl) {
+			fetchError = 'Enter a base URL first — models are fetched from the provider endpoint.';
+			return;
+		}
+		if (fetchingModels) return;
+		addError = null;
+		fetchError = null;
+		const requestId =
+			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+				? crypto.randomUUID()
+				: `fetch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		pendingFetchId = requestId;
+		fetchingModels = true;
+		sendMessage({
+			type: 'fetchProviderModels',
+			id: requestId,
+			data: {
+				baseUrl,
+				api: newProviderApi.trim() || undefined,
+				apiKey: newProviderApiKey.trim() || undefined
+			}
+		});
 	}
 
 	function parseModelLines(text: string): { id: string; name?: string }[] {
@@ -299,7 +412,9 @@
 				baseUrl: newProviderBaseUrl.trim() || undefined,
 				apiKey: newProviderApiKey.trim() || undefined,
 				api: newProviderApi.trim() || undefined,
-				models: models.length ? models : undefined
+				// In edit mode always send the list (even empty) so clearing the
+				// textarea actually removes the stored models.
+				models: isEditingProvider || models.length ? models : undefined
 			}
 		});
 	}
@@ -404,7 +519,7 @@
 				</button>
 				<button
 					class="btn small"
-					onclick={() => (showAddForm = !showAddForm)}
+					onclick={openAddForm}
 					title="Add a custom provider"
 				>
 					+ Add provider
@@ -521,7 +636,7 @@
 					</svg>
 				</div>
 				<div class="auth-info">
-					<span class="auth-name">Add custom provider</span>
+					<span class="auth-name">{isEditingProvider ? 'Edit custom provider' : 'Add custom provider'}</span>
 					<span class="auth-status">Persisted to models.json (visible in TUI too)</span>
 				</div>
 			</div>
@@ -533,6 +648,8 @@
 						<input
 							bind:value={newProviderId}
 							placeholder="e.g. kilocode"
+							disabled={isEditingProvider}
+							title={isEditingProvider ? 'Provider ID cannot be changed' : ''}
 							onkeydown={(e) => e.key === 'Enter' && addProvider()}
 						/>
 					</label>
@@ -593,6 +710,24 @@
 						placeholder={"gpt-4o\nllama3.1:8b, Llama 3.1 8B"}
 					></textarea>
 					<span class="field-hint">Each line is a model ID, optionally "id, Display Name". Saved to models.json and shown in model selection.</span>
+					<div class="fetch-models-row">
+						<button
+							class="btn small"
+							onclick={fetchModels}
+							disabled={fetchingModels || !newProviderBaseUrl.trim()}
+							title="Query the provider's /models endpoint and fill the list above"
+						>
+							{fetchingModels ? 'Fetching…' : 'Fetch available models'}
+						</button>
+						{#if !newProviderBaseUrl.trim()}
+							<span class="field-hint">Enter a base URL to fetch the model list.</span>
+						{:else}
+							<span class="field-hint">Queries the OpenAI-compatible `{newProviderBaseUrl.trim().replace(/\/+$/, '')}/models` endpoint. For authenticated providers, paste the API key above first — stored keys are never sent back to this form.</span>
+						{/if}
+					</div>
+					{#if fetchError}
+						<div class="form-error">{fetchError}</div>
+					{/if}
 				</label>
 
 				{#if addError}
@@ -600,7 +735,9 @@
 				{/if}
 
 				<div class="auth-actions">
-					<button class="btn primary small" onclick={addProvider} disabled={pendingAddId !== null}>Add provider</button>
+					<button class="btn primary small" onclick={addProvider} disabled={pendingAddId !== null}>
+						{isEditingProvider ? 'Save changes' : 'Add provider'}
+					</button>
 					<button class="btn small" onclick={resetAddForm}>Cancel</button>
 				</div>
 			</div>
@@ -684,7 +821,8 @@
 						<button
 							class="btn small"
 							class:primary={!p.configured}
-							onclick={() => startEditApiKey(p.provider)}
+							onclick={() =>
+								p.custom ? startEditProvider(p) : startEditApiKey(p.provider)}
 						>
 							{p.configured ? 'Update' : 'Configure'}
 						</button>
@@ -794,7 +932,8 @@
 						<button
 							class="btn small"
 							class:primary={!p.configured}
-							onclick={() => startEditApiKey(p.provider)}
+							onclick={() =>
+								p.custom ? startEditProvider(p) : startEditApiKey(p.provider)}
 						>
 							{p.configured ? 'Update' : 'Configure'}
 						</button>
@@ -1056,6 +1195,29 @@
 	.form-error {
 		font-size: 11px;
 		color: var(--color-error);
+	}
+
+	.fetch-models-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+
+	.models-label textarea {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: 6px 10px;
+		font-size: 11px;
+		font-family: var(--font-mono, monospace);
+		color: var(--color-text);
+		resize: vertical;
+	}
+
+	.models-label textarea:focus {
+		outline: none;
+		border-color: var(--color-primary);
 	}
 
 	.custom-badge {

@@ -65,6 +65,12 @@ export interface ProviderApi {
 			credentialType: "oauth" | "api_key" | null;
 			/** Provider offers an OAuth login flow (mirrors the PI CLI's /login list). */
 			oauthLogin: boolean;
+			/** Custom-provider base URL (models.json `baseUrl`), if known. */
+			baseUrl?: string;
+			/** Custom-provider API wire protocol (models.json `api`), if known. */
+			api?: string;
+			/** Custom-provider static model list (models.json `models`) for re-editing. */
+			models?: Array<{ id: string; name?: string }>;
 		}>
 	>;
 	checkProviderAuth(providerId: string): Promise<{
@@ -95,8 +101,20 @@ export interface ProviderApi {
 		apiKey?: string;
 		api?: string;
 		headers?: Record<string, string>;
+		/** Model list to persist. When provided (even empty), replaces the stored list. */
+		models?: Array<{ id: string; name?: string }>;
 	}): Promise<void>;
 	removeProvider(providerId: string): Promise<void>;
+	/**
+	 * Fetch the list of models advertised by a custom (OpenAI-compatible)
+	 * provider endpoint, e.g. `GET {baseUrl}/models`. Returns the model IDs
+	 * (and optional display names) the provider exposes.
+	 */
+	fetchProviderModels(input: {
+		baseUrl: string;
+		api?: string;
+		apiKey?: string;
+	}): Promise<Array<{ id: string; name?: string }>>;
 	openConfigFile(file: "auth" | "models" | "settings"): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
 	listSessions(): Promise<

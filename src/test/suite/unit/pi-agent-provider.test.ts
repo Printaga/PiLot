@@ -859,6 +859,107 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(kc.configured, false);
 		});
 
+		test("getProviderAuthData exposes stored baseUrl/api/models for custom providers", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [{ id: "kilocode" }],
+				getRegisteredProviderIds: () => ["kilocode"],
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).readModelsJsonConfig = async () => ({
+				providers: {
+					kilocode: {
+						name: "Kilo Code",
+						baseUrl: "https://api.kilocode.ai/v1",
+						api: "openai-completions",
+						models: [
+							{ id: "kilo-large" },
+							{ id: "kilo-small", name: "Kilo Small" },
+							{ id: 42 },
+						],
+					},
+				},
+			});
+
+			const data = await provider["getProviderAuthData"]();
+			const kc = data.find((p: any) => p.provider === "kilocode");
+			assert.ok(kc, "custom provider should appear in the list");
+			assert.strictEqual(kc.baseUrl, "https://api.kilocode.ai/v1");
+			assert.strictEqual(kc.api, "openai-completions");
+			assert.deepStrictEqual(kc.models, [
+				{ id: "kilo-large", name: undefined },
+				{ id: "kilo-small", name: "Kilo Small" },
+			]);
+		});
+
+		suite("fetchProviderModels", () => {
+			let originalFetch: typeof globalThis.fetch | undefined;
+
+			setup(() => {
+				originalFetch = globalThis.fetch;
+			});
+
+			teardown(() => {
+				globalThis.fetch = originalFetch!;
+			});
+
+			test("queries {baseUrl}/models and maps data[].id", async () => {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				const calls: any[] = [];
+				globalThis.fetch = (async (url: string, init: any) => {
+					calls.push({ url, init });
+					return {
+						ok: true,
+						status: 200,
+						statusText: "OK",
+						json: async () => ({ data: [{ id: "m1" }, { id: "m2", name: "M2" }, "m3"] }),
+					};
+				}) as any;
+
+				const models = await provider["fetchProviderModels"]({
+					baseUrl: "https://api.example.com/v1/",
+					apiKey: "secret-key",
+				});
+
+				assert.strictEqual(calls.length, 1);
+				assert.strictEqual(calls[0].url, "https://api.example.com/v1/models");
+				assert.strictEqual(calls[0].init.headers.Authorization, "Bearer secret-key");
+				assert.deepStrictEqual(models, [
+					{ id: "m1" },
+					{ id: "m2", name: "M2" },
+					{ id: "m3" },
+				]);
+			});
+
+			test("throws on HTTP error and on missing baseUrl", async () => {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				globalThis.fetch = (async () => ({
+					ok: false,
+					status: 401,
+					statusText: "Unauthorized",
+				})) as any;
+				await assert.rejects(
+					provider["fetchProviderModels"]({ baseUrl: "https://x/v1" }),
+					/401 Unauthorized/,
+				);
+				await assert.rejects(
+					provider["fetchProviderModels"]({ baseUrl: "  " }),
+					/Base URL is required/,
+				);
+			});
+		});
+
 		test("addProvider writes models.json and registers the provider", async () => {
 			const provider = buildProvider();
 			await settleInitialize(provider);
@@ -1001,11 +1102,55 @@ suite("PiAgentProvider", () => {
 
 			await provider["addProvider"]({ provider: "kilocode", apiKey: "x" });
 
-			assert.ok(written?.providers?.kilocode, "provider entry written");
+			assert.ok(written, "models.json should be written");
 			assert.strictEqual(
 				written.providers.kilocode.models,
 				undefined,
-				"models key omitted when none provided",
+				"no models key when none provided",
+			);
+		});
+
+		test("addProvider with empty models array clears stored models", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: () => {},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+			let written: any = null;
+			// Existing entry already has models from a previous save.
+			(provider as any).readModelsJsonConfig = async () => ({
+				providers: { kilocode: { baseUrl: "https://x", models: [{ id: "old" }] } },
+			});
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["addProvider"]({ provider: "kilocode", models: [] });
+
+			assert.ok(written, "models.json should be written");
+			assert.deepStrictEqual(
+				written.providers.kilocode.models,
+				[],
+				"empty list should replace stored models",
 			);
 		});
 
