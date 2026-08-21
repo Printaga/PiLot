@@ -49,7 +49,8 @@
 	let newProviderName = $state('');
 	let newProviderBaseUrl = $state('');
 	let newProviderApiKey = $state('');
-	let newProviderApi = $state('');
+	let newProviderApi = $state('openai-completions');
+	let newProviderModels = $state('');
 	let showNewApiKey = $state(false);
 	let addError = $state<string | null>(null);
 	// While an addProvider request is in flight, its correlation id lets us react
@@ -104,16 +105,55 @@
 
 		const onCheckResult = (event: MessageEvent) => {
 			const msg = event.data;
-			if (!msg || msg.type !== 'provider-auth-check-result') return;
+			if (!msg || !msg.type) return;
+			// An uncorrelated error (e.g. checkProviderAuth threw in the host)
+			// arrives as a bare `error` message with no requestId. Only treat it
+			// as an auth-check failure when a check is actually in flight.
+			if (msg.type === 'error' && !msg.data?.requestId) {
+				const anyChecking = Object.values(checkingProvider).some(Boolean);
+				if (!anyChecking) return;
+				for (const id of Object.keys(checkingProvider)) {
+					if (checkingProvider[id]) checkingProvider[id] = false;
+				}
+				const detail =
+					typeof msg.data?.message === 'string'
+						? msg.data.message
+						: 'Auth check failed';
+				const toast = (window as any).__toast;
+				toast?.showToast({
+					type: 'error',
+					title: 'Auth check failed',
+					message: detail,
+				});
+				return;
+			}
+			if (msg.type !== 'provider-auth-check-result') return;
 			const d = msg.data;
 			if (!d || typeof d.provider !== 'string') return;
+			checkingProvider[d.provider] = false;
 			if (typeof d.configured === 'boolean') {
 				authCheckResults[d.provider] = {
 					configured: d.configured,
 					credentialType: d.credentialType ?? null,
 				};
+				const toast = (window as any).__toast;
+				if (!toast?.showToast) return;
+				if (d.configured) {
+					const label =
+						d.credentialType === 'oauth' ? 'OAuth active' : 'API key valid';
+					toast.showToast({
+						type: 'success',
+						title: label,
+						message: `Credentials verified for ${d.provider}`,
+					});
+				} else {
+					toast.showToast({
+						type: 'warning',
+						title: 'No credentials',
+						message: `No ${d.credentialType ?? 'configured'} credentials found for ${d.provider}`,
+					});
+				}
 			}
-			checkingProvider[d.provider] = false;
 		};
 		window.addEventListener('message', onCheckResult);
 
@@ -210,11 +250,29 @@
 		newProviderName = '';
 		newProviderBaseUrl = '';
 		newProviderApiKey = '';
-		newProviderApi = '';
+		newProviderApi = 'openai-completions';
+		newProviderModels = '';
 		showNewApiKey = false;
 		addError = null;
 		pendingAddId = null;
 		pendingRequestId = null;
+	}
+
+	function parseModelLines(text: string): { id: string; name?: string }[] {
+		const out: { id: string; name?: string }[] = [];
+		const seen = new Set<string>();
+		for (const raw of text.split('\n')) {
+			const line = raw.trim();
+			if (!line) continue;
+			// Support "id,name" (optional display name) or just "id".
+			const comma = line.indexOf(',');
+			const id = (comma >= 0 ? line.slice(0, comma) : line).trim();
+			const name = comma >= 0 ? line.slice(comma + 1).trim() : '';
+			if (!id || seen.has(id)) continue;
+			seen.add(id);
+			out.push(name ? { id, name } : { id });
+		}
+		return out;
 	}
 
 	async function addProvider() {
@@ -229,6 +287,7 @@
 			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
 				? crypto.randomUUID()
 				: `add-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		const models = parseModelLines(newProviderModels);
 		pendingAddId = providerId;
 		pendingRequestId = requestId;
 		sendMessage({
@@ -239,7 +298,8 @@
 				name: newProviderName.trim() || undefined,
 				baseUrl: newProviderBaseUrl.trim() || undefined,
 				apiKey: newProviderApiKey.trim() || undefined,
-				api: newProviderApi.trim() || undefined
+				api: newProviderApi.trim() || undefined,
+				models: models.length ? models : undefined
 			}
 		});
 	}
@@ -523,6 +583,16 @@
 							{/if}
 						</button>
 					</div>
+				</label>
+
+				<label class="models-label">
+					<span>Models (optional, one per line)</span>
+					<textarea
+						bind:value={newProviderModels}
+						rows="3"
+						placeholder={"gpt-4o\nllama3.1:8b, Llama 3.1 8B"}
+					></textarea>
+					<span class="field-hint">Each line is a model ID, optionally "id, Display Name". Saved to models.json and shown in model selection.</span>
 				</label>
 
 				{#if addError}

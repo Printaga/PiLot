@@ -21,6 +21,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Fixed a bug where deleting a provider from the GUI did not actually remove the provider from PI.
 - Fixed favorite models not persisting between app restarts.
 - Fixed issues with running the test suite for development.
+- Fixed several dependabot security vulnerabilities.
 - Fixed 3 minor code quality issues found by Fallow.
 
 ## [2.3.1] - 2026-07-19

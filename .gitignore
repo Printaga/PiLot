@@ -39,5 +39,9 @@ graphify-out
 # macOS
 .DS_Store
 
+# Compiled extension sources (tsc/esbuild output, never commit)
+src/**/*.js
+src/**/*.js.map
+
 
 

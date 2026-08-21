@@ -1,5 +1,4 @@
 import * as assert from "assert";
-import * as fs from "node:fs/promises";
 import * as vscode from "vscode";
 import * as piModule from "@earendil-works/pi-coding-agent";
 import {

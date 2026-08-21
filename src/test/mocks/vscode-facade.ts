@@ -11,7 +11,7 @@
 // then fills in behaviour.
 import { EventEmitter as NodeEventEmitter } from 'node:events';
 import * as path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 class FacadeUri {
 	scheme: string;
@@ -297,7 +297,7 @@ export function installVscodeFacade(): void {
 			dispose: () => {},
 		}),
 		fs: {
-			readFile: async (u: any) => new Uint8Array(),
+			readFile: async (_u: any) => new Uint8Array(),
 			writeFile: async () => {},
 			stat: async () => ({ type: 1, size: 0, ctime: 0, mtime: 0 }),
 			readDirectory: async () => [],

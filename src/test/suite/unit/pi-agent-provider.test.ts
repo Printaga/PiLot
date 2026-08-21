@@ -1,10 +1,8 @@
 import * as assert from "node:assert";
 import * as vscode from "vscode";
-import * as fsPromises from "node:fs/promises";
 import {
 	SessionManager,
 	type SessionManager as SessionManagerType,
-	type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -910,6 +908,105 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(written.providers.kilocode.baseUrl, "https://api.kilocode.ai");
 			assert.ok(regCalls.some((c) => c.id === "kilocode"), "registerProvider called");
 			assert.strictEqual(reloadCalls.length, 1, "reloadConfig called");
+		});
+
+		test("addProvider persists models to models.json and registerProvider", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			const regCalls: any[] = [];
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: (id: string, cfg: any) => {
+					regCalls.push({ id, cfg });
+				},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["addProvider"]({
+				provider: "kilocode",
+				api: "openai-completions",
+				models: [{ id: "kilo-large" }, { id: "kilo-small", name: "Kilo Small" }],
+			});
+
+			assert.ok(written, "models.json should be written");
+			const entry = written.providers.kilocode;
+			assert.ok(entry, "provider entry written");
+			assert.strictEqual(entry.api, "openai-completions", "api default applied");
+			assert.deepStrictEqual(
+				entry.models,
+				[{ id: "kilo-large" }, { id: "kilo-small", name: "Kilo Small" }],
+				"models written with ids and names",
+			);
+			const reg = regCalls.find((c) => c.id === "kilocode");
+			assert.ok(reg, "registerProvider called");
+			assert.deepStrictEqual(
+				reg.cfg.models,
+				[{ id: "kilo-large" }, { id: "kilo-small", name: "Kilo Small" }],
+				"models passed to registerProvider",
+			);
+		});
+
+		test("addProvider omits models when none provided", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: () => {},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["addProvider"]({ provider: "kilocode", apiKey: "x" });
+
+			assert.ok(written?.providers?.kilocode, "provider entry written");
+			assert.strictEqual(
+				written.providers.kilocode.models,
+				undefined,
+				"models key omitted when none provided",
+			);
 		});
 
 		test("removeProvider deletes models.json entry and unregisters", async () => {

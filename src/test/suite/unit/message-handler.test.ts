@@ -102,7 +102,7 @@ function createMockProvider(): {
 	// `provider.calls.<name>`. Record every method call through a proxy so the
 	// call log stays populated regardless of how the method was replaced.
 	const provider: any = new Proxy(base, {
-		get(target, prop, receiver) {
+		get(target, prop, _receiver) {
 			const value = Reflect.get(target, prop, target);
 			if (typeof prop === 'string' && typeof value === 'function' && prop !== 'postMessage') {
 				return (...args: unknown[]) => {

@@ -2189,6 +2189,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		baseUrl?: string;
 		apiKey?: string;
 		api?: string;
+		models?: Array<{ id: string; name?: string }>;
 		headers?: Record<string, string>;
 	}): Promise<void> {
 		const providerId = input.provider?.trim();
@@ -2217,7 +2218,18 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		const providerConfig: Record<string, unknown> = { ...existing };
 		if (input.name?.trim()) providerConfig.name = input.name.trim();
 		if (input.baseUrl?.trim()) providerConfig.baseUrl = input.baseUrl.trim();
-		if (input.api?.trim()) providerConfig.api = input.api.trim();
+		// Default to openai-completions so a custom provider has a known wire
+		// protocol even when the UI leaves the API field at its default.
+		providerConfig.api = input.api?.trim() || "openai-completions";
+		if (Array.isArray(input.models) && input.models.length > 0) {
+			providerConfig.models = input.models
+				.filter((m) => m && typeof m.id === "string" && m.id.trim())
+				.map((m) => {
+					const entry: Record<string, unknown> = { id: m.id.trim() };
+					if (m.name?.trim()) entry.name = m.name.trim();
+					return entry;
+				});
+		}
 		if (input.apiKey?.trim()) providerConfig.apiKey = input.apiKey.trim();
 		if (input.headers && Object.keys(input.headers).length > 0) {
 			providerConfig.headers = {
@@ -2241,6 +2253,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 				baseUrl: providerConfig.baseUrl as string | undefined,
 				apiKey: providerConfig.apiKey as string | undefined,
 				headers: providerConfig.headers as Record<string, string> | undefined,
+				models: (providerConfig.models as any) ?? undefined,
 			});
 		} catch (error) {
 			this.logDebug(
