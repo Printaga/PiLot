@@ -60,10 +60,14 @@ function findPiSdkAtPath(nodeModulesPath) {
 		"pi-coding-agent",
 	);
 	if (fs.existsSync(directSdkPath)) {
-		// Resolve to real path for pnpm store symlinks, then find the real node_modules
+		// Resolve to real path for pnpm store symlinks, then find the real node_modules.
+		// Use lastIndexOf so that for mise's nested layout
+		// (outer node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules/@earendil-works/pi-coding-agent)
+		// we extract the outer node_modules, not the inner .mise/.../node_modules.
 		try {
 			const realSdkPath = fs.realpathSync(directSdkPath);
-			const nodeModulesIdx = realSdkPath.indexOf("/node_modules/");
+			const normalizedReal = realSdkPath.replace(/\\/g, "/");
+			const nodeModulesIdx = normalizedReal.lastIndexOf("/node_modules/");
 			if (nodeModulesIdx > 0) {
 				const realNodeModules = realSdkPath.substring(
 					0,
@@ -316,31 +320,36 @@ function findGlobalPiInstallation() {
 		if (fs.existsSync(miseInstallsBase)) {
 			try {
 				for (const category of fs.readdirSync(miseInstallsBase)) {
+					// Only scan tool categories that match the PI CLI package name.
+					// Version subdirectories (e.g. "0.85.1", "latest") do not repeat
+					// the tool name, so the filter must be on the category, not the entry.
+					if (!category.includes("pi-coding-agent")) continue;
 					const categoryPath = path.join(miseInstallsBase, category);
 					if (!fs.statSync(categoryPath).isDirectory()) continue;
-					for (const entry of fs.readdirSync(categoryPath)) {
-						if (!entry.includes("pi-coding-agent")) continue;
-						const entryPath = path.join(categoryPath, entry);
-						if (!fs.statSync(entryPath).isDirectory()) continue;
-						// Check version subdirectories (e.g. "0.85.1", "latest" symlink)
-						for (const version of fs.readdirSync(entryPath)) {
-							const versionNodeModules = path.join(
-								entryPath,
-								version,
-								"node_modules",
-							);
-							if (fs.existsSync(versionNodeModules)) {
-								possiblePaths.push(versionNodeModules);
+
+					// Each entry (e.g. "0.85.1", "latest") IS a version directory.
+					// node_modules/ is a direct child of the version dir, not nested.
+					// Wrap in try-catch so a single bad version dir doesn't abort the scan.
+					try {
+						for (const entry of fs.readdirSync(categoryPath)) {
+							const entryPath = path.join(categoryPath, entry);
+							if (!fs.statSync(entryPath).isDirectory()) continue;
+							const nmEntry = path.join(entryPath, "node_modules");
+							if (
+								fs.existsSync(nmEntry) &&
+								fs.statSync(nmEntry).isDirectory()
+							) {
+								possiblePaths.push(nmEntry);
 								// Also check .mise subdirectory (aube-bin-shim layout:
 								// node_modules/.mise/@earendel-works+pi-coding-agent@ver/node_modules/)
-								const miseSubdir = path.join(
-									versionNodeModules,
-									".mise",
-								);
+								const miseSubdir = path.join(nmEntry, ".mise");
 								if (fs.existsSync(miseSubdir)) {
 									for (const miseEntry of fs.readdirSync(miseSubdir)) {
 										if (!miseEntry.includes("pi-coding-agent")) continue;
-										const miseEntryPath = path.join(miseSubdir, miseEntry);
+										const miseEntryPath = path.join(
+											miseSubdir,
+											miseEntry,
+										);
 										if (!fs.statSync(miseEntryPath).isDirectory()) continue;
 										for (const subVer of fs.readdirSync(miseEntryPath)) {
 											const subNodeModules = path.join(
@@ -356,6 +365,8 @@ function findGlobalPiInstallation() {
 								}
 							}
 						}
+					} catch (_e) {
+						// Ignore errors from scanning this category; try next category
 					}
 				}
 			} catch (_e) {
@@ -424,15 +435,38 @@ function findPiSdkFromCommand() {
 			return null;
 		}
 
+		// Skip the mise binary shim (~/.local/share/mise/shims/pi) — it is a
+		// symlink to the compiled mise binary itself, not a text script. We can't
+		// derive the SDK path from it here; the installs-directory scan in
+		// findGlobalPiInstallation() will find the actual install instead.
+		try {
+			if (fs.lstatSync(piPath).isSymbolicLink()) {
+				const resolved = fs.realpathSync(piPath);
+				const baseName = path.basename(resolved).toLowerCase();
+				if (baseName === "mise" || baseName === "mise.exe") {
+					console.error(
+						"[PiLot] Skipping mise binary shim (not a text shim): " + piPath,
+					);
+					return null;
+				}
+			}
+		} catch (_e) {
+			// lstat/realpath failed — fall through and let deriveSdkPathFromBinary try
+		}
+
 		// The pi executable reference is typically at:
 		// - npm: ~/.nvm/versions/node/.../lib/node_modules/@earendel-works/pi-coding-agent/dist/cli.js
 		// - pnpm shim: ~/.local/share/pnpm/bin/pi (shell script with # cmd-shim-target)
-		// - mise/bun: ~/.local/share/mise/.../node_modules/.bin/pi (aube-bin-shim script)
+		// - mise install dir: ~/.local/share/mise/installs/.../node_modules/.bin/pi (aube-bin-shim text script)
+		// - mise shim dir: ~/.local/share/mise/shims/pi (symlink to compiled mise binary — skipped above)
 		// - bun: ~/.bun/bin/pi (shim that runs: bun <path>)
 
 		// For pnpm, the shim contains # cmd-shim-target=... pointing to the actual CLI
 		// For npm/pnpm, it might also contain exec "..." lines with the actual path
-		// For mise, the shim contains # aube-bin-shim v2 target=... pointing to the CLI
+		// For mise (install dir), the shim contains # aube-bin-shim v2 target=... pointing to the CLI
+		// Binary files (e.g. compiled mise binary shim in ~/.local/share/mise/shims/)
+		// throw from readFileSync("utf8") and are silently skipped here — they are
+		// handled upstream by the null return from findPiSdkFromCommand().
 
 		const result = deriveSdkPathFromBinary(piPath);
 		if (!result) {
