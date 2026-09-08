@@ -303,14 +303,82 @@ function findGlobalPiInstallation() {
 		// pnpm not available, skip
 	}
 
+	// Check mise installations (covers installs where the 'pi' binary is not on
+	// PATH seen by VS Code, e.g. launched from desktop dock instead of terminal)
+	if (homeDir) {
+		const miseInstallsBase = path.join(
+			homeDir,
+			".local",
+			"share",
+			"mise",
+			"installs",
+		);
+		if (fs.existsSync(miseInstallsBase)) {
+			try {
+				for (const category of fs.readdirSync(miseInstallsBase)) {
+					const categoryPath = path.join(miseInstallsBase, category);
+					if (!fs.statSync(categoryPath).isDirectory()) continue;
+					for (const entry of fs.readdirSync(categoryPath)) {
+						if (!entry.includes("pi-coding-agent")) continue;
+						const entryPath = path.join(categoryPath, entry);
+						if (!fs.statSync(entryPath).isDirectory()) continue;
+						// Check version subdirectories (e.g. "0.85.1", "latest" symlink)
+						for (const version of fs.readdirSync(entryPath)) {
+							const versionNodeModules = path.join(
+								entryPath,
+								version,
+								"node_modules",
+							);
+							if (fs.existsSync(versionNodeModules)) {
+								possiblePaths.push(versionNodeModules);
+								// Also check .mise subdirectory (aube-bin-shim layout:
+								// node_modules/.mise/@earendel-works+pi-coding-agent@ver/node_modules/)
+								const miseSubdir = path.join(
+									versionNodeModules,
+									".mise",
+								);
+								if (fs.existsSync(miseSubdir)) {
+									for (const miseEntry of fs.readdirSync(miseSubdir)) {
+										if (!miseEntry.includes("pi-coding-agent")) continue;
+										const miseEntryPath = path.join(miseSubdir, miseEntry);
+										if (!fs.statSync(miseEntryPath).isDirectory()) continue;
+										for (const subVer of fs.readdirSync(miseEntryPath)) {
+											const subNodeModules = path.join(
+												miseEntryPath,
+												subVer,
+												"node_modules",
+											);
+											if (fs.existsSync(subNodeModules)) {
+												possiblePaths.push(subNodeModules);
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			} catch (_e) {
+				// Ignore errors from mise directory scanning
+			}
+		}
+	}
+
 	// Try each possible path
+	const attemptedPaths = [];
 	for (const piNodeModules of possiblePaths) {
 		const found = findPiSdkAtPath(piNodeModules);
 		if (found) {
 			return found;
 		}
+		attemptedPaths.push(piNodeModules);
 	}
 
+	console.error("[PiLot] PI SDK not found. Tried the following paths:");
+	for (const p of attemptedPaths) {
+		console.error("  - " + p);
+	}
+	console.error("[PiLot] VS Code process PATH: " + (process.env.PATH || "(empty)"));
 	return null;
 }
 
@@ -343,6 +411,8 @@ function findPiSdkFromCommand() {
 		}
 
 		if (!piPath || !fs.existsSync(piPath)) {
+			console.error("[PiLot] 'which pi' / 'where pi' did not find 'pi' on PATH");
+			console.error("[PiLot]   VS Code process PATH: " + (process.env.PATH || "(empty)"));
 			return null;
 		}
 
@@ -350,20 +420,31 @@ function findPiSdkFromCommand() {
 		// These may not match the user's global PI installation.
 		const cwd = process.cwd();
 		if (piPath.startsWith(cwd + path.sep)) {
+			console.error("[PiLot] Skipping workspace-local 'pi' binary at: " + piPath);
 			return null;
 		}
 
 		// The pi executable reference is typically at:
-		// - npm: ~/.nvm/versions/node/.../lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js
-		// - pnpm shim: ~/.local/share/pnpm/bin/pi (shell script that runs node <target>)
+		// - npm: ~/.nvm/versions/node/.../lib/node_modules/@earendel-works/pi-coding-agent/dist/cli.js
+		// - pnpm shim: ~/.local/share/pnpm/bin/pi (shell script with # cmd-shim-target)
+		// - mise/bun: ~/.local/share/mise/.../node_modules/.bin/pi (aube-bin-shim script)
 		// - bun: ~/.bun/bin/pi (shim that runs: bun <path>)
 
-		// For pnpm, the shim contains # cmd-shim-target=... line pointing to the actual CLI
+		// For pnpm, the shim contains # cmd-shim-target=... pointing to the actual CLI
 		// For npm/pnpm, it might also contain exec "..." lines with the actual path
+		// For mise, the shim contains # aube-bin-shim v2 target=... pointing to the CLI
 
-		return deriveSdkPathFromBinary(piPath);
+		const result = deriveSdkPathFromBinary(piPath);
+		if (!result) {
+			console.error("[PiLot] Found 'pi' at: " + piPath);
+			console.error("[PiLot] Could not derive SDK path from binary (unrecognized shim format)");
+		}
+		return result;
 	} catch (e) {
 		// pi command not found
+		console.error("[PiLot] 'which pi' / 'where pi' command failed (is 'pi' on your PATH?)");
+		console.error("[PiLot]   VS Code process PATH: " + (process.env.PATH || "(empty)"));
+		console.error("[PiLot]   Error: " + (e instanceof Error ? e.message : String(e)));
 		return null;
 	}
 }
@@ -424,13 +505,40 @@ function deriveSdkPathFromBinary(piPath) {
 			}
 		}
 
+		// Check for aube-bin-shim target comment (mise, bun-managed installs)
+		// Format: # aube-bin-shim v2 target=../.mise/@earendel-works+pi-coding-agent@0.85.1/node_modules/@earendel-works/pi-coding-agent/dist/bundle/cli.js
+		const aubeMatch = content.match(/#\s*aube-bin-shim\s+v\d+\s+target=(.+)/);
+		if (aubeMatch) {
+			const targetPath = aubeMatch[1].trim();
+			// Resolve relative to the shim file's real directory (follows symlinks
+			// so "latest" style symlinks resolve to the real version path)
+			const realPiPath = fs.realpathSync(piPath);
+			const resolvedTarget = path.resolve(
+				path.dirname(realPiPath),
+				targetPath,
+			);
+			const sdkNodeModules = extractNodeModulesPath(resolvedTarget);
+			if (
+				sdkNodeModules &&
+				fs.existsSync(
+					path.join(sdkNodeModules, "@earendel-works", "pi-coding-agent"),
+				)
+			) {
+				return sdkNodeModules;
+			}
+		}
+
 		// Check pnpm exec line
 		const pnpmExecMatch = content.match(
 			/node_modules[^'"]*pi-coding-agent[^'"]*cli\.js/,
 		);
 		if (pnpmExecMatch) {
 			const fullMatch = pnpmExecMatch[0];
-			const sdkNodeModules = extractNodeModulesPath(fullMatch);
+			// Resolve relative path fragments relative to the binary's directory
+			const resolvedPath = path.isAbsolute(fullMatch)
+				? fullMatch
+				: path.resolve(path.dirname(piPath), fullMatch);
+			const sdkNodeModules = extractNodeModulesPath(resolvedPath);
 			if (
 				sdkNodeModules &&
 				fs.existsSync(
@@ -489,8 +597,11 @@ function deriveSdkPathFromBinary(piPath) {
 function extractNodeModulesPath(cliPath) {
 	// Find the position of /node_modules/ or \node_modules\ (Windows)
 	const normalized = cliPath.replace(/\\/g, "/");
-	const nodeModulesIdx = normalized.indexOf("/node_modules/");
-	if (nodeModulesIdx > 0) {
+	// Use lastIndexOf to handle nested node_modules structures (e.g., mise
+	// installs where the SDK lives under .../node_modules/.mise/.../node_modules/
+	// instead of the outer .../node_modules/).
+	const nodeModulesIdx = normalized.lastIndexOf("/node_modules/");
+	if (nodeModulesIdx >= 0) {
 		return cliPath.substring(0, nodeModulesIdx + "/node_modules".length);
 	}
 	return null;
@@ -594,8 +705,11 @@ function load() {
 				} else {
 					installInstructions =
 						"1. Open Terminal\n" +
-						"2. Run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent\n" +
-						"3. Restart VS Code";
+						"2. Run: npm install -g --ignore-scripts @earendel-works/pi-coding-agent\n" +
+						"3. Restart VS Code\n\n" +
+						"If 'pi' works in Terminal but not here, VS Code may not see your PATH.\n" +
+						"Try: launch VS Code from Terminal (run 'code .' from your project dir).\n" +
+						"Alternatively, set pi-agent.binaryPath in VS Code settings to the full path from 'which pi'.";
 				}
 
 				const message =

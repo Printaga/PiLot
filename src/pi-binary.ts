@@ -126,6 +126,8 @@ export function findPiBinary(): string {
 					path.join(home, ".local/bin/pi"),
 					path.join(home, ".npm-global/bin/pi"),
 					path.join(home, ".local/share/pnpm/bin/pi"),
+					// mise shims — covers installs where 'pi' is not on PATH seen by VS Code
+					path.join(home, ".local/share/mise/shims/pi"),
 					"pi",
 				];
 

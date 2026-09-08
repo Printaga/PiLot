@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [2.4.1] - 2026-09-08
+
+### Fixed
+
+- PI installed via MISE and other non-standard methods was not properly detected.
+
 ## [2.4.0] - 2026-08-21
 
 ### Added
