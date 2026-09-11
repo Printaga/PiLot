@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **PI Light Mode** toggle (Settings → Agent Behavior, or the `pi-agent.lightMode` setting) for running pi in a reduced mode ideal for local LLMs via llama.cpp — equivalent to `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`. Overrides the individual discovery toggles and restricts tools to `read`, `bash`, `edit`, `write` when the tool preset is `default`; toggling restarts the current session with its history preserved.
+
 ## [2.4.1] - 2026-09-08
 
 ### Fixed

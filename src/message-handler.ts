@@ -389,6 +389,21 @@ export class MessageHandler {
 					result = { success: true };
 					break;
 
+				case "getLightMode": {
+					const enabled = this.provider.getLightMode();
+					this.provider.webview?.postMessage({
+						type: "light-mode-changed",
+						data: { enabled },
+					});
+					result = enabled;
+					break;
+				}
+
+				case "setLightMode":
+					await this.provider.setLightMode(message.data.enabled);
+					result = { success: true };
+					break;
+
 				case "setExtraSkillPaths":
 					await this.provider.setExtraSkillPaths(message.data.paths);
 					result = { success: true };

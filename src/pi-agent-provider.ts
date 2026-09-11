@@ -846,6 +846,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			false,
 		);
 
+		// Light mode: run pi with all discovery disabled and only core tools,
+		// matching `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`.
+		const lightMode = config.get<boolean>("lightMode", false);
+
 		// Read system prompt settings
 		const systemPrompt = config.get<string | null>("systemPrompt", null);
 		const appendSystemPrompts = config.get<string[]>("appendSystemPrompts", []);
@@ -869,7 +873,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				tools = customTools.length > 0 ? customTools : undefined;
 				break;
 			case "default":
-				// Default: no restrictions, use built-in tools
+				// Default: no restrictions, use built-in tools — unless light mode
+				// restricts to the core tools (matches `--tools read,bash,edit,write`).
+				if (lightMode) {
+					tools = ["read", "bash", "edit", "write"];
+				}
 				break;
 		}
 
@@ -883,10 +891,11 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			additionalSkillPaths: extraSkills.length > 0 ? extraSkills : undefined,
 			additionalPromptTemplatePaths:
 				extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
-			noExtensions: disableExtensions,
-			noSkills: disableSkills,
-			noPromptTemplates: disablePromptTemplates,
-			noContextFiles: disableContextFiles,
+			noExtensions: disableExtensions || lightMode,
+			noSkills: disableSkills || lightMode,
+			noPromptTemplates: disablePromptTemplates || lightMode,
+			noContextFiles: disableContextFiles || lightMode,
+			noThemes: lightMode,
 			systemPrompt: systemPrompt || undefined,
 			appendSystemPrompt:
 				appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
@@ -3099,6 +3108,63 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			.then(() => {
 				this.reloadSessionResources();
 			});
+	}
+
+	/** Whether pi runs in light mode (all discovery off, core tools only). */
+	getLightMode(): boolean {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		return config.get<boolean>("lightMode", false);
+	}
+
+	/**
+	 * Enable/disable pi light mode. The config change listener in extension.ts
+	 * restarts the live session so the new flags apply without a window reload.
+	 */
+	async setLightMode(enabled: boolean): Promise<void> {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		await config.update(
+			"lightMode",
+			enabled,
+			vscode.ConfigurationTarget.Global,
+		);
+	}
+
+	/**
+	 * Rebuild the agent session so newly-set resource flags (e.g. light mode's
+	 * `no*` options, which are fixed at resource-loader construction) take
+	 * effect, while keeping the current conversation.
+	 */
+	async restartSessionPreservingHistory(): Promise<void> {
+		if (!this.session) return;
+
+		try {
+			await this.tearDownCurrentSession("reload");
+			await this.createSession();
+
+			// Re-send the transcript and resources so the webview stays in sync
+			// after the session object was replaced.
+			const messages = this.session
+				? this.getSerializedSessionMessages(this.session)
+				: [];
+			this.notifyWebview({
+				type: "session-history",
+				data: {
+					sessionId: this.session?.sessionId,
+					messages,
+				},
+			});
+			await this.sendSessionResources();
+			this.notifyWebview({
+				type: "light-mode-changed",
+				data: { enabled: this.getLightMode() },
+			});
+			this._onDidChangeTreeData.fire();
+		} catch (e) {
+			this.logError("[PI] Failed to restart session after setting change:", e);
+			vscode.window.showErrorMessage(
+				`Failed to apply setting change to the current session: ${String(e)}`,
+			);
+		}
 	}
 
 	async setExtraSkillPaths(paths: string[]): Promise<void> {

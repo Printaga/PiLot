@@ -35,6 +35,7 @@
   let thinkingLevel = $state<string>("medium");
   let autoContext = $state(true);
   let showCacheMissNotices = $state(false);
+  let lightMode = $state(false);
 
   // Thinking levels supported by the currently selected model (falls back to the
   // full set when the model carries no capability metadata).
@@ -135,6 +136,7 @@
       window.addEventListener("message", handleVSCodeMessage);
       vscode.postMessage({ type: "ready" });
       vscode.postMessage({ type: "getPiUISettings" });
+      vscode.postMessage({ type: "getLightMode" });
 
       return () => {
         window.removeEventListener("message", handleVSCodeMessage);
@@ -363,6 +365,12 @@
       case "pi-settings-changed":
         if (typeof data?.showCacheMissNotices === "boolean") {
           showCacheMissNotices = data.showCacheMissNotices;
+        }
+        break;
+
+      case "light-mode-changed":
+        if (typeof data?.enabled === "boolean") {
+          lightMode = data.enabled;
         }
         break;
 
@@ -1413,6 +1421,14 @@
           }}
           onThinkingLevelChange={handleSetThinkingLevel}
           {showCacheMissNotices}
+          {lightMode}
+          onLightModeChange={(value) => {
+            lightMode = value;
+            sendMessage({
+              type: "setLightMode",
+              data: { enabled: value },
+            });
+          }}
           onShowCacheMissNoticesChange={(value) => {
             showCacheMissNotices = value;
             sendMessage({

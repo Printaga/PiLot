@@ -48,46 +48,79 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
-	const resourceConfigKeys = [
-		"disableExtensionDiscovery",
-		"disableSkillDiscovery",
-		"disablePromptTemplateDiscovery",
-		"disableContextFiles",
-		"extraExtensions",
-		"extraSkills",
-		"extraPromptTemplates",
-		"systemPrompt",
-		"appendSystemPrompts",
-	];
+	context.subscriptions.push(installConfigListener(provider));
+}
 
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration("pi-agent")) {
-				const newConfig = vscode.workspace.getConfiguration("pi-agent");
-				provider.updateConfig({
-					defaultModel: newConfig.get(
-						"defaultModel",
-						"anthropic/claude-sonnet-4-5",
-					),
-					defaultProvider: newConfig.get("defaultProvider", "anthropic"),
-					autoContext: newConfig.get("context.autoAttach", true),
-					maxTokens: newConfig.get("maxTokens", 8192),
-					thinkingLevel: validateThinkingLevel(newConfig.get("thinkingLevel")),
-					sessionDir: newConfig.get("sessionDir", ""),
+/**
+ * Which `pi-agent.*` keys require only a resource-loader `reload()` when they
+ * change. Everything that rewrites loader construction-time options — light
+ * mode's `no*` flags — needs a full session rebuild instead.
+ */
+const resourceConfigKeys = [
+	"disableExtensionDiscovery",
+	"disableSkillDiscovery",
+	"disablePromptTemplateDiscovery",
+	"disableContextFiles",
+	"extraExtensions",
+	"extraSkills",
+	"extraPromptTemplates",
+	"systemPrompt",
+	"appendSystemPrompts",
+];
+
+/**
+ * React to `pi-agent.*` configuration changes: refresh the provider config
+ * snapshot, then reload session resources or rebuild the session (history
+ * preserved) depending on which keys changed.
+ *
+ * Exported so tests can drive the real listener without activating the full
+ * extension.
+ */
+export function installConfigListener(
+	provider: Pick<
+		PiAgentProvider,
+		| "updateConfig"
+		| "reloadSessionResources"
+		| "restartSessionPreservingHistory"
+		| "logDebug"
+	>,
+): vscode.Disposable {
+	return vscode.workspace.onDidChangeConfiguration((e) => {
+		if (e.affectsConfiguration("pi-agent")) {
+			const newConfig = vscode.workspace.getConfiguration("pi-agent");
+			provider.updateConfig({
+				defaultModel: newConfig.get(
+					"defaultModel",
+					"anthropic/claude-sonnet-4-5",
+				),
+				defaultProvider: newConfig.get("defaultProvider", "anthropic"),
+				autoContext: newConfig.get("context.autoAttach", true),
+				maxTokens: newConfig.get("maxTokens", 8192),
+				thinkingLevel: validateThinkingLevel(newConfig.get("thinkingLevel")),
+				sessionDir: newConfig.get("sessionDir", ""),
+			});
+
+			if (e.affectsConfiguration("pi-agent.lightMode")) {
+				// Light mode's `no*` flags are fixed at resource-loader
+				// construction, so the session must be rebuilt (history is
+				// preserved) for the change to take effect.
+				provider.restartSessionPreservingHistory().catch((err) => {
+					provider.logDebug(
+						"[PI] Failed to restart session for light mode change:",
+						err,
+					);
 				});
-
-				if (
-					resourceConfigKeys.some((k) =>
-						e.affectsConfiguration(`pi-agent.${k}`),
-					)
-				) {
-					provider.reloadSessionResources().catch((err) => {
-						provider.logDebug("[PI] Failed to reload session resources:", err);
-					});
-				}
+			} else if (
+				resourceConfigKeys.some((k) =>
+					e.affectsConfiguration(`pi-agent.${k}`),
+				)
+			) {
+				provider.reloadSessionResources().catch((err) => {
+					provider.logDebug("[PI] Failed to reload session resources:", err);
+				});
 			}
-		}),
-	);
+		}
+	});
 }
 
 export function deactivate() {}

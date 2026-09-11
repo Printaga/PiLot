@@ -7,12 +7,14 @@
 		thinkingLevel: string;
 		availableThinkingLevels?: string[];
 		showCacheMissNotices?: boolean;
+		lightMode?: boolean;
 		onAutoContextChange: (value: boolean) => void;
 		onThinkingLevelChange: (level: string) => void;
 		onShowCacheMissNoticesChange?: (value: boolean) => void;
+		onLightModeChange?: (value: boolean) => void;
 	}
 
-	let { autoContext, appVersion, thinkingLevel, availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], showCacheMissNotices = false, onAutoContextChange, onThinkingLevelChange, onShowCacheMissNoticesChange }: Props = $props();
+	let { autoContext, appVersion, thinkingLevel, availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], showCacheMissNotices = false, lightMode = false, onAutoContextChange, onThinkingLevelChange, onShowCacheMissNoticesChange, onLightModeChange }: Props = $props();
 
   const allThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   const levels = $derived.by(() => (availableThinkingLevels && availableThinkingLevels.length > 0 ? availableThinkingLevels : allThinkingLevels));
@@ -33,6 +35,12 @@
 	function handleShowCacheMissNoticesChange() {
 		if (onShowCacheMissNoticesChange) {
 			onShowCacheMissNoticesChange(!showCacheMissNotices);
+		}
+	}
+
+	function handleLightModeChange() {
+		if (onLightModeChange) {
+			onLightModeChange(!lightMode);
 		}
 	}
 
@@ -84,6 +92,26 @@
 				</div>
 				<label class="toggle">
 					<input type="checkbox" checked={autoContext} onchange={handleAutoContextChange} />
+					<span class="toggle-slider"></span>
+				</label>
+			</div>
+
+			<div class="setting-item">
+				<div class="setting-info">
+					<div class="setting-label-row">
+						<span class="setting-label">Light Mode (local LLMs)</span>
+						<HelpTooltip text="Runs pi in a reduced mode ideal for local models (e.g. via llama.cpp). Equivalent to: pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write — the tool restriction applies while the tool preset is 'default' (explicit presets like review or custom keep their behavior). Disables discovery of skills, extensions, context files, prompt templates and themes. The current session restarts with its history preserved." title="Light Mode" />
+					</div>
+					<span class="setting-description">
+						Minimal runtime: no discovered resources, core tools only
+					</span>
+				</div>
+				<label class="toggle">
+					<input
+						type="checkbox"
+						checked={lightMode}
+						onchange={handleLightModeChange}
+					/>
 					<span class="toggle-slider"></span>
 				</label>
 			</div>

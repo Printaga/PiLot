@@ -2,6 +2,7 @@ import * as assert from "node:assert";
 import * as vscode from "vscode";
 import {
 	SessionManager,
+	DefaultResourceLoader,
 	type SessionManager as SessionManagerType,
 } from "@earendil-works/pi-coding-agent";
 
@@ -10,6 +11,8 @@ import {
 	type PiAgentConfig,
 	piAgentProviderInternals,
 } from "../../../pi-agent-provider.js";
+import { MessageHandler } from "../../../message-handler.js";
+import { installConfigListener } from "../../../extension.js";
 import { ModelRegistryHandler } from "../../../model-registry-handler.js";
 import { PackageManager } from "../../../package-manager.js";
 import { SessionListManager } from "../../../session-manager.js";
@@ -265,6 +268,40 @@ async function settleInitialize(provider: any) {
 	provider.initialize = async () => {};
 }
 
+/**
+ * Like settleInitialize, but deterministically drains the constructor-started
+ * background initialize() (whose continuations can stomp dependency mocks at
+ * ANY await point mid-test) and then re-asserts those mocks, so tests that
+ * span multiple awaits see stable identities (e.g. the same sessionManager
+ * across a session rebuild).
+ */
+async function stabilizeProvider(provider: any) {
+	provider.initialize = async () => {};
+	// The constructor-started background initialize() mutates dependency
+	// fields across real async boundaries (fs-based native-addon checks). Its
+	// continuations can stomp test mocks at ANY await point mid-test, so poll
+	// until every dependency identity is stable across three consecutive
+	// ticks before re-asserting the mocks.
+	const snapshot = () => [
+		provider.sessionManager,
+		provider.modelRuntime,
+		provider.modelRegistry,
+		provider.settingsManager,
+	];
+	let prev = snapshot();
+	let stableTicks = 0;
+	for (let i = 0; i < 300 && stableTicks < 3; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const cur = snapshot();
+		stableTicks = cur.every((v, j) => v === prev[j]) ? stableTicks + 1 : 0;
+		prev = cur;
+	}
+	provider.modelRuntime = createMockModelRuntime();
+	provider.modelRegistry = createMockModelRegistry();
+	provider.settingsManager = createMockSettingsManager();
+	provider.sessionManager = createMockSessionManager("/fake/workspace");
+}
+
 suite("PiAgentProvider", () => {
 	setup(() => {
 		setupPiSdkMocks();
@@ -487,6 +524,387 @@ suite("PiAgentProvider", () => {
 			);
 			assert.strictEqual(opts.noTools, undefined);
 			assert.strictEqual(opts.tools, undefined);
+		});
+
+		test("lightMode disables all discovery and restricts tools under default preset", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "lightMode") return true;
+					if (key === "toolPreset") return "default";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const opts = await (provider as any).buildSessionOptions(
+				"/fake/workspace",
+			);
+			const rlOptions = opts.resourceLoader as any;
+			assert.strictEqual(rlOptions.noExtensions, true);
+			assert.strictEqual(rlOptions.noSkills, true);
+			assert.strictEqual(rlOptions.noPromptTemplates, true);
+			assert.strictEqual(rlOptions.noContextFiles, true);
+			assert.strictEqual(rlOptions.noThemes, true);
+			assert.deepStrictEqual(opts.tools, ["read", "bash", "edit", "write"]);
+			assert.strictEqual(opts.noTools, undefined);
+		});
+
+		test("lightMode keeps explicit tool preset behavior", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "lightMode") return true;
+					if (key === "toolPreset") return "review";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const opts = await (provider as any).buildSessionOptions(
+				"/fake/workspace",
+			);
+			assert.deepStrictEqual(opts.tools, ["read", "grep", "find", "ls"]);
+			assert.strictEqual(opts.noTools, undefined);
+		});
+
+		test("lightMode off leaves discovery and tools untouched", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "lightMode") return false;
+					if (key === "toolPreset") return "default";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const opts = await (provider as any).buildSessionOptions(
+				"/fake/workspace",
+			);
+			const rlOptions = opts.resourceLoader as any;
+			assert.strictEqual(rlOptions.noExtensions, false);
+			assert.strictEqual(rlOptions.noSkills, false);
+			assert.strictEqual(rlOptions.noPromptTemplates, false);
+			assert.strictEqual(rlOptions.noContextFiles, false);
+			assert.strictEqual(rlOptions.noThemes, false);
+			assert.strictEqual(opts.tools, undefined);
+		});
+	});
+
+	// ── Light mode live-apply ─────────────────────────────────────────────
+	// These tests drive the REAL chain: webview message → setLightMode →
+	// config update → extension.ts listener → session rebuild → real
+	// DefaultResourceLoader with the light-mode flags, restricted tools,
+	// preserved transcript (same session file), and webview re-sync.
+	suite("light mode live-apply", () => {
+		/**
+		 * Install a config store mock and a createAgentSession spy that hands
+		 * out a fresh session mock (with the given transcript) per call while
+		 * recording every options object it was called with. Registers the REAL
+		 * extension.ts config listener against our own emitter so tests can fire
+		 * configuration changes the way VS Code does.
+		 */
+		function installLiveApplyHarness(
+			provider: any,
+			options: {
+				config: Map<string, any>;
+				transcript: any[];
+			},
+		) {
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) =>
+					options.config.has(key) ? options.config.get(key) : def,
+				update: async (key: string, value: any) => {
+					options.config.set(key, value);
+				},
+			});
+
+			const createCalls: any[] = [];
+			piAgentProviderInternals.createAgentSession = (async (opts: any) => {
+				createCalls.push(opts);
+				return {
+					session: createSessionMock({
+						resourceLoader: opts.resourceLoader,
+						sessionId: "live-apply-session",
+						messages: options.transcript,
+					}),
+					extensionsResult: { statuses: [] },
+				};
+			}) as any;
+
+			const configEmitter =
+				new vscode.EventEmitter<vscode.ConfigurationChangeEvent>();
+			(vscode.workspace as any).onDidChangeConfiguration = configEmitter.event;
+			const disposable = installConfigListener(provider);
+
+			// Count reload() on EVERY loader instance — the rebuild constructs a
+			// fresh DefaultResourceLoader, so the patch must live on the prototype.
+			const savedProtoReload = (DefaultResourceLoader.prototype as any).reload;
+			(DefaultResourceLoader.prototype as any).reload = async function () {
+				this._reloadCalls = (this._reloadCalls ?? 0) + 1;
+				return savedProtoReload.call(this);
+			};
+			Object.defineProperty(DefaultResourceLoader.prototype, "reloadCalls", {
+				get(this: any) {
+					return this._reloadCalls ?? 0;
+				},
+				configurable: true,
+			});
+
+			/**
+			 * Fire a config change for the given pi-agent key, emulating VS
+			 * Code's prefix semantics: a change to `pi-agent.lightMode` makes
+			 * both `pi-agent` and `pi-agent.lightMode` queries match.
+			 */
+			const fireConfigChange = (key: string) => {
+				configEmitter.fire({
+					affectsConfiguration: (section: string) =>
+						section === "pi-agent" ||
+						section.startsWith(`pi-agent.${key}`),
+				} as vscode.ConfigurationChangeEvent);
+			};
+
+			/** Wait until the listener's async rebuild has created a new session. */
+			const waitForRebuild = async () => {
+				for (
+					let i = 0;
+					i < 500 && createCalls.length < 2;
+					i++
+				) {
+					await new Promise((resolve) => setTimeout(resolve, 20));
+				}
+			};
+
+			/**
+			 * Surface silent failures: the provider swallows restart errors and
+			 * reports them via showErrorMessage — capture them for assertions.
+			 */
+			const errorToasts: string[] = [];
+			(vscode.window as any).showErrorMessage = async (msg: string) => {
+				errorToasts.push(msg);
+				return undefined;
+			};
+
+			return {
+				createCalls,
+				fireConfigChange,
+				waitForRebuild,
+				errorToasts,
+				dispose: () => {
+					disposable.dispose();
+					(DefaultResourceLoader.prototype as any).reload = savedProtoReload;
+					delete (DefaultResourceLoader.prototype as any).reloadCalls;
+				},
+			};
+		}
+
+		function captureWebviewPosts(provider: any): any[] {
+			const posted: any[] = [];
+			(provider._webview as any).postMessage = (msg: any) => {
+				posted.push(msg);
+				return Promise.resolve();
+			};
+			return posted;
+		}
+
+		test("webview setLightMode rebuilds session with no* flags, restricted tools, preserved transcript", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+			const handler = new MessageHandler(provider);
+
+			// Light mode starts OFF; tool preset untouched ("default").
+			const config = new Map<string, any>([
+				["lightMode", false],
+				["toolPreset", "default"],
+			]);
+			const transcript = [
+				{ role: "user", content: "before the toggle" },
+				{ role: "assistant", content: "kept across restart" },
+			];
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript,
+			});
+			const createCalls = harness.createCalls;
+
+			await provider.createSession();
+			assert.ok(provider.session, "initial session should exist");
+
+			// The first session must be torn down (disposed) by the rebuild.
+			let disposed = 0;
+			const originalDispose = provider.session.dispose.bind(provider.session);
+			provider.session.dispose = () => {
+				disposed++;
+				originalDispose();
+			};
+
+			const posted = captureWebviewPosts(provider);
+
+			// Flip the toggle the way the webview does. `setLightMode` only
+			// persists the setting — the config listener (same as in the real
+			// extension) performs the rebuild.
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: true },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			assert.deepStrictEqual(
+				harness.errorToasts,
+				[],
+				"rebuild surfaced an error toast",
+			);
+
+			// setLightMode persisted the config change…
+			assert.strictEqual(config.get("lightMode"), true);
+
+			// …the listener rebuilt the session…
+			assert.ok(
+				createCalls.length >= 2,
+				`expected a session rebuild, got ${createCalls.length} createAgentSession calls`,
+			);
+			assert.strictEqual(disposed, 1, "old session should be disposed once");
+
+			// …the rebuilt loader is a NEW real loader carrying the light-mode
+			// flags (fixed at construction — hence the rebuild) and was reloaded…
+			const secondOpts = createCalls[1];
+			const rl2: any = secondOpts.resourceLoader;
+			assert.notStrictEqual(
+				rl2,
+				createCalls[0].resourceLoader,
+				"expected a fresh resource loader instance",
+			);
+			assert.strictEqual(rl2.noSkills, true);
+			assert.strictEqual(rl2.noExtensions, true);
+			assert.strictEqual(rl2.noPromptTemplates, true);
+			assert.strictEqual(rl2.noContextFiles, true);
+			assert.strictEqual(rl2.noThemes, true);
+			assert.strictEqual(
+				rl2.reloadCalls,
+				1,
+				"rebuilt loader should have reload()ed once",
+			);
+
+			// …tools restricted to read,bash,edit,write under the default preset…
+			assert.deepStrictEqual(secondOpts.tools, [
+				"read",
+				"bash",
+				"edit",
+				"write",
+			]);
+
+			// …the transcript survived via the SAME session file (the rebuilt
+			// session reuses the provider's sessionManager)…
+			assert.strictEqual(provider.session.sessionId, "live-apply-session");
+			assert.strictEqual(
+				createCalls[1].sessionManager,
+				createCalls[0].sessionManager,
+				"rebuild must reuse the same session file (sessionManager)",
+			);
+
+			// …and the webview was re-synced with history + the light-mode state.
+			const history = posted.find((m) => m.type === "session-history");
+			assert.ok(history, "expected session-history re-sync after rebuild");
+			assert.strictEqual(history.data.messages.length, 2);
+			assert.ok(
+				history.data.messages.some(
+					(m: any) => m.content === "before the toggle",
+				),
+				"pre-toggle user message must survive the rebuild",
+			);
+			const lm = posted.find((m) => m.type === "light-mode-changed");
+			assert.ok(lm, "expected light-mode-changed notification");
+			assert.strictEqual(lm.data.enabled, true);
+			harness.dispose();
+		});
+
+		test("toggling light mode off restores discovery and unrestricted default tools", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+			const handler = new MessageHandler(provider);
+
+			// Light mode starts ON.
+			const config = new Map<string, any>([
+				["lightMode", true],
+				["toolPreset", "default"],
+			]);
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript: [{ role: "user", content: "hello" }],
+			});
+			const createCalls = harness.createCalls;
+
+			await provider.createSession();
+			const posted = captureWebviewPosts(provider);
+
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: false },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			assert.strictEqual(config.get("lightMode"), false);
+			assert.ok(
+				createCalls.length >= 2,
+				"expected a session rebuild when light mode turns off",
+			);
+			const secondOpts = createCalls[1];
+			const rl2: any = secondOpts.resourceLoader;
+			assert.strictEqual(rl2.noSkills, false);
+			assert.strictEqual(rl2.noExtensions, false);
+			assert.strictEqual(rl2.noPromptTemplates, false);
+			assert.strictEqual(rl2.noContextFiles, false);
+			assert.strictEqual(rl2.noThemes, false);
+			assert.strictEqual(secondOpts.tools, undefined, "default preset should not restrict tools");
+			assert.strictEqual(secondOpts.noTools, undefined);
+
+			const history = posted.find((m) => m.type === "session-history");
+			assert.ok(history, "expected session-history re-sync after rebuild");
+			harness.dispose();
+		});
+
+		test("direct pi-agent.lightMode config change triggers the rebuild via extension.ts listener", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+
+			// Config edited directly in settings UI: lightMode starts off.
+			const config = new Map<string, any>([
+				["lightMode", false],
+				["toolPreset", "default"],
+			]);
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript: [{ role: "user", content: "hello" }],
+			});
+
+			await provider.createSession();
+
+			// Simulate editing pi-agent.lightMode in the VS Code settings UI,
+			// then the platform firing the corresponding change event.
+			config.set("lightMode", true);
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			assert.ok(
+				harness.createCalls.length >= 2,
+				"extension.ts listener should rebuild the session on lightMode change",
+			);
+			const rl2: any = harness.createCalls[1].resourceLoader;
+			assert.strictEqual(rl2.noSkills, true);
+			assert.strictEqual(rl2.noExtensions, true);
+			assert.strictEqual(rl2.noPromptTemplates, true);
+			assert.strictEqual(rl2.noContextFiles, true);
+			assert.strictEqual(rl2.noThemes, true);
+			assert.deepStrictEqual(harness.createCalls[1].tools, [
+				"read",
+				"bash",
+				"edit",
+				"write",
+			]);
+			harness.dispose();
 		});
 	});
 

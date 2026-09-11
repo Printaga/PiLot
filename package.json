@@ -476,6 +476,12 @@
             "default": false,
             "order": 3,
             "markdownDescription": "Start `pi` with `--no-prompt-templates`, which disables prompt template discovery and loading."
+          },
+          "pi-agent.lightMode": {
+            "type": "boolean",
+            "default": false,
+            "order": 4,
+            "markdownDescription": "Run `pi` in light mode, ideal for local LLMs (e.g. via llama.cpp). Equivalent to starting `pi` with `--no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write` — the tool restriction applies while `pi-agent.toolPreset` is `default` (explicit presets like `review` or `custom` keep their behavior). Overrides the individual discovery toggles and disables themes. Changing this restarts the current session with its history preserved."
           }
         }
       },

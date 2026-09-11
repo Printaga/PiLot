@@ -165,4 +165,7 @@ export interface ProviderApi {
 	setSkillDiscovery(enabled: boolean): void;
 	setExtraSkillPaths(paths: string[]): Promise<void>;
 	getExtraSkillPaths(): string[];
+	getLightMode(): boolean;
+	setLightMode(enabled: boolean): Promise<void>;
+	restartSessionPreservingHistory(): Promise<void>;
 }

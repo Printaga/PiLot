@@ -96,6 +96,9 @@ function createMockProvider(): {
 		setExtraSkillPaths: () => undefined,
 		getExtraSkillPaths: () => [],
 		sendSkillsList: () => undefined,
+		getLightMode: () => false,
+		setLightMode: () => Promise.resolve(),
+		restartSessionPreservingHistory: () => Promise.resolve(),
 	};
 
 	// Tests override provider methods with plain functions and still assert on
@@ -760,6 +763,32 @@ suite("MessageHandler", () => {
 		};
 		const result = await handler.handle({
 			type: "setSkillDiscovery",
+			data: { enabled: true },
+		});
+		assert.strictEqual(lastEnabled, true);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("getLightMode - sends light-mode-changed", async () => {
+		provider.getLightMode = () => true;
+		const result = await handler.handle({
+			type: "getLightMode",
+			data: {},
+		});
+		assert.strictEqual(result, true);
+		const msg = webviewMessages.find((m: any) => m.type === "light-mode-changed");
+		assert.ok(msg);
+		assert.strictEqual(msg.data.enabled, true);
+	});
+
+	test("setLightMode - calls provider and returns success", async () => {
+		let lastEnabled: boolean | undefined;
+		provider.setLightMode = (enabled: boolean) => {
+			lastEnabled = enabled;
+			return Promise.resolve();
+		};
+		const result = await handler.handle({
+			type: "setLightMode",
 			data: { enabled: true },
 		});
 		assert.strictEqual(lastEnabled, true);
