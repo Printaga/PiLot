@@ -53,10 +53,7 @@ function makeSkill(skill: {
 	};
 }
 
-function makeExtension(ext: {
-	path?: string;
-	sourceInfo?: { source?: string };
-}) {
+function makeExtension(ext: { path?: string; sourceInfo?: { source?: string } }) {
 	return {
 		path: ext.path ?? "",
 		sourceInfo: ext.sourceInfo ?? {},
@@ -85,7 +82,7 @@ function createDeps(opts?: {
 	binaryService?: any;
 	notifyWebviewMessages?: any[];
 }) {
-	const _notifyWebviewMessages: any[] = (opts?.notifyWebviewMessages ?? []);
+	const _notifyWebviewMessages: any[] = opts?.notifyWebviewMessages ?? [];
 	const _logDebugMessages: any[][] = [];
 	const _logErrorMessages: any[][] = [];
 
@@ -179,9 +176,7 @@ suite("PackageManager: enrichPackages", () => {
 		assert.strictEqual(result[0].description, "my desc");
 		assert.strictEqual(result[0].version, "1.2.3");
 		assert.deepStrictEqual(result[0].types, ["extensions", "skills", "prompts"]);
-		assert.deepStrictEqual(result[0].skills, [
-			{ name: "skill-a", description: "skill desc" },
-		]);
+		assert.deepStrictEqual(result[0].skills, [{ name: "skill-a", description: "skill desc" }]);
 		assert.deepStrictEqual(result[0].extensions, [
 			{ path: "ext-a.ts", sourceName: "my-source" },
 		]);
@@ -268,9 +263,7 @@ suite("PackageManager: enrichPackages", () => {
 		const { deps } = createDeps({ resourceLoader: loader });
 		const pm = await requirePackageManager(deps);
 
-		const result = pm.enrichPackages([
-			makeInstalledPackage({ source: "src", path: pkgDir }),
-		]);
+		const result = pm.enrichPackages([makeInstalledPackage({ source: "src", path: pkgDir })]);
 
 		assert.strictEqual(result[0].skills.length, 0);
 		assert.strictEqual(result[0].extensions.length, 1);
@@ -292,9 +285,7 @@ suite("PackageManager: enrichPackages", () => {
 		const { deps } = createDeps({ resourceLoader: loader });
 		const pm = await requirePackageManager(deps);
 
-		const result = pm.enrichPackages([
-			makeInstalledPackage({ source: "src", path: pkgDir }),
-		]);
+		const result = pm.enrichPackages([makeInstalledPackage({ source: "src", path: pkgDir })]);
 
 		assert.strictEqual(result[0].skills.length, 1);
 		assert.strictEqual(result[0].extensions.length, 0);
@@ -316,9 +307,7 @@ suite("PackageManager: enrichPackages", () => {
 		const { deps } = createDeps({ resourceLoader: loader });
 		const pm = await requirePackageManager(deps);
 
-		const result = pm.enrichPackages([
-			makeInstalledPackage({ source: "src", path: pkgDir }),
-		]);
+		const result = pm.enrichPackages([makeInstalledPackage({ source: "src", path: pkgDir })]);
 
 		assert.strictEqual(result[0].skills.length, 1);
 		assert.strictEqual(result[0].prompts.length, 0);
@@ -336,9 +325,7 @@ suite("PackageManager: enrichPackages", () => {
 		const pm = await requirePackageManager(deps);
 
 		assert.doesNotThrow(() => {
-			pm.enrichPackages([
-				makeInstalledPackage({ source: "src", path: pkgDir }),
-			]);
+			pm.enrichPackages([makeInstalledPackage({ source: "src", path: pkgDir })]);
 		});
 	});
 
@@ -415,9 +402,7 @@ suite("PackageManager: listPackages", () => {
 			JSON.stringify({ name: "cfg-pkg", description: "configured desc", version: "5.0.0" }),
 		);
 
-		const configuredPkgs = [
-			makeInstalledPackage({ source: "cfg-src", path: pkgDir }),
-		];
+		const configuredPkgs = [makeInstalledPackage({ source: "cfg-src", path: pkgDir })];
 		const { deps } = createDeps({ configuredPackages: configuredPkgs });
 		const pm = await requirePackageManager(deps);
 
@@ -431,9 +416,7 @@ suite("PackageManager: listPackages", () => {
 	});
 
 	test("falls back to listPackagesFromCli when no configured packages are present", async () => {
-		const cliPkgs = [
-			makeInstalledPackage({ source: "cli-src", path: "/cli/path" }),
-		];
+		const cliPkgs = [makeInstalledPackage({ source: "cli-src", path: "/cli/path" })];
 		const { deps } = createDeps({ configuredPackages: [] });
 		const pm = await requirePackageManager(deps);
 		(pm as any).listPackagesFromCli = async () => cliPkgs;
@@ -470,9 +453,7 @@ suite("PackageManager: listPackages", () => {
 				}),
 			],
 		});
-		const configuredPkgs = [
-			makeInstalledPackage({ source: "cfg", path: pkgDir }),
-		];
+		const configuredPkgs = [makeInstalledPackage({ source: "cfg", path: pkgDir })];
 		const { deps } = createDeps({ resourceLoader: loader, configuredPackages: configuredPkgs });
 		const pm = await requirePackageManager(deps);
 
@@ -513,19 +494,13 @@ suite("PackageManager: runPackageCommand", () => {
 			return fakeProc;
 		};
 
-		await assert.doesNotReject(() =>
-			(pm as any).runPackageCommand(["install", "test-pkg"]),
-		);
+		await assert.doesNotReject(() => (pm as any).runPackageCommand(["install", "test-pkg"]));
 
-		const loadingMsgs = notifyWebviewMessages.filter(
-			(m: any) => m.type === "loading",
-		);
+		const loadingMsgs = notifyWebviewMessages.filter((m: any) => m.type === "loading");
 		assert.strictEqual(loadingMsgs.length, 2);
 		assert.deepStrictEqual(loadingMsgs[0], { type: "loading", data: { loading: true } });
 		assert.deepStrictEqual(loadingMsgs[1], { type: "loading", data: { loading: false } });
-		assert.ok(
-			notifyWebviewMessages.some((m: any) => m.type === "packages-updated"),
-		);
+		assert.ok(notifyWebviewMessages.some((m: any) => m.type === "packages-updated"));
 	});
 
 	test("rejects with 'Command failed' message when exit code is non-zero", async () => {
@@ -571,9 +546,7 @@ suite("PackageManager: runPackageCommand", () => {
 		};
 
 		(pm as any).spawnPackageCommand = () => {
-			process.nextTick(() =>
-				capturedErrorListener!(new Error("ENOENT: pi not found")),
-			);
+			process.nextTick(() => capturedErrorListener!(new Error("ENOENT: pi not found")));
 			return fakeProc;
 		};
 
@@ -625,9 +598,7 @@ suite("PackageManager: runPackageCommand", () => {
 
 		await (pm as any).runPackageCommand(["install", "test-pkg"]);
 
-		const outputMessages = notifyWebviewMessages.filter(
-			(m: any) => m.type === "output",
-		);
+		const outputMessages = notifyWebviewMessages.filter((m: any) => m.type === "output");
 		assert.ok(outputMessages.length >= 2, "expected at least 2 output messages");
 		const joinedText = outputMessages.map((m: any) => m.data?.text).join("");
 		assert.ok(joinedText.includes("hello stdout"), "stdout should reach webview");

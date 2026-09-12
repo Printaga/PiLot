@@ -1,8 +1,5 @@
 import * as assert from "assert";
-import {
-	extractTextFromMessage,
-	generateSessionName,
-} from "../../../session-manager.js";
+import { extractTextFromMessage, generateSessionName } from "../../../session-manager.js";
 
 suite("Session naming helpers", () => {
 	test("extractTextFromMessage joins text blocks", () => {

@@ -168,16 +168,14 @@
     if (typeof value === "number") return String(value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (Array.isArray(value)) return `[${value.length}]`;
-    if (value && typeof value === "object")
-      return `{${Object.keys(value).length}}`;
+    if (value && typeof value === "object") return `{${Object.keys(value).length}}`;
     return String(value);
   }
 
   const toolIconPaths: Record<string, string> = {
     read: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6",
     edit: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.12 2.12 0 0 1 3 3L12 16l-4 1 1-4z",
-    write:
-      "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6",
+    write: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6",
     bash: "M4 6h16M4 12h16M4 18h12",
     grep: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
     find: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
@@ -188,10 +186,7 @@
   const clipboardSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
   function escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   /** Render a markdown string to HTML. Handles the rich formatting the PI agent outputs. */
@@ -199,15 +194,10 @@
     // Split out fenced code blocks first (they must not be processed)
     const codeBlocks: string[] = [];
     // Match full info strings (same pattern as parseContent)
-    let processed = md.replace(
-      /```([^\n]*)\n([\s\S]*?)```/g,
-      (_, _lang, code) => {
-        codeBlocks.push(
-          `<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`,
-        );
-        return `\x00CODE${codeBlocks.length - 1}\x00`;
-      },
-    );
+    let processed = md.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
+      codeBlocks.push(`<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+      return `\x00CODE${codeBlocks.length - 1}\x00`;
+    });
 
     // Split into paragraphs (double newlines)
     const paragraphs = processed.split(/\n\n+/);
@@ -255,10 +245,7 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^[-*+]\s/.test(l))
-          .map(
-            (l) =>
-              `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`,
-          );
+          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`);
         htmlParts.push(`<ul class="md-ul">${items.join("")}</ul>`);
         continue;
       }
@@ -268,19 +255,13 @@
         const items = trimmed
           .split("\n")
           .filter((l) => /^\d+\.\s/.test(l))
-          .map(
-            (l) =>
-              `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`,
-          );
+          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`);
         htmlParts.push(`<ol class="md-ol">${items.join("")}</ol>`);
         continue;
       }
 
       // Table
-      if (
-        trimmed.includes("|") &&
-        /^\|?\s*[-:]+/.test(trimmed.split("\n")[1] || "")
-      ) {
+      if (trimmed.includes("|") && /^\|?\s*[-:]+/.test(trimmed.split("\n")[1] || "")) {
         const rows = trimmed.split("\n").filter((l) => l.includes("|"));
         if (rows.length >= 2) {
           const headerCells = rows[0]
@@ -298,8 +279,7 @@
               .map((c) => c.trim())
               .filter(Boolean);
             tableHtml += "<tr>";
-            for (const cell of cells)
-              tableHtml += `<td>${renderInline(cell, searchRegex)}</td>`;
+            for (const cell of cells) tableHtml += `<td>${renderInline(cell, searchRegex)}</td>`;
             tableHtml += "</tr>";
           }
           tableHtml += "</tbody></table>";
@@ -309,17 +289,15 @@
       }
 
       // Regular paragraph
-      htmlParts.push(
-        `<p class="md-p">${renderInline(trimmed, searchRegex)}</p>`,
-      );
+      htmlParts.push(`<p class="md-p">${renderInline(trimmed, searchRegex)}</p>`);
     }
 
     let html = htmlParts.join("");
-    // Restore code blocks
-    html = html.replace(
-      /\x00CODE(\d+)\x00/g,
-      (_, i) => codeBlocks[parseInt(i)] || "",
-    );
+    // Restore code blocks. NUL sentinels are internal placeholders that never
+    // appear in user input.
+    /* eslint-disable no-control-regex -- NUL sentinels are internal placeholders, never user input */
+    html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i)] || "");
+    /* eslint-enable no-control-regex */
     return html;
   }
 
@@ -329,10 +307,7 @@
     let html = escapeHtml(text);
     // Search highlight — apply after escapeHtml so <mark> tags aren't double-escaped
     if (searchRegex) {
-      html = html.replace(
-        searchRegex,
-        '<mark class="search-highlight">$1</mark>',
-      );
+      html = html.replace(searchRegex, '<mark class="search-highlight">$1</mark>');
     }
     // Inline code (backticks) — must process before bold/italic
     html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
@@ -376,17 +351,12 @@
     }
 
     // Edit tool results
-    if (
-      toolCall.toolName === "edit" &&
-      details?.edits &&
-      details.edits.length > 0
-    ) {
+    if (toolCall.toolName === "edit" && details?.edits && details.edits.length > 0) {
       let html = '<div class="edit-tool">';
       for (const edit of details.edits) {
         html += `<div class="edit-entry">`;
         html += `<span class="edit-file">${escapeHtml(edit.file || "")}</span>`;
-        if (edit.lines)
-          html += `: <span class="edit-lines">${edit.lines}</span>`;
+        if (edit.lines) html += `: <span class="edit-lines">${edit.lines}</span>`;
         if (edit.diff) {
           html += `<pre class="edit-diff">${escapeHtml(edit.diff)}</pre>`;
         }
@@ -496,7 +466,9 @@
             stroke-linecap="round"
             stroke-linejoin="round"
           >
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+            <path
+              d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+            />
             <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
             <line x1="12" y1="22.08" x2="12" y2="12" />
           </svg>
@@ -515,12 +487,24 @@
           </svg>
         {/if}
       </span>
-      <span class="role-name">{message.role === "provider" ? message.label || "provider" : message.role}</span>
+      <span class="role-name"
+        >{message.role === "provider" ? message.label || "provider" : message.role}</span
+      >
     </div>
     <div class="message-actions">
       {#if (message.role === "assistant" || message.role === "user" || message.role === "provider") && !message.isStreaming}
         <button class="copy-msg-btn" onclick={copyMessage} title="Copy message">
-          {@html clipboardSvg}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
           {#if copiedMessage}<span class="copy-check">✓</span>{/if}
         </button>
       {/if}
@@ -543,11 +527,7 @@
           </svg>
         </button>
       {/if}
-      <button
-        class="time-toggle"
-        onclick={toggleTimeFormat}
-        title="Toggle timestamp format"
-      >
+      <button class="time-toggle" onclick={toggleTimeFormat} title="Toggle timestamp format">
         <span class="message-time">{formatTimestamp(message.timestamp)}</span>
       </button>
     </div>
@@ -555,7 +535,7 @@
 
   <div class="message-content">
     {#if message.toolCalls && message.toolCalls.length > 0}
-      {#each message.toolCalls as toolCall}
+      {#each message.toolCalls as toolCall (toolCall.toolCallId)}
         <div class="tool-call {toolCall.isError ? 'tool-error' : ''}">
           <div class="tool-header">
             <span class="tool-icon">
@@ -569,9 +549,7 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               >
-                <path
-                  d={toolIconPaths[toolCall.toolName] || defaultToolIconPath}
-                />
+                <path d={toolIconPaths[toolCall.toolName] || defaultToolIconPath} />
               </svg>
             </span>
             <span class="tool-name">{toolCall.toolName}</span>
@@ -633,12 +611,12 @@
             fill="none"
             stroke="var(--color-error)"
             stroke-width="2.5"
-            ><circle cx="12" cy="12" r="10" /><line
-              x1="15"
+            ><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line
+              x1="9"
               y1="9"
-              x2="9"
+              x2="15"
               y2="15"
-            /><line x1="9" y1="9" x2="15" y2="15" /></svg
+            /></svg
           >
         {:else if message.content.startsWith("⚠")}
           <svg
@@ -674,12 +652,12 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2.5"
-            ><circle cx="12" cy="12" r="10" /><line
+            ><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line
               x1="12"
-              y1="8"
-              x2="12"
-              y2="12"
-            /><line x1="12" y1="16" x2="12.01" y2="16" /></svg
+              y1="16"
+              x2="12.01"
+              y2="16"
+            /></svg
           >
         {/if}
         <span>{message.content}</span>
@@ -734,11 +712,8 @@
         <div class="text-wrapper">
           {#if message.images && message.images.length > 0}
             <div class="message-images">
-              {#each message.images as img}
-                <button
-                  class="image-thumb-btn"
-                  onclick={() => openLightbox(getImageDataUrl(img))}
-                >
+              {#each message.images as img, i (i)}
+                <button class="image-thumb-btn" onclick={() => openLightbox(getImageDataUrl(img))}>
                   <img
                     src={getImageDataUrl(img)}
                     alt={img.name || "Attached image"}
@@ -748,7 +723,7 @@
               {/each}
             </div>
           {/if}
-          {#each parseContent(message.content) as part}
+          {#each parseContent(message.content) as part, i (i)}
             {#if typeof part === "string"}
               {@html renderMarkdown(part, searchRegex)}
             {:else if part.isMermaid}
@@ -772,8 +747,7 @@
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        stroke-width="2"
-                        ><polyline points="20 6 9 17 4 12" /></svg
+                        stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg
                       >
                       <span>Apply</span>
                     </button>
@@ -832,8 +806,7 @@
                     </button>
                   </div>
                 </div>
-                <pre class="language-{part.language}"><code>{part.code}</code
-                  ></pre>
+                <pre class="language-{part.language}"><code>{part.code}</code></pre>
               </div>
             {/if}
           {/each}
@@ -848,7 +821,6 @@
 
 <!-- Lightbox overlay -->
 {#if lightboxImage}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="lightbox-overlay"
     role="dialog"
@@ -858,11 +830,7 @@
     onclick={closeLightbox}
     onkeydown={(e) => e.key === "Escape" && closeLightbox()}
   >
-    <button
-      class="lightbox-close"
-      onclick={closeLightbox}
-      aria-label="Close image preview"
-    >
+    <button class="lightbox-close" onclick={closeLightbox} aria-label="Close image preview">
       <svg
         width="24"
         height="24"

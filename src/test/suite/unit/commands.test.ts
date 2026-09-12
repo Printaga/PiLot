@@ -51,9 +51,7 @@ suite("commands: logDiagnostics", () => {
 
 		const buffer = getDiagnosticsBuffer();
 		assert.ok(buffer.some((line: string) => line.includes("42")));
-		assert.ok(
-			buffer.some((line: string) => line.includes('"foo"') || line.includes('foo')),
-		);
+		assert.ok(buffer.some((line: string) => line.includes('"foo"') || line.includes("foo")));
 	});
 
 	test("logs confirmation message when enabled", () => {
@@ -61,11 +59,7 @@ suite("commands: logDiagnostics", () => {
 		setDiagnosticsEnabled(true);
 
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 });
 
@@ -83,11 +77,7 @@ suite("commands: setDiagnosticsEnabled", () => {
 	test("enabling logs a confirmation", () => {
 		setDiagnosticsEnabled(true);
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 
 	test("disabling does not add confirmation message", () => {
@@ -95,11 +85,7 @@ suite("commands: setDiagnosticsEnabled", () => {
 		resetDiagnosticsStateForTests();
 		setDiagnosticsEnabled(false);
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			!buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(!buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 });
 

@@ -1,0 +1,18 @@
+{
+  "plugins": ["prettier-plugin-svelte"],
+  "useTabs": true,
+  "tabWidth": 4,
+  "printWidth": 100,
+  "semi": true,
+  "singleQuote": false,
+  "overrides": [
+    {
+      "files": "src/webview/**",
+      "options": { "useTabs": false, "tabWidth": 2 }
+    },
+    {
+      "files": ["*.json", "*.jsonc"],
+      "options": { "useTabs": false, "tabWidth": 2 }
+    }
+  ]
+}

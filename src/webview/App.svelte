@@ -15,14 +15,7 @@
   import type { ImageContent, Message, Model } from "./types/index";
 
   let activeTab = $state<
-    | "chat"
-    | "sessions"
-    | "models"
-    | "providers"
-    | "tools"
-    | "settings"
-    | "packages"
-    | "skills"
+    "chat" | "sessions" | "models" | "providers" | "tools" | "settings" | "packages" | "skills"
   >("chat");
   let messages = $state<Message[]>([]);
   let isStreaming = $state(false);
@@ -66,9 +59,7 @@
     }>
   >([]);
   let isListening = $state(false);
-  let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(
-    new Map(),
-  );
+  let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(new Map());
   let toolPreset = $state<string | null>(null);
 
   // Update notification state
@@ -77,7 +68,6 @@
   let packageUpdateCount = $state(0);
   let appVersion = $state("0.0.0");
   let piCliVersion = $state<string | null>(null);
-  let isBinaryAvailable = $state(false);
 
   // Footer data for PI TUI-style status line
   let footerCwd = $state("");
@@ -231,9 +221,7 @@
     if (Array.isArray(msg.content)) {
       const thinkingBlocks = msg.content.filter(
         (c: any) =>
-          c.type === "thinking" &&
-          typeof c.thinking === "string" &&
-          c.thinking.trim().length > 0,
+          c.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim().length > 0,
       );
       if (thinkingBlocks.length === 0) return undefined;
       return thinkingBlocks.map((c: any) => c.thinking).join("\n");
@@ -406,10 +394,7 @@
         // (e.g. when agent.prompt() throws before emitting end events)
         if (messages.length > 0 && messages[messages.length - 1].isStreaming) {
           const lastMsg = messages[messages.length - 1];
-          messages = [
-            ...messages.slice(0, -1),
-            { ...lastMsg, isStreaming: false },
-          ];
+          messages = [...messages.slice(0, -1), { ...lastMsg, isStreaming: false }];
         }
         showToast({
           type: "error",
@@ -463,9 +448,7 @@
 
       case "voice-transcription":
         if (data?.text) {
-          window.dispatchEvent(
-            new CustomEvent("voice-transcription", { detail: data.text }),
-          );
+          window.dispatchEvent(new CustomEvent("voice-transcription", { detail: data.text }));
         }
         break;
 
@@ -529,8 +512,7 @@
         // Footer data from extension host (cwd, git branch, session name)
         if (data.cwd) footerCwd = data.cwd;
         if (data.gitBranch !== undefined) footerGitBranch = data.gitBranch;
-        if (data.sessionName !== undefined)
-          footerSessionName = data.sessionName;
+        if (data.sessionName !== undefined) footerSessionName = data.sessionName;
         break;
       }
 
@@ -580,7 +562,6 @@
     if (data?.currentModel) currentModel = data.currentModel;
     if (data?.favoriteModels) favoriteModels = data.favoriteModels;
     piCliVersion = data?.piCliVersion ?? null;
-    isBinaryAvailable = data?.isBinaryAvailable ?? false;
     if (data?.thinkingLevel) thinkingLevel = data.thinkingLevel;
 
     // Show onboarding on first launch (Feature 3)
@@ -589,7 +570,9 @@
       if (!hasSeenTour) {
         showOnboarding = true;
       }
-    } catch {}
+    } catch {
+      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+    }
   }
 
   function handlePiEvent(event: any) {
@@ -608,9 +591,7 @@
           // disturbing any in-progress streaming assistant bubble.
           if (msgRole === "custom") {
             if (event.message?.display !== false) {
-              const { content, images } = extractTextAndImages(
-                event.message?.content,
-              );
+              const { content, images } = extractTextAndImages(event.message?.content);
               if (content.trim() || images.length > 0) {
                 messages = [
                   ...messages,
@@ -630,18 +611,13 @@
           if (messages.length > 0) {
             const lastMsg = messages[messages.length - 1];
             if (lastMsg.isStreaming) {
-              messages = [
-                ...messages.slice(0, -1),
-                { ...lastMsg, isStreaming: false },
-              ];
+              messages = [...messages.slice(0, -1), { ...lastMsg, isStreaming: false }];
             }
           }
           // Extract initial text content from the message if available
           // (covers non-streaming providers or partial content in start event)
           const startContent = extractTextFromAssistantMessage(event.message);
-          const startThinking = extractThinkingFromAssistantMessage(
-            event.message,
-          );
+          const startThinking = extractThinkingFromAssistantMessage(event.message);
           if (msgRole === "assistant" || !msgRole || msgRole === "system") {
             messages = [
               ...messages,
@@ -665,15 +641,10 @@
           const lastMsg = messages[messages.length - 1];
           // Extract final content from the completed message to ensure nothing is lost
           let finalContent = extractTextFromAssistantMessage(event.message);
-          const finalThinking = extractThinkingFromAssistantMessage(
-            event.message,
-          );
+          const finalThinking = extractThinkingFromAssistantMessage(event.message);
           // Surface provider errors (rate limit, out of credits, etc.)
           // The agent sets stopReason="error" + errorMessage on the assistant message
-          if (
-            event.message?.stopReason === "error" &&
-            event.message?.errorMessage
-          ) {
+          if (event.message?.stopReason === "error" && event.message?.errorMessage) {
             finalContent = `❌ ${event.message.errorMessage}`;
           }
           if (lastMsg.isStreaming) {
@@ -701,8 +672,7 @@
 
       case "message_update":
         {
-          const hasStreaming =
-            messages.length > 0 && messages[messages.length - 1].isStreaming;
+          const hasStreaming = messages.length > 0 && messages[messages.length - 1].isStreaming;
           if (!hasStreaming && isStreaming) {
             messages = [
               ...messages,
@@ -716,18 +686,14 @@
           }
         }
         // Handle thinking deltas — append to the thinking buffer
-        if (
-          event.assistantMessageEvent?.type === "thinking_delta" &&
-          messages.length > 0
-        ) {
+        if (event.assistantMessageEvent?.type === "thinking_delta" && messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           if (lastMsg.isStreaming) {
             messages = [
               ...messages.slice(0, -1),
               {
                 ...lastMsg,
-                thinking:
-                  (lastMsg.thinking || "") + event.assistantMessageEvent.delta,
+                thinking: (lastMsg.thinking || "") + event.assistantMessageEvent.delta,
                 content: lastMsg.content || "",
               },
             ];
@@ -735,10 +701,7 @@
           break;
         }
         // Handle text deltas — append to the content buffer
-        if (
-          event.assistantMessageEvent?.type === "text_delta" &&
-          messages.length > 0
-        ) {
+        if (event.assistantMessageEvent?.type === "text_delta" && messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           if (lastMsg.isStreaming) {
             messages = [
@@ -754,24 +717,13 @@
         // For other message_update events (text_end, thinking_end, toolcall_*),
         // sync content from the partial message if it's more complete than what we have.
         // This ensures content is captured even if some delta events were dropped.
-        if (
-          event.assistantMessageEvent &&
-          event.message &&
-          messages.length > 0
-        ) {
+        if (event.assistantMessageEvent && event.message && messages.length > 0) {
           const lastMsg = messages[messages.length - 1];
           if (lastMsg.isStreaming) {
-            const partialContent = extractTextFromAssistantMessage(
-              event.message,
-            );
-            const partialThinking = extractThinkingFromAssistantMessage(
-              event.message,
-            );
+            const partialContent = extractTextFromAssistantMessage(event.message);
+            const partialThinking = extractThinkingFromAssistantMessage(event.message);
             // Only update if the partial message content is longer than what we've accumulated
-            if (
-              partialContent &&
-              partialContent.length > (lastMsg.content || "").length
-            ) {
+            if (partialContent && partialContent.length > (lastMsg.content || "").length) {
               messages = [
                 ...messages.slice(0, -1),
                 {
@@ -910,15 +862,14 @@
         ];
         break;
 
-      case "tool_execution_update":
+      case "tool_execution_update": {
         activeToolCalls.set(event.toolCallId, {
           toolName: event.toolName,
           args: event.args || {},
         });
         const updateMsgIdx = messages.findLastIndex(
           (m) =>
-            m.role === "system" &&
-            m.toolCalls?.some((tc) => tc.toolCallId === event.toolCallId),
+            m.role === "system" && m.toolCalls?.some((tc) => tc.toolCallId === event.toolCallId),
         );
         if (updateMsgIdx >= 0) {
           messages = [
@@ -926,24 +877,22 @@
             {
               ...messages[updateMsgIdx],
               toolCalls: messages[updateMsgIdx].toolCalls!.map((tc) =>
-                tc.toolCallId === event.toolCallId
-                  ? { ...tc, status: "streaming" }
-                  : tc,
+                tc.toolCallId === event.toolCallId ? { ...tc, status: "streaming" } : tc,
               ),
             },
             ...messages.slice(updateMsgIdx + 1),
           ];
         }
         break;
+      }
 
-      case "tool_execution_end":
+      case "tool_execution_end": {
         const toolResult = activeToolCalls.get(event.toolCallId);
         if (toolResult || messages.length > 0) {
           activeToolCalls.delete(event.toolCallId);
           const lastSystemIdx = messages.findLastIndex(
             (m) =>
-              m.role === "system" &&
-              m.toolCalls?.some((tc) => tc.toolCallId === event.toolCallId),
+              m.role === "system" && m.toolCalls?.some((tc) => tc.toolCallId === event.toolCallId),
           );
           if (lastSystemIdx >= 0) {
             messages = [
@@ -957,9 +906,7 @@
                         status: "complete",
                         result: {
                           content:
-                            event.result?.content
-                              ?.map((c: any) => c.text || "")
-                              .join("\n") || "",
+                            event.result?.content?.map((c: any) => c.text || "").join("\n") || "",
                           details: event.result?.details,
                           isError: event.isError,
                         },
@@ -973,6 +920,7 @@
           }
         }
         break;
+      }
 
       case "model_select":
         showToast({
@@ -1049,11 +997,12 @@
       showToast({
         type: "info",
         title: "New fork shortcut",
-        message:
-          "Hover any user message and click the fork icon to branch from that point.",
+        message: "Hover any user message and click the fork icon to branch from that point.",
         duration: 5500,
       });
-    } catch {}
+    } catch {
+      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+    }
   }
 
   async function handleSendPrompt(text: string, images?: ImageContent[]) {
@@ -1170,7 +1119,9 @@
     showOnboarding = false;
     try {
       localStorage.setItem("pilots-seen-tour", "true");
-    } catch {}
+    } catch {
+      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+    }
     showToast({
       type: "success",
       title: "Tour complete!",
@@ -1217,9 +1168,7 @@
             stroke="currentColor"
             stroke-width="2"
           >
-            <path
-              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-            />
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </button>
 
@@ -1398,8 +1347,8 @@
           {providers}
           onSelect={handleSwitchModel}
           onToggleFavorite={handleToggleFavorite}
-          onOpenConfigFile={(file) => sendMessage({ type: 'openConfigFile', data: { file } })}
-          onRefresh={() => sendMessage({ type: 'refreshModels' })}
+          onOpenConfigFile={(file) => sendMessage({ type: "openConfigFile", data: { file } })}
+          onRefresh={() => sendMessage({ type: "refreshModels" })}
         />
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />
@@ -1445,10 +1394,7 @@
 <Toast />
 
 {#if showOnboarding}
-  <OnboardingTour
-    onComplete={completeOnboarding}
-    onDismiss={completeOnboarding}
-  />
+  <OnboardingTour onComplete={completeOnboarding} onDismiss={completeOnboarding} />
 {/if}
 
 {#if showExport}

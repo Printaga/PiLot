@@ -7,9 +7,7 @@ import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 // MessageHandler.handle() reports failures by returning `{ error }` (and
 // posting to the webview) rather than re-throwing. Capture both shapes so
 // error-path tests can assert either outcome uniformly.
-async function catchError(
-	fn: () => Promise<any>,
-): Promise<{ caught?: Error; result?: any }> {
+async function catchError(fn: () => Promise<any>): Promise<{ caught?: Error; result?: any }> {
 	let caught: Error | undefined;
 	let result: any;
 	try {
@@ -55,9 +53,7 @@ function createMockProvider(): {
 		setAutoCompactionEnabled: () => undefined,
 		getAutoContext: () => false,
 		setAutoContext: () => undefined,
-		getAvailableModels: async () => [
-			{ id: "model-a", provider: "prov", name: "Model A" },
-		],
+		getAvailableModels: async () => [{ id: "model-a", provider: "prov", name: "Model A" }],
 		getCurrentModelId: () => "model-a",
 		getExtensionVersion: () => "1.0.0",
 		getPiCliVersion: async () => "0.1.0",
@@ -107,7 +103,7 @@ function createMockProvider(): {
 	const provider: any = new Proxy(base, {
 		get(target, prop, _receiver) {
 			const value = Reflect.get(target, prop, target);
-			if (typeof prop === 'string' && typeof value === 'function' && prop !== 'postMessage') {
+			if (typeof prop === "string" && typeof value === "function" && prop !== "postMessage") {
 				return (...args: unknown[]) => {
 					calls[prop] = calls[prop] || [];
 					calls[prop].push(args);
@@ -213,9 +209,7 @@ suite("MessageHandler", () => {
 		});
 		assert.deepStrictEqual(provider.calls.prompt[0], ["/export .html"]);
 		assert.strictEqual(result.success, true);
-		const exportMsg = webviewMessages.find(
-			(m: any) => m.type === "exportResult",
-		);
+		const exportMsg = webviewMessages.find((m: any) => m.type === "exportResult");
 		assert.ok(exportMsg);
 		assert.strictEqual(exportMsg.data.success, true);
 	});
@@ -244,9 +238,7 @@ suite("MessageHandler", () => {
 		});
 		assert.strictEqual(result.success, false);
 		assert.ok(result.error?.includes("export failed"));
-		const exportMsg = webviewMessages.find(
-			(m: any) => m.type === "exportResult",
-		);
+		const exportMsg = webviewMessages.find((m: any) => m.type === "exportResult");
 		assert.ok(exportMsg);
 		assert.strictEqual(exportMsg.data.success, false);
 	});
@@ -461,9 +453,7 @@ suite("MessageHandler", () => {
 			{ toolPreset: "custom", customTools: ["bash"] },
 		]);
 		assert.strictEqual(result.success, true);
-		const settingsMsg = webviewMessages.find(
-			(m: any) => m.type === "settings-response",
-		);
+		const settingsMsg = webviewMessages.find((m: any) => m.type === "settings-response");
 		assert.ok(settingsMsg);
 		assert.strictEqual(settingsMsg.data.toolPreset, "custom");
 	});
@@ -481,13 +471,10 @@ suite("MessageHandler", () => {
 	});
 
 	test("getPiUISettings success", async () => {
-		provider.getPiUISettings = () =>
-			Promise.resolve({ showCacheMissNotices: true });
+		provider.getPiUISettings = () => Promise.resolve({ showCacheMissNotices: true });
 		const result = await handler.handle({ type: "getPiUISettings" });
 		assert.strictEqual(result.success, true);
-		const msg = webviewMessages.find(
-			(m: any) => m.type === "pi-settings-changed",
-		);
+		const msg = webviewMessages.find((m: any) => m.type === "pi-settings-changed");
 		assert.ok(msg);
 		assert.deepStrictEqual(msg.data, { showCacheMissNotices: true });
 	});
@@ -508,10 +495,7 @@ suite("MessageHandler", () => {
 			type: "setPiUISetting",
 			data: { key: "showCacheMissNotices", value: true },
 		});
-		assert.deepStrictEqual(provider.calls.setPiUISetting[0], [
-			"showCacheMissNotices",
-			true,
-		]);
+		assert.deepStrictEqual(provider.calls.setPiUISetting[0], ["showCacheMissNotices", true]);
 		assert.strictEqual(result.success, true);
 	});
 
@@ -540,9 +524,7 @@ suite("MessageHandler", () => {
 		});
 		assert.deepStrictEqual(provider.calls.checkProviderAuth[0], ["openai"]);
 		assert.strictEqual(result.success, true);
-		const msg = webviewMessages.find(
-			(m: any) => m.type === "provider-auth-check-result",
-		);
+		const msg = webviewMessages.find((m: any) => m.type === "provider-auth-check-result");
 		assert.ok(msg);
 		assert.deepStrictEqual(msg.data, {
 			provider: "openai",
@@ -561,9 +543,7 @@ suite("MessageHandler", () => {
 			}),
 		);
 		assert.ok(caught || result?.error);
-		const resultMsg = webviewMessages.find(
-			(m: any) => m.type === "provider-auth-check-result",
-		);
+		const resultMsg = webviewMessages.find((m: any) => m.type === "provider-auth-check-result");
 		assert.ok(!resultMsg, "no result message on failure");
 		assert.ok(webviewMessages.some((m: any) => m.type === "error"));
 	});
@@ -661,9 +641,7 @@ suite("MessageHandler", () => {
 		assert.deepStrictEqual(result, [{ id: "m1", provider: "p", name: "M1" }]);
 		const msg = webviewMessages.find((m: any) => m.type === "models-updated");
 		assert.ok(msg);
-		assert.deepStrictEqual(msg.data.models, [
-			{ id: "m1", provider: "p", name: "M1" },
-		]);
+		assert.deepStrictEqual(msg.data.models, [{ id: "m1", provider: "p", name: "M1" }]);
 	});
 
 	test("getProviderAuth - returns auth and sends provider-auth", async () => {
@@ -749,9 +727,7 @@ suite("MessageHandler", () => {
 			data: {},
 		});
 		assert.strictEqual(result, true);
-		const msg = webviewMessages.find(
-			(m: any) => m.type === "skill-discovery-changed",
-		);
+		const msg = webviewMessages.find((m: any) => m.type === "skill-discovery-changed");
 		assert.ok(msg);
 		assert.strictEqual(msg.data.enabled, true);
 	});
@@ -812,9 +788,7 @@ suite("MessageHandler", () => {
 			data: {},
 		});
 		assert.deepStrictEqual(result, ["/skill-a"]);
-		const msg = webviewMessages.find(
-			(m: any) => m.type === "extra-skill-paths",
-		);
+		const msg = webviewMessages.find((m: any) => m.type === "extra-skill-paths");
 		assert.ok(msg);
 		assert.deepStrictEqual(msg.data.paths, ["/skill-a"]);
 	});
@@ -872,10 +846,7 @@ suite("MessageHandler", () => {
 		});
 		assert.strictEqual(result.success, true);
 		assert.strictEqual(result.cancelled, true);
-		assert.ok(
-			!provider.calls.deleteSessions?.length,
-			"deleteSessions should not be called",
-		);
+		assert.ok(!provider.calls.deleteSessions?.length, "deleteSessions should not be called");
 	});
 
 	test("deleteSessions success", async () => {
@@ -898,10 +869,7 @@ suite("MessageHandler", () => {
 			data: {},
 		});
 		assert.strictEqual(result.cancelled, true);
-		assert.ok(
-			!provider.calls.setSessionName?.length,
-			"setSessionName should not be called",
-		);
+		assert.ok(!provider.calls.setSessionName?.length, "setSessionName should not be called");
 	});
 
 	test("showRenameSessionDialog success", async () => {
@@ -947,10 +915,7 @@ suite("MessageHandler", () => {
 		provider.prompt = () => Promise.resolve();
 		// ready sends ready message, not response
 		await handler.handle({ type: "ready" });
-		assert.ok(
-			!webviewMessages.some((m: any) => m.id),
-			"no response id expected",
-		);
+		assert.ok(!webviewMessages.some((m: any) => m.id), "no response id expected");
 	});
 
 	test("default unknown type - returns error and logs debug", async () => {
@@ -1311,17 +1276,14 @@ suite("MessageHandler", () => {
 	});
 
 	test("loginProvider failure posts a string error to the webview", async () => {
-		provider.loginProvider = () =>
-			Promise.reject(new Error("OAuth not supported"));
+		provider.loginProvider = () => Promise.reject(new Error("OAuth not supported"));
 		const result = await handler.handle({
 			type: "loginProvider",
 			data: { provider: "anthropic" },
 		});
 		assert.strictEqual(result.success, true);
 		await new Promise((r) => setImmediate(r));
-		const msg = webviewMessages.find(
-			(m: any) => m.type === "provider-login-result",
-		);
+		const msg = webviewMessages.find((m: any) => m.type === "provider-login-result");
 		assert.ok(msg, "expected a provider-login-result message");
 		assert.strictEqual(msg.data.success, false);
 		assert.strictEqual(msg.data.error, "OAuth not supported");
@@ -1332,9 +1294,7 @@ suite("MessageHandler", () => {
 			type: "cancelProviderLogin",
 			data: { provider: "anthropic" },
 		});
-		assert.deepStrictEqual(provider.calls.cancelProviderLogin[0], [
-			"anthropic",
-		]);
+		assert.deepStrictEqual(provider.calls.cancelProviderLogin[0], ["anthropic"]);
 		assert.strictEqual(result.success, true);
 	});
 
@@ -1378,9 +1338,7 @@ suite("MessageHandler", () => {
 			type: "openLoginUrl",
 			data: { url: "https://auth.example/start" },
 		});
-		assert.deepStrictEqual(provider.calls.openExternalUrl[0], [
-			"https://auth.example/start",
-		]);
+		assert.deepStrictEqual(provider.calls.openExternalUrl[0], ["https://auth.example/start"]);
 		assert.strictEqual(result.success, true);
 	});
 
@@ -1441,10 +1399,7 @@ suite("MessageHandler", () => {
 	});
 
 	test("fetchProviderModels routes to provider and posts correlated provider-models", async () => {
-		provider.fetchProviderModels = async () => [
-			{ id: "m1" },
-			{ id: "m2", name: "M2" },
-		];
+		provider.fetchProviderModels = async () => [{ id: "m1" }, { id: "m2", name: "M2" }];
 		const result = await handler.handle({
 			type: "fetchProviderModels",
 			id: "req-fetch-1",
@@ -1459,10 +1414,7 @@ suite("MessageHandler", () => {
 		]);
 		const posted = webviewMessages.find((m: any) => m.type === "provider-models");
 		assert.ok(posted, "provider-models message posted to webview");
-		assert.deepStrictEqual(posted.data.models, [
-			{ id: "m1" },
-			{ id: "m2", name: "M2" },
-		]);
+		assert.deepStrictEqual(posted.data.models, [{ id: "m1" }, { id: "m2", name: "M2" }]);
 		assert.strictEqual(posted.data.requestId, "req-fetch-1");
 		assert.strictEqual(result.success, true);
 	});

@@ -89,7 +89,7 @@ suite("VoiceManager", () => {
 		voiceManagerInternals.existsSync = () => true;
 
 		originalStatSync = voiceManagerInternals.statSync;
-		voiceManagerInternals.statSync = () => ({ size: 10 * 1024 * 1024 } as fs.Stats);
+		voiceManagerInternals.statSync = () => ({ size: 10 * 1024 * 1024 }) as fs.Stats;
 
 		resetVscodeMocks();
 	});
@@ -123,8 +123,8 @@ suite("VoiceManager", () => {
 	});
 
 	suite("toggleVoiceCapture", () => {
-	test("shows info message and does not spawn when voice is disabled", async () => {
-		const infoMessages: string[] = [];
+		test("shows info message and does not spawn when voice is disabled", async () => {
+			const infoMessages: string[] = [];
 			(vscode.window as any).showInformationMessage = async (msg: string) => {
 				infoMessages.push(msg);
 				return msg;
@@ -147,13 +147,11 @@ suite("VoiceManager", () => {
 			await manager.toggleVoiceCapture();
 
 			assert.strictEqual(manager.listening, false);
-			assert.ok(
-				infoMessages.some((m: string) => m.includes("Voice dictation is disabled")),
-			);
+			assert.ok(infoMessages.some((m: string) => m.includes("Voice dictation is disabled")));
 		});
 
-	test("starts capture when stopped", async () => {
-		const spawnArgs: any[][] = [];
+		test("starts capture when stopped", async () => {
+			const spawnArgs: any[][] = [];
 			voiceManagerInternals.spawn = (...args: any[]) => {
 				spawnArgs.push(args);
 				return mockProcess as any;
@@ -176,9 +174,7 @@ suite("VoiceManager", () => {
 			assert.strictEqual(manager.listening, true);
 			assert.ok(
 				notifyCalls.some(
-					(c: any) =>
-						c.type === "voice-listening-changed" &&
-						c.data.listening === true,
+					(c: any) => c.type === "voice-listening-changed" && c.data.listening === true,
 				),
 			);
 		});
@@ -200,9 +196,7 @@ suite("VoiceManager", () => {
 			assert.strictEqual(manager.listening, false);
 			assert.ok(
 				notifyCalls.some(
-					(c: any) =>
-						c.type === "voice-listening-changed" &&
-						c.data.listening === false,
+					(c: any) => c.type === "voice-listening-changed" && c.data.listening === false,
 				),
 			);
 		});

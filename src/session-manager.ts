@@ -80,10 +80,7 @@ export function extractTextFromMessage(msg: {
  * Prioritises the assistant's first substantive line because it tends to
  * summarise the task more naturally. Falls back to the first user message.
  */
-export function generateSessionName(
-	userText: string,
-	assistantText: string,
-): string {
+export function generateSessionName(userText: string, assistantText: string): string {
 	const clean = (text: string): string =>
 		text
 			.replace(/```[\s\S]*?```/g, "")
@@ -147,16 +144,12 @@ export function generateSessionName(
 			return capitalize(firstSentence);
 		}
 		const truncated = truncate(firstSentence, 55);
-		return truncated.length < firstSentence.length
-			? truncated + "…"
-			: capitalize(truncated);
+		return truncated.length < firstSentence.length ? truncated + "…" : capitalize(truncated);
 	}
 
 	// 4 — Last resort: truncated user text
 	const truncated = truncate(cleanUser, 55);
-	return truncated.length < cleanUser.length
-		? truncated + "…"
-		: capitalize(truncated);
+	return truncated.length < cleanUser.length ? truncated + "…" : capitalize(truncated);
 }
 
 export class SessionListManager {
@@ -219,10 +212,7 @@ export class SessionListManager {
 
 		const name = generateSessionName(userText, "");
 		if (name) {
-			this.deps.logDebug(
-				"[PI] Auto-generated session name from user message:",
-				name,
-			);
+			this.deps.logDebug("[PI] Auto-generated session name from user message:", name);
 			session.setSessionName(name);
 			return true;
 		}
@@ -241,13 +231,9 @@ export class SessionListManager {
 			return this._sessionListCache;
 		}
 
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
-			const sessions = await PiSessionManager.list(
-				cwd,
-				this.deps.config.sessionDir,
-			);
+			const sessions = await PiSessionManager.list(cwd, this.deps.config.sessionDir);
 			// Cache full info for internal use (includes file path)
 			this._sessionListFullCache = sessions.map((s) => ({
 				id: s.id,
@@ -289,27 +275,18 @@ export class SessionListManager {
 	}
 
 	async deleteSessions(sessionIds: string[]): Promise<void> {
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
-			const allSessions = await PiSessionManager.list(
-				cwd,
-				this.deps.config.sessionDir,
-			);
+			const allSessions = await PiSessionManager.list(cwd, this.deps.config.sessionDir);
 			await Promise.all(
 				sessionIds.map(async (sessionId) => {
 					try {
-						const targetSessionInfo = allSessions.find(
-							(s) => s.id === sessionId,
-						);
+						const targetSessionInfo = allSessions.find((s) => s.id === sessionId);
 						if (targetSessionInfo) {
 							await sessionManagerInternals.unlink(targetSessionInfo.path);
 						}
 					} catch (error) {
-						this.deps.logError(
-							`[PI] Failed to delete session ${sessionId}:`,
-							error,
-						);
+						this.deps.logError(`[PI] Failed to delete session ${sessionId}:`, error);
 						throw error;
 					}
 				}),
@@ -325,9 +302,7 @@ export class SessionListManager {
 			await this.refreshSessionList(true);
 		} catch (error) {
 			this.deps.logError("[PI] Failed to delete sessions:", error);
-			vscode.window.showErrorMessage(
-				`Failed to delete sessions: ${String(error)}`,
-			);
+			vscode.window.showErrorMessage(`Failed to delete sessions: ${String(error)}`);
 			throw error;
 		}
 	}

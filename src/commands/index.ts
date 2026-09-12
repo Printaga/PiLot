@@ -13,10 +13,7 @@ async function focusSidebar() {
 	await vscode.commands.executeCommand("piAgentChat.focus");
 }
 
-export function registerCommands(
-	context: vscode.ExtensionContext,
-	provider: PiAgentProvider,
-) {
+export function registerCommands(context: vscode.ExtensionContext, provider: PiAgentProvider) {
 	// Explain Code command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.explainCode", async () => {
@@ -69,31 +66,23 @@ export function registerCommands(
 
 	// Analyze Project command
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.analyzeProject",
-			async (uri: vscode.Uri) => {
-				await focusSidebar();
-				await new Promise((resolve) => setTimeout(resolve, 500));
+		vscode.commands.registerCommand("pi-agent.analyzeProject", async (uri: vscode.Uri) => {
+			await focusSidebar();
+			await new Promise((resolve) => setTimeout(resolve, 500));
 
-				const folderPath =
-					uri?.fsPath ||
-					vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
-					"";
-				const prompt = `Analyze the project at \`${folderPath}\`. Provide an overview of:\n1. Project structure\n2. Key files and their purposes\n3. Technologies and frameworks used\n4. Potential improvements`;
+			const folderPath =
+				uri?.fsPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+			const prompt = `Analyze the project at \`${folderPath}\`. Provide an overview of:\n1. Project structure\n2. Key files and their purposes\n3. Technologies and frameworks used\n4. Potential improvements`;
 
-				await provider.prompt(prompt);
-			},
-		),
+			await provider.prompt(prompt);
+		}),
 	);
 
 	// Navigate To Session command
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.navigateToSession",
-			async (nodeId: string) => {
-				await provider.navigateTree(nodeId);
-			},
-		),
+		vscode.commands.registerCommand("pi-agent.navigateToSession", async (nodeId: string) => {
+			await provider.navigateTree(nodeId);
+		}),
 	);
 
 	// Cycle Model command
@@ -129,21 +118,15 @@ export function registerCommands(
 	// Open Settings command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.openSettings", async () => {
-			await vscode.commands.executeCommand(
-				"workbench.action.openSettings",
-				"pi-agent",
-			);
+			await vscode.commands.executeCommand("workbench.action.openSettings", "pi-agent");
 		}),
 	);
 
 	// Open Current Session in Editor command
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.openCurrentSessionInEditor",
-			async () => {
-				await provider.openCurrentSessionInEditor();
-			},
-		),
+		vscode.commands.registerCommand("pi-agent.openCurrentSessionInEditor", async () => {
+			await provider.openCurrentSessionInEditor();
+		}),
 	);
 
 	// New Chat in Editor command
@@ -162,18 +145,15 @@ export function registerCommands(
 
 	// Add File to Chat command
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.addFileToChat",
-			async (uri: vscode.Uri) => {
-				if (uri && uri.scheme === "file") {
-					await focusSidebar();
-					const relativePath = vscode.workspace.asRelativePath(uri);
-					provider.notifyWebviewFromCommand("add-file-to-chat", {
-						path: relativePath,
-					});
-				}
-			},
-		),
+		vscode.commands.registerCommand("pi-agent.addFileToChat", async (uri: vscode.Uri) => {
+			if (uri && uri.scheme === "file") {
+				await focusSidebar();
+				const relativePath = vscode.workspace.asRelativePath(uri);
+				provider.notifyWebviewFromCommand("add-file-to-chat", {
+					path: relativePath,
+				});
+			}
+		}),
 	);
 
 	// Resource Management Commands
@@ -188,8 +168,7 @@ export function registerCommands(
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.installResource", async () => {
 			const input = await vscode.window.showInputBox({
-				prompt:
-					"Enter resource source to install (e.g., npm package, git URL, or local path)",
+				prompt: "Enter resource source to install (e.g., npm package, git URL, or local path)",
 				placeHolder: "npm:@pi-agent/skill-analyze",
 			});
 			if (input) {
@@ -270,42 +249,34 @@ export function registerCommands(
 	);
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.exportDiagnosticsLog",
-			async () => {
-				const workspaceFolders = vscode.workspace.workspaceFolders;
-				const defaultUri = workspaceFolders?.[0]?.uri;
+		vscode.commands.registerCommand("pi-agent.exportDiagnosticsLog", async () => {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			const defaultUri = workspaceFolders?.[0]?.uri;
 
-				const uri = await vscode.window.showSaveDialog({
-					defaultUri: defaultUri
-						? vscode.Uri.joinPath(defaultUri, "pi-diagnostics.log")
-						: undefined,
-					filters: {
-						"Log files": ["log"],
-						"Text files": ["txt"],
-						"All files": ["*"],
-					},
-					title: "Export PiLot Studio Diagnostics Log",
-				});
+			const uri = await vscode.window.showSaveDialog({
+				defaultUri: defaultUri
+					? vscode.Uri.joinPath(defaultUri, "pi-diagnostics.log")
+					: undefined,
+				filters: {
+					"Log files": ["log"],
+					"Text files": ["txt"],
+					"All files": ["*"],
+				},
+				title: "Export PiLot Studio Diagnostics Log",
+			});
 
-				if (!uri) return;
+			if (!uri) return;
 
-				try {
-					const content = getDiagnosticsLogContent();
-					await vscode.workspace.fs.writeFile(
-						uri,
-						Buffer.from(content, "utf-8"),
-					);
-					vscode.window.showInformationMessage(
-						`Diagnostics log exported to ${uri.fsPath}`,
-					);
-				} catch (error) {
-					vscode.window.showErrorMessage(
-						`Failed to export diagnostics log: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-			},
-		),
+			try {
+				const content = getDiagnosticsLogContent();
+				await vscode.workspace.fs.writeFile(uri, Buffer.from(content, "utf-8"));
+				vscode.window.showInformationMessage(`Diagnostics log exported to ${uri.fsPath}`);
+			} catch (error) {
+				vscode.window.showErrorMessage(
+					`Failed to export diagnostics log: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
 	);
 
 	// Watch diagnostics.enabled setting to toggle the buffer
@@ -313,9 +284,7 @@ export function registerCommands(
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("pi-agent.diagnostics")) {
 				const config = vscode.workspace.getConfiguration("pi-agent");
-				setDiagnosticsEnabled(
-					config.get<boolean>("diagnostics.enabled", false),
-				);
+				setDiagnosticsEnabled(config.get<boolean>("diagnostics.enabled", false));
 			}
 		}),
 	);
@@ -353,11 +322,8 @@ export function registerCommands(
 
 	// Rebuild Native Addons command
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.rebuildNativeAddons",
-			async () => {
-				await provider.rebuildNativeAddons();
-			},
-		),
+		vscode.commands.registerCommand("pi-agent.rebuildNativeAddons", async () => {
+			await provider.rebuildNativeAddons();
+		}),
 	);
 }

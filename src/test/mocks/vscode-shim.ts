@@ -9,7 +9,7 @@
 const facade = (globalThis as any).__vscodeFacade;
 if (!facade) {
 	throw new Error(
-		'vscode facade not installed; the test suite entrypoint (src/test/suite/index.ts) must run first',
+		"vscode facade not installed; the test suite entrypoint (src/test/suite/index.ts) must run first",
 	);
 }
 

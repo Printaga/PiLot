@@ -385,10 +385,7 @@ suite("update-checker: showUpdateNotification", () => {
 	test("returns user choice when PI update is available", async () => {
 		(vscode.window as any).showInformationMessage = async () => "Update All";
 
-		const result = await showUpdateNotification(
-			{ version: "1.0.0", note: "note" },
-			[],
-		);
+		const result = await showUpdateNotification({ version: "1.0.0", note: "note" }, []);
 		assert.strictEqual(result, "Update All");
 	});
 
@@ -404,13 +401,10 @@ suite("update-checker: showUpdateNotification", () => {
 	test("returns user choice when both PI and package updates are available", async () => {
 		(vscode.window as any).showInformationMessage = async () => "Update All";
 
-		const result = await showUpdateNotification(
-			{ version: "1.0.0" },
-			[
-				{ source: "src1", displayName: "Pkg1", type: "npm" },
-				{ source: "src2", displayName: "Pkg2", type: "npm" },
-			],
-		);
+		const result = await showUpdateNotification({ version: "1.0.0" }, [
+			{ source: "src1", displayName: "Pkg1", type: "npm" },
+			{ source: "src2", displayName: "Pkg2", type: "npm" },
+		]);
 		assert.strictEqual(result, "Update All");
 	});
 });
@@ -452,9 +446,7 @@ suite("update-checker: runUpdateCheck", () => {
 
 		try {
 			await runUpdateCheck(provider as any);
-			assert.ok(
-				infoMessages.some((m: string) => m.includes("up to date")),
-			);
+			assert.ok(infoMessages.some((m: string) => m.includes("up to date")));
 		} finally {
 			restoreEnvVar("PI_SKIP_VERSION_CHECK", prev);
 			restoreEnvVar("PI_OFFLINE", prevOffline);
@@ -502,9 +494,7 @@ suite("update-checker: runUpdateCheck", () => {
 
 		try {
 			await runUpdateCheck(provider as any);
-			assert.ok(
-				notifyCalls.some((c: any) => c.piVersion === "99.0.0"),
-			);
+			assert.ok(notifyCalls.some((c: any) => c.piVersion === "99.0.0"));
 			assert.ok(terminalCalls.includes("created"));
 			// User chose "Update All" so terminal should have "pi update"
 			assert.ok(terminalCalls.some((c: string) => c === "pi update"));
@@ -588,29 +578,29 @@ suite("update-checker: performCheckWithDeduplication", () => {
 		}
 	});
 
-		test("skips when last check was less than 1 hour ago", async () => {
-			const prev = process.env.PI_OFFLINE;
-			process.env.PI_OFFLINE = "";
-			try {
-				(vscode.workspace as any).getConfiguration = () =>
-					({
-						get: (key: string, _defaultValue?: any) => {
-							if (key === "offline") return false;
-							if (key === "autoUpdate") return false;
-							return _defaultValue;
-						},
-						update: async () => {},
-					}) as unknown as vscode.WorkspaceConfiguration;
-
-				const context = createMockContext({
-					globalState: {
-						get: (key: string, defaultValue: any) => {
-							if (key === "updateChecker.lastCheck") return Date.now();
-							return defaultValue;
-						},
-						update: async () => {},
+	test("skips when last check was less than 1 hour ago", async () => {
+		const prev = process.env.PI_OFFLINE;
+		process.env.PI_OFFLINE = "";
+		try {
+			(vscode.workspace as any).getConfiguration = () =>
+				({
+					get: (key: string, _defaultValue?: any) => {
+						if (key === "offline") return false;
+						if (key === "autoUpdate") return false;
+						return _defaultValue;
 					},
-				});
+					update: async () => {},
+				}) as unknown as vscode.WorkspaceConfiguration;
+
+			const context = createMockContext({
+				globalState: {
+					get: (key: string, defaultValue: any) => {
+						if (key === "updateChecker.lastCheck") return Date.now();
+						return defaultValue;
+					},
+					update: async () => {},
+				},
+			});
 
 			const provider = createMockProvider();
 			provider.sendUpdatesToWebview = () => {};
@@ -636,21 +626,21 @@ suite("update-checker: performCheckWithDeduplication", () => {
 					update: async () => {},
 				}) as unknown as vscode.WorkspaceConfiguration;
 
-		const lastCheck = 0;
-		const context = {
-			globalState: {
-				get: (key: string, defaultValue: any) => {
-					if (key === "updateChecker.lastCheck") return lastCheck;
-					return defaultValue;
+			const lastCheck = 0;
+			const context = {
+				globalState: {
+					get: (key: string, defaultValue: any) => {
+						if (key === "updateChecker.lastCheck") return lastCheck;
+						return defaultValue;
+					},
+					update: async (key: string, value: unknown) => {
+						globalStateUpdates[key] = value;
+					},
 				},
-				update: async (key: string, value: unknown) => {
-					globalStateUpdates[key] = value;
-				},
-			},
-		} as any;
-		if ((context as any).subscriptions === undefined) {
-			(context as any).subscriptions = [];
-		}
+			} as any;
+			if ((context as any).subscriptions === undefined) {
+				(context as any).subscriptions = [];
+			}
 
 			const updateCalls: any[] = [];
 			const provider = {
@@ -667,13 +657,8 @@ suite("update-checker: performCheckWithDeduplication", () => {
 
 			try {
 				await performCheckWithDeduplication(context, provider);
-				assert.ok(
-					updateCalls.some((c: any) => c.piVersion === "99.0.0"),
-				);
-				assert.strictEqual(
-					globalStateUpdates["updateChecker.knownPiUpdate"],
-					"pi:v99.0.0",
-				);
+				assert.ok(updateCalls.some((c: any) => c.piVersion === "99.0.0"));
+				assert.strictEqual(globalStateUpdates["updateChecker.knownPiUpdate"], "pi:v99.0.0");
 			} finally {
 				delete (global as any).fetch;
 			}
@@ -699,27 +684,28 @@ suite("update-checker: performCheckWithDeduplication", () => {
 			const context = {
 				globalState: {
 					get: <T>(key: string, defaultValue: T): T => {
-						if (key === "updateChecker.lastCheck") return (Date.now() - 2 * 60 * 60 * 1000) as T;
-						if (key === "updateChecker.knownPiUpdate") return ("pi:v99.0.0") as T;
+						if (key === "updateChecker.lastCheck")
+							return (Date.now() - 2 * 60 * 60 * 1000) as T;
+						if (key === "updateChecker.knownPiUpdate") return "pi:v99.0.0" as T;
 						return defaultValue;
 					},
 					update: async () => {},
 				},
 				subscriptions: [],
-		} as any;
+			} as any;
 
-		const updateCalls: any[] = [];
-		let infoMessageCalls = 0;
-		const provider = {
-			getSettingsManager: () => null,
-			sendUpdatesToWebview: (piVersion: string | null, count: number) => {
-				updateCalls.push({ piVersion, count });
-			},
-		} as any;
-		(vscode.window as any).showInformationMessage = async () => {
-			infoMessageCalls++;
-			return undefined;
-		};
+			const updateCalls: any[] = [];
+			let infoMessageCalls = 0;
+			const provider = {
+				getSettingsManager: () => null,
+				sendUpdatesToWebview: (piVersion: string | null, count: number) => {
+					updateCalls.push({ piVersion, count });
+				},
+			} as any;
+			(vscode.window as any).showInformationMessage = async () => {
+				infoMessageCalls++;
+				return undefined;
+			};
 
 			(global as any).fetch = async () => ({
 				ok: true,
@@ -769,11 +755,11 @@ function createMockContext(overrides: any = {}): vscode.ExtensionContext {
 	return {
 		extensionUri: vscode.Uri.file("/fake/extension"),
 		extensionPath: "/fake/extension",
-	globalState: {
-		get: <T>(_key: string, defaultValue: T): T => defaultValue,
-		update: async () => {},
-		...overrides.globalState,
-	},
+		globalState: {
+			get: <T>(_key: string, defaultValue: T): T => defaultValue,
+			update: async () => {},
+			...overrides.globalState,
+		},
 		subscriptions: [],
 		workspaceState: {
 			get: <T>(_key: string, defaultValue: T): T => defaultValue,

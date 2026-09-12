@@ -4,11 +4,7 @@
     onClose: () => void;
   }
 
-  type TemplateCategory =
-    | "analysis"
-    | "implementation"
-    | "quality"
-    | "workflow";
+  type TemplateCategory = "analysis" | "implementation" | "quality" | "workflow";
   type FilterCategory = "all" | "recent" | TemplateCategory;
 
   interface Template {
@@ -28,8 +24,7 @@
   const builtinTemplates: Template[] = [
     {
       name: "Explain Code",
-      description:
-        "Break down behavior, control flow, and important tradeoffs.",
+      description: "Break down behavior, control flow, and important tradeoffs.",
       category: "analysis",
       tags: ["code", "learning", "walkthrough"],
       prompt: `Explain the following code clearly and concretely.
@@ -88,8 +83,7 @@ Please:
     },
     {
       name: "Implement Feature",
-      description:
-        "Plan and build a feature in a way that fits the existing codebase.",
+      description: "Plan and build a feature in a way that fits the existing codebase.",
       category: "implementation",
       tags: ["feature", "implementation", "planning"],
       prompt: `Implement the following feature in the existing project style.
@@ -128,8 +122,7 @@ Code / files:
     },
     {
       name: "Add Tests",
-      description:
-        "Create focused tests that cover important behavior and edge cases.",
+      description: "Create focused tests that cover important behavior and edge cases.",
       category: "quality",
       tags: ["tests", "coverage", "regression"],
       prompt: `Add or update tests for the following code.
@@ -147,8 +140,7 @@ Code / files:
     },
     {
       name: "Code Review",
-      description:
-        "Look for correctness, risk, performance, and missing coverage.",
+      description: "Look for correctness, risk, performance, and missing coverage.",
       category: "quality",
       tags: ["review", "risk", "quality"],
       prompt: `Review this code like a careful peer reviewer.
@@ -167,8 +159,7 @@ Code / diff:
     },
     {
       name: "Write Docs",
-      description:
-        "Produce concise documentation that explains usage and intent.",
+      description: "Produce concise documentation that explains usage and intent.",
       category: "quality",
       tags: ["docs", "comments", "handoff"],
       prompt: `Write documentation for this code or feature.
@@ -204,8 +195,7 @@ Content to summarize:
     },
     {
       name: "Migration Plan",
-      description:
-        "Plan an upgrade with risks, sequencing, and verification steps.",
+      description: "Plan an upgrade with risks, sequencing, and verification steps.",
       category: "workflow",
       tags: ["upgrade", "migration", "planning"],
       prompt: `Create a migration plan for this change.
@@ -235,7 +225,9 @@ Scope:
     try {
       const stored = localStorage.getItem("pilots-recent-templates");
       if (stored) recentTemplates = JSON.parse(stored);
-    } catch {}
+    } catch {
+      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+    }
   });
 
   $effect(() => {
@@ -245,19 +237,15 @@ Scope:
   function saveToRecents(template: Template) {
     const existing = recentTemplates.findIndex((t) => t.name === template.name);
     if (existing >= 0) {
-      recentTemplates = [
-        template,
-        ...recentTemplates.filter((_, i) => i !== existing),
-      ];
+      recentTemplates = [template, ...recentTemplates.filter((_, i) => i !== existing)];
     } else {
       recentTemplates = [template, ...recentTemplates].slice(0, 10);
     }
     try {
-      localStorage.setItem(
-        "pilots-recent-templates",
-        JSON.stringify(recentTemplates),
-      );
-    } catch {}
+      localStorage.setItem("pilots-recent-templates", JSON.stringify(recentTemplates));
+    } catch {
+      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+    }
   }
 
   function useTemplate(template: Template) {
@@ -282,12 +270,10 @@ Scope:
   }
 
   const displayTemplates = $derived.by(() => {
-    const source =
-      activeCategory === "recent" ? recentTemplates : builtinTemplates;
+    const source = activeCategory === "recent" ? recentTemplates : builtinTemplates;
     if (activeCategory !== "all" && activeCategory !== "recent") {
       return source.filter(
-        (template) =>
-          template.category === activeCategory && matchesSearch(template),
+        (template) => template.category === activeCategory && matchesSearch(template),
       );
     }
     return source.filter(matchesSearch);
@@ -302,7 +288,6 @@ Scope:
   }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div
   class="templates-overlay"
   role="dialog"
@@ -312,18 +297,11 @@ Scope:
   onclick={onClose}
   onkeydown={handleKeydown}
 >
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
-  <div
-    class="templates-dialog"
-    role="presentation"
-    onclick={(e) => e.stopPropagation()}
-  >
+  <div class="templates-dialog" role="presentation" onclick={(e) => e.stopPropagation()}>
     <div class="dialog-header">
       <div>
         <h3>Prompt Templates</h3>
-        <p class="dialog-subtitle">
-          Start with a stronger prompt, then customize it in chat.
-        </p>
+        <p class="dialog-subtitle">Start with a stronger prompt, then customize it in chat.</p>
       </div>
       <button class="close-btn" onclick={onClose} aria-label="Close">
         <svg
@@ -334,12 +312,7 @@ Scope:
           stroke="currentColor"
           stroke-width="2.5"
         >
-          <line x1="18" y1="6" x2="6" y2="18" /><line
-            x1="6"
-            y1="6"
-            x2="18"
-            y2="18"
-          />
+          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
     </div>
@@ -396,22 +369,18 @@ Scope:
       {#if displayTemplates.length === 0}
         <div class="empty-results">
           <div class="empty-results-title">No templates match</div>
-          <div class="empty-results-desc">
-            Try a different search term or switch categories.
-          </div>
+          <div class="empty-results-desc">Try a different search term or switch categories.</div>
         </div>
       {:else}
-        {#each displayTemplates as template}
+        {#each displayTemplates as template (template.name)}
           <button class="template-item" onclick={() => useTemplate(template)}>
             <div class="template-topline">
               <div class="template-name">{template.name}</div>
-              <span class="template-category"
-                >{categoryLabels[template.category]}</span
-              >
+              <span class="template-category">{categoryLabels[template.category]}</span>
             </div>
             <div class="template-desc">{template.description}</div>
             <div class="template-tags">
-              {#each template.tags as tag}
+              {#each template.tags as tag (tag)}
                 <span class="template-tag">{tag}</span>
               {/each}
             </div>
@@ -422,9 +391,7 @@ Scope:
     </div>
 
     <div class="dialog-footer">
-      <span class="footer-hint"
-        >Templates insert editable starter text.</span
-      >
+      <span class="footer-hint">Templates insert editable starter text.</span>
     </div>
   </div>
 </div>
@@ -680,6 +647,4 @@ Scope:
     font-size: var(--text-xs);
     color: var(--color-text-muted);
   }
-
-
 </style>

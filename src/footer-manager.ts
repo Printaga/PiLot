@@ -19,9 +19,7 @@ export class FooterManager {
 		private readonly binaryService: {
 			resolveGitBranch(cwd: string): string | null;
 		},
-		private readonly notifyWebview: (
-			message: { type: string; data: FooterData },
-		) => void,
+		private readonly notifyWebview: (message: { type: string; data: FooterData }) => void,
 	) {}
 
 	start(session: SessionCwd | null | undefined): void {

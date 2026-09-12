@@ -9,9 +9,9 @@
 // `Uri`/`EventEmitter` (the two APIs the SDK and production code rely on at
 // import time) plus minimal stubs for the rest. Test setup (`resetVscodeMocks`)
 // then fills in behaviour.
-import { EventEmitter as NodeEventEmitter } from 'node:events';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { EventEmitter as NodeEventEmitter } from "node:events";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 class FacadeUri {
 	scheme: string;
@@ -20,13 +20,7 @@ class FacadeUri {
 	query: string;
 	fragment: string;
 
-	constructor(
-		scheme: string,
-		authority: string,
-		p: string,
-		query: string,
-		fragment: string,
-	) {
+	constructor(scheme: string, authority: string, p: string, query: string, fragment: string) {
 		this.scheme = scheme;
 		this.authority = authority;
 		this.path = p;
@@ -35,7 +29,7 @@ class FacadeUri {
 	}
 
 	get fsPath(): string {
-		if (this.scheme !== 'file') return this.path;
+		if (this.scheme !== "file") return this.path;
 		return fileURLToPath(this.toString());
 	}
 
@@ -63,7 +57,7 @@ class FacadeUri {
 	}
 
 	static file(p: string): FacadeUri {
-		return new FacadeUri('file', '', path.resolve(p), '', '');
+		return new FacadeUri("file", "", path.resolve(p), "", "");
 	}
 
 	static joinPath(base: FacadeUri, ...parts: string[]): FacadeUri {
@@ -80,14 +74,14 @@ class FacadeUri {
 		try {
 			const u = new URL(value);
 			return new FacadeUri(
-				u.protocol.replace(/:$/, ''),
+				u.protocol.replace(/:$/, ""),
 				u.host,
 				decodeURIComponent(u.pathname),
-				u.search.replace(/^\?/, ''),
-				u.hash.replace(/^#/, ''),
+				u.search.replace(/^\?/, ""),
+				u.hash.replace(/^#/, ""),
 			);
 		} catch {
-			return new FacadeUri('file', '', value, '', '');
+			return new FacadeUri("file", "", value, "", "");
 		}
 	}
 }
@@ -97,11 +91,11 @@ class FacadeEventEmitter<T> {
 	private readonly listeners = new Set<(e: T) => any>();
 	readonly event = (listener: (e: T) => any): { dispose(): void } => {
 		this.listeners.add(listener);
-		this.emitter.on('e', listener as any);
+		this.emitter.on("e", listener as any);
 		return { dispose: () => this.listeners.delete(listener) };
 	};
 	fire(data?: T): void {
-		this.emitter.emit('e', data);
+		this.emitter.emit("e", data);
 		for (const l of [...this.listeners]) {
 			try {
 				l(data as T);
@@ -165,7 +159,7 @@ export function installVscodeFacade(): void {
 	facade.MarkdownString = class {
 		value: string;
 		constructor(value?: string) {
-			this.value = value ?? '';
+			this.value = value ?? "";
 		}
 		appendText(t: string): this {
 			this.value += t;
@@ -176,7 +170,7 @@ export function installVscodeFacade(): void {
 			return this;
 		}
 	};
-	facade.ThemeIcon = { File: { id: 'file' }, Folder: { id: 'folder' } };
+	facade.ThemeIcon = { File: { id: "file" }, Folder: { id: "folder" } };
 	facade.ThemeColor = class {
 		constructor(public id: string) {}
 	};
@@ -215,7 +209,7 @@ export function installVscodeFacade(): void {
 			public kind?: unknown,
 		) {}
 	};
-	facade.CodeActionKind = { QuickFix: { value: 'quickfix' } };
+	facade.CodeActionKind = { QuickFix: { value: "quickfix" } };
 	facade.Location = class {
 		constructor(
 			public uri: unknown,
@@ -233,7 +227,7 @@ export function installVscodeFacade(): void {
 	facade.SnippetString = class {
 		value: string;
 		constructor(value?: string) {
-			this.value = value ?? '';
+			this.value = value ?? "";
 		}
 	};
 	facade.ExtensionMode = { Development: 1, Test: 2, Production: 3 };
@@ -252,7 +246,7 @@ export function installVscodeFacade(): void {
 			clear: () => {},
 		}),
 		createStatusBarItem: () => ({
-			text: '',
+			text: "",
 			show: () => {},
 			hide: () => {},
 			dispose: () => {},
@@ -264,7 +258,7 @@ export function installVscodeFacade(): void {
 		}),
 		createTextEditorDecorationType: () => ({ dispose: () => {} }),
 		createWebviewPanel: () => ({
-			webview: { html: '', postMessage: async () => true, onDidReceiveMessage: event() },
+			webview: { html: "", postMessage: async () => true, onDidReceiveMessage: event() },
 			onDidDispose: event(),
 			dispose: () => {},
 			reveal: () => {},
@@ -305,7 +299,7 @@ export function installVscodeFacade(): void {
 			createDirectory: async () => {},
 			isWritableFileSystem: true,
 		},
-		openTextDocument: async () => ({ getText: () => '' }),
+		openTextDocument: async () => ({ getText: () => "" }),
 		openExternal: async () => true,
 		asRelativePath: (p: string) => p,
 		findFiles: async () => [],
@@ -317,11 +311,11 @@ export function installVscodeFacade(): void {
 		getCommands: async () => [],
 	};
 	const env: Record<string, unknown> = {
-		language: 'en',
-		appName: 'PilotStudioTests',
-		appHost: 'cli',
-		machineId: 'test',
-		sessionId: 'test',
+		language: "en",
+		appName: "PilotStudioTests",
+		appHost: "cli",
+		machineId: "test",
+		sessionId: "test",
 		uiKind: 1,
 		openExternal: async () => true,
 		clipboard: { writeText: async () => {} },

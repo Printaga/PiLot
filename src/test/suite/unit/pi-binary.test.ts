@@ -138,7 +138,7 @@ suite("pi-binary: resolvePiBinary", () => {
 			fs.writeFileSync(fakeBin, "#!/bin/sh\necho ok");
 			fs.chmodSync(fakeBin, 0o755);
 
-			const origConfig = (vscodeModule.workspace.getConfiguration as any);
+			const origConfig = vscodeModule.workspace.getConfiguration as any;
 			(vscodeModule.workspace.getConfiguration as any) = (_section?: string) =>
 				({
 					get: (_key: string, defaultValue?: any) => {
@@ -158,7 +158,7 @@ suite("pi-binary: resolvePiBinary", () => {
 	});
 
 	test("returns null when no pi binary is found and spawnSync fails", async () => {
-		const origConfig = (vscodeModule.workspace.getConfiguration as any);
+		const origConfig = vscodeModule.workspace.getConfiguration as any;
 		const shellModule = await import("../../../utils/shell.js");
 		const origExecFileAsync = shellModule.shellInternals.execFileAsync;
 		const origSpawnSync = piBinaryInternals.spawnSync;
@@ -175,11 +175,7 @@ suite("pi-binary: resolvePiBinary", () => {
 			}) as any;
 
 		// Mock spawnSync so `command -v "pi"` returns empty (status = 1)
-		(piBinaryInternals as any).spawnSync = (
-			_cmd: string,
-			_args: string[],
-			opts?: any,
-		) => ({
+		(piBinaryInternals as any).spawnSync = (_cmd: string, _args: string[], opts?: any) => ({
 			status: 1,
 			stdout: Buffer.from(""),
 			stderr: Buffer.from(""),
@@ -198,17 +194,13 @@ suite("pi-binary: resolvePiBinary", () => {
 	});
 
 	test("returns null when spawnSync throws an exception", async () => {
-		const origConfig = (vscodeModule.workspace.getConfiguration as any);
+		const origConfig = vscodeModule.workspace.getConfiguration as any;
 		const origSpawnSync = piBinaryInternals.spawnSync;
 		const origAccessSync2 = piBinaryInternals.accessSync;
 		piBinaryInternals.accessSync = () => {
 			throw new Error("ENOENT");
 		};
-		(piBinaryInternals as any).spawnSync = (
-			_cmd: string,
-			_args: string[],
-			_opts?: any,
-		) => {
+		(piBinaryInternals as any).spawnSync = (_cmd: string, _args: string[], _opts?: any) => {
 			throw new Error("spawnSync crashed");
 		};
 
@@ -441,10 +433,7 @@ suite("pi-binary: readPackageSourcesFromSettingsFile", () => {
 			fs.writeFileSync(
 				filePath,
 				JSON.stringify({
-					packages: [
-						{ source: "skill-a" },
-						{ source: "skill-b" },
-					],
+					packages: [{ source: "skill-a" }, { source: "skill-b" }],
 				}),
 			);
 			const result = readPackageSourcesFromSettingsFile(filePath);
@@ -485,9 +474,7 @@ suite("pi-binary: readPackageSourcesFromSettingsFile", () => {
 			const filePath = path.join(tmpDir, "settings.json");
 			fs.writeFileSync(filePath, "not-valid-json");
 			const debugLogs: any[][] = [];
-			readPackageSourcesFromSettingsFile(filePath, (...args: any[]) =>
-				debugLogs.push(args),
-			);
+			readPackageSourcesFromSettingsFile(filePath, (...args: any[]) => debugLogs.push(args));
 			assert.strictEqual(debugLogs.length, 1);
 			assert.ok(
 				debugLogs[0][0].includes("Failed to read package sources"),

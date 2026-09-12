@@ -83,8 +83,7 @@ suite("SessionResources class", () => {
 			const sr = new SessionResources(deps);
 
 			const vscode = (globalThis as any).vscode;
-			vscode.workspace.fs.readFile = async () =>
-				Buffer.from("invalid json {{{");
+			vscode.workspace.fs.readFile = async () => Buffer.from("invalid json {{{");
 
 			const ctx = await sr.getProjectContext();
 			assert.ok(ctx.includes("Project Root:"));
@@ -103,18 +102,12 @@ suite("SessionResources class", () => {
 	});
 
 	suite("resolveFileMentions()", () => {
-		const tmpDir = path.join(
-			import.meta.dirname,
-			"../../..",
-			"test-tmp-session-resources",
-		);
+		const tmpDir = path.join(import.meta.dirname, "../../..", "test-tmp-session-resources");
 
 		setup(() => {
 			fs.mkdirSync(tmpDir, { recursive: true });
 			// Set workspace root to tmpDir
-			(globalThis as any).vscode.workspace.workspaceFolders = [
-				{ uri: { fsPath: tmpDir } },
-			];
+			(globalThis as any).vscode.workspace.workspaceFolders = [{ uri: { fsPath: tmpDir } }];
 		});
 
 		teardown(() => {
@@ -179,9 +172,7 @@ suite("SessionResources class", () => {
 			// Actually, let's use a non-existent path that's not binary
 			// but the regex won't match non-existent files without @
 			// The function checks fs.existsSync first, so non-existent files are skipped
-			const result = await sr.resolveFileMentions(
-				"@nonexistent-file.txt hello",
-			);
+			const result = await sr.resolveFileMentions("@nonexistent-file.txt hello");
 			// File doesn't exist, so it's skipped
 			assert.ok(result.includes("hello"));
 		});

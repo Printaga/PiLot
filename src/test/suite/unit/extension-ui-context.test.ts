@@ -1,18 +1,10 @@
 import * as assert from "node:assert";
-import {
-	ExtensionUIContext,
-	type ExtensionUIContextDeps,
-} from "../../../extension-ui-context.js";
-import {
-	createSessionMock,
-	createExtensionRunnerMock,
-} from "../../mocks/session-mock.js";
+import { ExtensionUIContext, type ExtensionUIContextDeps } from "../../../extension-ui-context.js";
+import { createSessionMock, createExtensionRunnerMock } from "../../mocks/session-mock.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-function createMockDeps(
-	overrides?: Partial<ExtensionUIContextDeps>,
-): ExtensionUIContextDeps & {
+function createMockDeps(overrides?: Partial<ExtensionUIContextDeps>): ExtensionUIContextDeps & {
 	_webviewMessages: Array<{ type: string; data?: unknown }>;
 	_debugLogs: string[];
 	_errorLogs: unknown[];
@@ -57,11 +49,7 @@ suite("ExtensionUIContext", () => {
 			const deps = createMockDeps({ getSession: () => session as any });
 			const ctx = new ExtensionUIContext(deps);
 			await ctx.bindExtensionUI();
-			assert.ok(
-				deps._debugLogs.some((l: string) =>
-					l.includes("No extension runner found"),
-				),
-			);
+			assert.ok(deps._debugLogs.some((l: string) => l.includes("No extension runner found")));
 		});
 
 		test("full success path: binds UI, emits session_start, sends statuses", async () => {
@@ -74,10 +62,7 @@ suite("ExtensionUIContext", () => {
 			};
 
 			// Build extensions array with handlers Map
-			const handlers = new Map<
-				string,
-				Array<(...args: unknown[]) => unknown>
-			>();
+			const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
 			handlers.set("session_start", [() => {}]);
 			(runner as any).extensions = [{ path: "/ext/a", handlers }];
 
@@ -102,9 +87,7 @@ suite("ExtensionUIContext", () => {
 
 	suite("createUIContext()", () => {
 		// Helper to get the UI context object from the runner
-		function getCapturedUI(
-			deps: ReturnType<typeof createMockDeps>,
-		): Promise<any> {
+		function getCapturedUI(deps: ReturnType<typeof createMockDeps>): Promise<any> {
 			const session = createSessionMock();
 			(deps as any).getSession = () => session;
 
@@ -178,9 +161,7 @@ suite("ExtensionUIContext", () => {
 
 			const notifyMsg = deps._webviewMessages.find(
 				(m: any) => m.type === "extension-notify",
-			) as
-				| { type: string; data: { message: string; type: string } }
-				| undefined;
+			) as { type: string; data: { message: string; type: string } } | undefined;
 			assert.ok(notifyMsg);
 			assert.strictEqual(notifyMsg.data.message, "Hello from extension");
 			assert.strictEqual(notifyMsg.data.type, "warning");
@@ -194,9 +175,7 @@ suite("ExtensionUIContext", () => {
 
 			const notifyMsg = deps._webviewMessages.find(
 				(m: any) => m.type === "extension-notify",
-			) as
-				| { type: string; data: { message: string; type: string } }
-				| undefined;
+			) as { type: string; data: { message: string; type: string } } | undefined;
 			assert.ok(notifyMsg);
 			assert.strictEqual(notifyMsg.data.type, "info");
 		});
@@ -419,10 +398,7 @@ suite("ExtensionUIContext", () => {
 
 			const ctx = new ExtensionUIContext(deps);
 			(ctx as any).forwardExtensionLoadingErrors();
-			assert.strictEqual(
-				extensionStatuses.get("ext:error:/ext2"),
-				"plain string error",
-			);
+			assert.strictEqual(extensionStatuses.get("ext:error:/ext2"), "plain string error");
 		});
 	});
 

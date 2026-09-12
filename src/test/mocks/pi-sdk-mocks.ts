@@ -17,7 +17,10 @@ export type MockExtensionRunner = {
 	getExtensionPaths?: () => string[];
 	hasUI?: () => boolean;
 	emit: (event: AgentSessionEvent) => Promise<void>;
-	extensions?: Array<{ path: string; handlers?: Map<string, (..._args: unknown[]) => unknown[]> }>;
+	extensions?: Array<{
+		path: string;
+		handlers?: Map<string, (..._args: unknown[]) => unknown[]>;
+	}>;
 	extendResourcesFromExtensions?: (phase: string) => Promise<void>;
 };
 
@@ -41,7 +44,7 @@ export function createMockAgentSession(options?: {
 		prompt: async () => {},
 		abort: async () => {},
 		compact: async () => ({}),
-		editMessage: async () => ({} as unknown),
+		editMessage: async () => ({}) as unknown,
 		getContextUsage: () => ({ used: 0, total: 0 }),
 		getSessionStats: () => ({}) as any,
 		_replaceMessageInPlace: async () => ({}) as any,
@@ -228,9 +231,7 @@ export function resetVscodeMocks(): void {
 		dispose: () => {},
 	});
 
-	(vscode.workspace.workspaceFolders as any) = [
-		{ uri: { fsPath: "/fake/workspace" } } as any,
-	];
+	(vscode.workspace.workspaceFolders as any) = [{ uri: { fsPath: "/fake/workspace" } } as any];
 	(vscode.workspace.getConfiguration as any) = () =>
 		({
 			get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,

@@ -41,17 +41,11 @@ suite("native-addons", () => {
 
 	suite("checkBetterSqlite3()", () => {
 		test("returns ok: true when ABI matches", () => {
-			const fakeDir = createFakeBetterSqlite3(
-				tmpDir,
-				Number(process.versions.modules),
-			);
+			const fakeDir = createFakeBetterSqlite3(tmpDir, Number(process.versions.modules));
 			const result = checkBetterSqlite3([fakeDir]);
 			assert.strictEqual(result.ok, true);
 			// moduleABI is only populated for mismatches; check the copy directly.
-			assert.strictEqual(
-				result.copies[0].moduleABI,
-				Number(process.versions.modules),
-			);
+			assert.strictEqual(result.copies[0].moduleABI, Number(process.versions.modules));
 			assert.strictEqual(result.runtimeABI, Number(process.versions.modules));
 		});
 

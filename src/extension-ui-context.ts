@@ -31,9 +31,7 @@ export class ExtensionUIContext {
 		try {
 			const runner = session.extensionRunner;
 			if (!runner) {
-				this.deps.logDebug(
-					"[PI] No extension runner found, skipping UI context binding",
-				);
+				this.deps.logDebug("[PI] No extension runner found, skipping UI context binding");
 				return;
 			}
 
@@ -48,21 +46,14 @@ export class ExtensionUIContext {
 
 			const extensionPaths = runner.getExtensionPaths?.() ?? [];
 			const extensionCount = extensionPaths.length;
-			this.deps.logDebug(
-				`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`,
-			);
+			this.deps.logDebug(`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`);
 			if (extensionCount > 0) {
-				this.deps.logDebug(
-					"[PiLot DIAGNOSTIC] Extension paths:",
-					extensionPaths,
-				);
+				this.deps.logDebug("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
 			}
 
 			// Check if extensions have session_start handlers
 			const extensions = (runner as any).extensions ?? [];
-			this.deps.logDebug(
-				`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`,
-			);
+			this.deps.logDebug(`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`);
 			if (extensions.length > 0) {
 				const handlers = extensions.map((ext: any) => ({
 					path: ext.path,
@@ -98,9 +89,7 @@ export class ExtensionUIContext {
 			);
 			this.deps.logDebug("[PI] Emitting session_start to extensions");
 			await runner.emit(sessionStartEvent);
-			this.deps.logDebug(
-				"[PiLot DIAGNOSTIC] session_start emitted successfully",
-			);
+			this.deps.logDebug("[PiLot DIAGNOSTIC] session_start emitted successfully");
 
 			// Let extensions discover additional resources (skills, prompts, themes)
 			await (session as any).extendResourcesFromExtensions?.("startup");
@@ -125,9 +114,7 @@ export class ExtensionUIContext {
 
 			// Send any statuses that extensions may have already set during initialization
 			if (this.deps.extensionStatuses.size > 0) {
-				this.deps.logDebug(
-					"[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview",
-				);
+				this.deps.logDebug("[PiLot DIAGNOSTIC] Sending extension-statuses-full to webview");
 				this.deps.notifyWebview({
 					type: "extension-statuses-full",
 					data: Object.fromEntries(this.deps.extensionStatuses),
@@ -252,9 +239,7 @@ export class ExtensionUIContext {
 			confirm: async () => false,
 			input: async () => undefined,
 			notify: (message: string, type?: string) => {
-				this.deps.logDebug(
-					`[PI] Extension notify: ${type || "info"}: ${message}`,
-				);
+				this.deps.logDebug(`[PI] Extension notify: ${type || "info"}: ${message}`);
 				this.deps.notifyWebview({
 					type: "extension-notify",
 					data: { message, type: type || "info" },
@@ -262,9 +247,7 @@ export class ExtensionUIContext {
 			},
 			onTerminalInput: () => () => {},
 			setStatus: (key: string, text: string | undefined) => {
-				this.deps.logDebug(
-					`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`,
-				);
+				this.deps.logDebug(`[PiLot DIAGNOSTIC] setStatus called: ${key} = ${text}`);
 				if (text === undefined || text === null) {
 					this.deps.extensionStatuses.delete(key);
 				} else {
@@ -297,17 +280,11 @@ export class ExtensionUIContext {
 			setHeader: () => {},
 			setTitle: () => {},
 			custom: async <T>(
-				factory: (
-					tui: any,
-					theme: any,
-					keybindings: any,
-					done: (result: T) => void,
-				) => any,
+				factory: (tui: any, theme: any, keybindings: any, done: (result: T) => void) => any,
 				options?: { overlay?: boolean },
 			): Promise<T> => {
 				const factoryName = factory.name || "";
-				const callerLine =
-					new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
+				const callerLine = new Error().stack?.split("\n").slice(2, 4).join(" / ") || "";
 				this.deps.logDebug(
 					`[PI] Extension custom UI (no TUI): factory=${factoryName}, caller=${callerLine}`,
 				);

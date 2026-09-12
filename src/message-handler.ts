@@ -27,11 +27,7 @@ export class MessageHandler {
 		}
 	}
 
-	async handle(message: {
-		type: string;
-		id?: string;
-		data?: any;
-	}): Promise<any> {
+	async handle(message: { type: string; id?: string; data?: any }): Promise<any> {
 		try {
 			let result: any;
 
@@ -49,9 +45,7 @@ export class MessageHandler {
 					break;
 
 				case "newSession":
-					result = await this.withErrorReporting(() =>
-						this.provider.newSession(),
-					);
+					result = await this.withErrorReporting(() => this.provider.newSession());
 					break;
 
 				case "exportSession": {
@@ -149,9 +143,7 @@ export class MessageHandler {
 					break;
 
 				case "refreshModels":
-					result = await this.withErrorReporting(() =>
-						this.provider.refreshModels(),
-					);
+					result = await this.withErrorReporting(() => this.provider.refreshModels());
 					break;
 
 				case "getProviderAuth":
@@ -162,19 +154,15 @@ export class MessageHandler {
 
 				case "checkProviderAuth":
 					result = await this.withErrorReporting(async () => {
-						const authResult =
-							await this.provider.checkProviderAuth(
-								message.data.provider,
-							);
+						const authResult = await this.provider.checkProviderAuth(
+							message.data.provider,
+						);
 						this.sendProviderAuthCheckResult(authResult);
 					});
 					break;
 
 				case "setApiKey":
-					await this.provider.setApiKey(
-						message.data.provider,
-						message.data.apiKey,
-					);
+					await this.provider.setApiKey(message.data.provider, message.data.apiKey);
 					result = { success: true };
 					break;
 
@@ -193,19 +181,13 @@ export class MessageHandler {
 					// polling). Kick it off and stream progress to the webview as
 					// provider-login-* messages instead of blocking this handler.
 					void this.provider.loginProvider(providerId).catch((error: unknown) => {
-						this.provider.logError(
-							"[MessageHandler] loginProvider failed:",
-							error,
-						);
+						this.provider.logError("[MessageHandler] loginProvider failed:", error);
 						this.provider.webview?.postMessage({
 							type: "provider-login-result",
 							data: {
 								provider: providerId,
 								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: String(error),
+								error: error instanceof Error ? error.message : String(error),
 							},
 						});
 					});
@@ -226,10 +208,7 @@ export class MessageHandler {
 
 				case "providerLoginPromptResponse": {
 					const data = message.data ?? {};
-					if (
-						typeof data.provider !== "string" ||
-						typeof data.promptId !== "string"
-					) {
+					if (typeof data.provider !== "string" || typeof data.promptId !== "string") {
 						result = {
 							error: "providerLoginPromptResponse requires provider and promptId",
 						};
@@ -307,7 +286,7 @@ export class MessageHandler {
 					break;
 				}
 
-			case "openConfigFile": {
+				case "openConfigFile": {
 					const file = message.data?.file;
 					const allowed = ["auth", "models", "settings"];
 					if (typeof file !== "string" || !allowed.includes(file)) {
@@ -317,9 +296,7 @@ export class MessageHandler {
 						break;
 					}
 					await this.withErrorReporting(() =>
-						this.provider.openConfigFile(
-							file as "auth" | "models" | "settings",
-						),
+						this.provider.openConfigFile(file as "auth" | "models" | "settings"),
 					);
 					result = { success: true };
 					break;
@@ -586,9 +563,7 @@ export class MessageHandler {
 					{
 						const editor = vscode.window.activeTextEditor;
 						if (!editor) {
-							vscode.window.showWarningMessage(
-								"No active editor to apply code to.",
-							);
+							vscode.window.showWarningMessage("No active editor to apply code to.");
 							result = { success: false, error: "No active editor" };
 							break;
 						}
@@ -607,9 +582,7 @@ export class MessageHandler {
 							}
 						});
 						vscode.window.showInformationMessage(
-							hasSelection
-								? "Code replaced selection."
-								: "Code inserted at cursor.",
+							hasSelection ? "Code replaced selection." : "Code inserted at cursor.",
 						);
 						result = { success: true };
 					}
@@ -619,9 +592,7 @@ export class MessageHandler {
 					{
 						const editor = vscode.window.activeTextEditor;
 						if (!editor) {
-							vscode.window.showWarningMessage(
-								"No active editor to diff against.",
-							);
+							vscode.window.showWarningMessage("No active editor to diff against.");
 							result = { success: false, error: "No active editor" };
 							break;
 						}
@@ -681,9 +652,7 @@ export class MessageHandler {
 
 				case "forkSession":
 					result = await this.withErrorReporting(() =>
-						this.provider.forkSession(
-							message.data.entryId ?? message.data.fromNodeId,
-						),
+						this.provider.forkSession(message.data.entryId ?? message.data.fromNodeId),
 					);
 					break;
 
@@ -718,10 +687,7 @@ export class MessageHandler {
 							key?: "showCacheMissNotices";
 							value?: boolean;
 						};
-						if (
-							!data.key ||
-							typeof data.value !== "boolean"
-						) {
+						if (!data.key || typeof data.value !== "boolean") {
 							throw new Error("Invalid pi settings payload");
 						}
 						await this.provider.setPiUISetting(data.key, data.value);
@@ -852,12 +818,8 @@ export class MessageHandler {
 		const root = workspaceFolders[0].uri.fsPath;
 
 		try {
-			const packageJsonPath = vscode.Uri.joinPath(
-				workspaceFolders[0].uri,
-				"package.json",
-			);
-			const packageJsonContent =
-				await vscode.workspace.fs.readFile(packageJsonPath);
+			const packageJsonPath = vscode.Uri.joinPath(workspaceFolders[0].uri, "package.json");
+			const packageJsonContent = await vscode.workspace.fs.readFile(packageJsonPath);
 			const pkg = JSON.parse(packageJsonContent.toString());
 
 			return {
@@ -948,11 +910,7 @@ export class MessageHandler {
 			// restrictive (e.g. hiding src/ or dist/ depending on user settings).
 			const excludePattern = "{**/node_modules/**,**/.git/**,**/dist-tsc/**}";
 			const pattern = new vscode.RelativePattern(rootUri, "**/*");
-			const fileUris = await vscode.workspace.findFiles(
-				pattern,
-				excludePattern,
-				10000,
-			);
+			const fileUris = await vscode.workspace.findFiles(pattern, excludePattern, 10000);
 
 			const seen = new Set<string>();
 			for (const uri of fileUris) {
@@ -1000,9 +958,7 @@ export class MessageHandler {
 		});
 
 		if (uris && uris.length > 0) {
-			const paths = uris
-				.map((uri) => vscode.workspace.asRelativePath(uri))
-				.filter(Boolean);
+			const paths = uris.map((uri) => vscode.workspace.asRelativePath(uri)).filter(Boolean);
 			return paths;
 		}
 

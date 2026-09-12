@@ -45,9 +45,7 @@ export interface ProviderApi {
 	setAutoCompactionEnabled(enabled: boolean): void;
 	getAutoContext(): boolean;
 	setAutoContext(enabled: boolean): void;
-	getAvailableModels(): Promise<
-		Array<{ id: string; provider: string; name: string }>
-	>;
+	getAvailableModels(): Promise<Array<{ id: string; provider: string; name: string }>>;
 	tryHandleBuiltinCommand(text: string): Promise<boolean>;
 	getCurrentModelId(): string | null;
 	getExtensionVersion(): string;
@@ -147,10 +145,7 @@ export interface ProviderApi {
 	deleteSessions(sessionIds: string[]): Promise<void>;
 	editMessage(index: number, text: string): Promise<void>;
 	getSettings(): Promise<{ toolPreset: string; customTools: string[] }>;
-	setToolConfig(config: {
-		toolPreset: string;
-		customTools?: string[];
-	}): Promise<void>;
+	setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void>;
 	getAllSkills(): Promise<
 		Array<{
 			name: string;

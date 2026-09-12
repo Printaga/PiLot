@@ -40,9 +40,7 @@ function findFiles(pattern) {
 }
 
 function patchAgentsMode() {
-	const files = findFiles(
-		"@earendil-works/pi-coding-agent/dist/core/package-manager.js",
-	);
+	const files = findFiles("@earendil-works/pi-coding-agent/dist/core/package-manager.js");
 	if (files.length === 0) {
 		process.stderr.write("[patch] package-manager.js not found, skipping\n");
 		return;
@@ -73,15 +71,11 @@ function patchAgentsMode() {
 			process.stderr.write(`[patch] fail ${file}: ${err.message}\n`);
 		}
 	}
-	process.stdout.write(
-		`[patch] pi-coding-agent agents→pi mode: ${patched} file(s)\n`,
-	);
+	process.stdout.write(`[patch] pi-coding-agent agents→pi mode: ${patched} file(s)\n`);
 }
 
 function patchPhotonStub() {
-	const files = findFiles(
-		"@earendil-works/pi-coding-agent/dist/utils/photon.js",
-	);
+	const files = findFiles("@earendil-works/pi-coding-agent/dist/utils/photon.js");
 	if (files.length === 0) {
 		process.stderr.write("[patch] photon.js not found, skipping\n");
 		return;
@@ -96,7 +90,9 @@ function patchPhotonStub() {
 			});
 			// Healthy photon.js starts with our stub comment or JS code.
 			// The corrupt upstream file starts with binary bytes (e.g. 0xe8...).
-			const startsJs = content.startsWith("//") || content.startsWith("/*") ||
+			const startsJs =
+				content.startsWith("//") ||
+				content.startsWith("/*") ||
 				/^[A-Za-z_'"`]/.test(content);
 			if (!startsJs) {
 				writeFileSync(file, PHOTON_STUB, "utf-8");
@@ -106,9 +102,7 @@ function patchPhotonStub() {
 			process.stderr.write(`[patch] photon fail ${file}: ${err.message}\n`);
 		}
 	}
-	process.stdout.write(
-		`[patch] pi-coding-agent photon stub: ${patched} file(s)\n`,
-	);
+	process.stdout.write(`[patch] pi-coding-agent photon stub: ${patched} file(s)\n`);
 }
 
 patchAgentsMode();

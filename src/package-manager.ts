@@ -102,10 +102,7 @@ export class PackageManager {
 		this.deps.logDebug("[PI] listPackages called");
 		const configuredPackages = this.deps.getConfiguredPackages();
 		if (configuredPackages.length > 0) {
-			this.deps.logDebug(
-				"[PI] listPackages: found configured packages:",
-				configuredPackages,
-			);
+			this.deps.logDebug("[PI] listPackages: found configured packages:", configuredPackages);
 			return this.enrichPackages(configuredPackages);
 		}
 
@@ -116,10 +113,7 @@ export class PackageManager {
 		const binaryPath = this.deps.binaryService.getBinaryPath();
 		const direct = await execFileAsync(binaryPath, ["list"]);
 		let packages = parseInstalledPackages(direct.stdout);
-		this.deps.logDebug(
-			"[PI] listPackagesFromCli: direct parsed packages:",
-			packages,
-		);
+		this.deps.logDebug("[PI] listPackagesFromCli: direct parsed packages:", packages);
 
 		if (packages.length > 0) {
 			return packages;
@@ -133,15 +127,9 @@ export class PackageManager {
 			return packages;
 		}
 
-		const fromShell = await execFileAsync(
-			shellCommand.command,
-			shellCommand.args,
-		);
+		const fromShell = await execFileAsync(shellCommand.command, shellCommand.args);
 		packages = parseInstalledPackages(fromShell.stdout);
-		this.deps.logDebug(
-			"[PI] listPackagesFromCli: shell parsed packages:",
-			packages,
-		);
+		this.deps.logDebug("[PI] listPackagesFromCli: shell parsed packages:", packages);
 		if (packages.length === 0 && (direct.stderr || fromShell.stderr)) {
 			this.deps.logError(
 				"[PI] listPackagesFromCli error:",
