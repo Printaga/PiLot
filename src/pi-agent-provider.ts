@@ -18,6 +18,7 @@ import {
 	type PromptTemplate,
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
+import { type ConfigFileKey } from "./protocol/types.js";
 import { VoiceManager } from "./voice-manager.js";
 import {
 	type ImageContent,
@@ -47,6 +48,19 @@ import { serializeMessages } from "./message-serializer.js";
 
 // THINKING_LEVELS is imported from ./model-registry-handler.js so the host and
 // webview share a single ordered source of truth for the thinking-level list.
+
+// Key → filename → creation policy behind openConfigFile.
+const CONFIG_FILES: Record<
+	ConfigFileKey,
+	{ fileName: string; initialContent: string; confirmCreate?: boolean }
+> = {
+	auth: { fileName: "auth.json", initialContent: "{}" },
+	models: { fileName: "models.json", initialContent: "{}" },
+	settings: { fileName: "settings.json", initialContent: "{}" },
+	// Creating it empty replaces pi's built-in system prompt, so confirm.
+	"system-prompt": { fileName: "SYSTEM.md", initialContent: "", confirmCreate: true },
+	"append-system-prompt": { fileName: "APPEND_SYSTEM.md", initialContent: "" },
+};
 
 // ── OAuth login interaction shapes ───────────────────────────────────────────
 // Structural mirrors of @earendil-works/pi-ai's AuthPrompt/AuthEvent (the SDK
@@ -91,6 +105,8 @@ export const piAgentProviderInternals = {
 	createAgentSession,
 	getAgentDir,
 	unlinkFile: (path: string) => fs.unlink(path),
+	// Tests stub filesystem access through this seam; ESM namespaces are frozen.
+	existsFile: (path: string) => existsSync(path),
 	mkdir: (dir: string, options?: { recursive?: boolean }) =>
 		fs.mkdir(dir, options),
 	writeFile: (
@@ -2669,21 +2685,39 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		}
 	}
 
-	async openConfigFile(file: "auth" | "models" | "settings"): Promise<void> {
+	/** Open a PI config/prompt file in an editor tab, creating it if missing. */
+	async openConfigFile(file: ConfigFileKey): Promise<void> {
 		if (!this.isInitialized) {
 			await this.initialize();
 		}
-		const fileName = `${file}.json`;
+		const spec = CONFIG_FILES[file];
 		const agentDir = piAgentProviderInternals.getAgentDir();
-		const filePath = path.join(agentDir, fileName);
+		const filePath = path.join(agentDir, spec.fileName);
 
 		await piAgentProviderInternals.mkdir(agentDir, { recursive: true });
-		// Write only if the file does not already exist (flag "wx").
-		try {
-			await piAgentProviderInternals.writeFile(filePath, "{}", { flag: "wx" });
-		} catch (error: unknown) {
-			if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
-				throw error;
+
+		if (!piAgentProviderInternals.existsFile(filePath)) {
+			if (spec.confirmCreate) {
+				const choice = await vscode.window.showInformationMessage(
+					`Creating ${spec.fileName} will replace pi's default system prompt for new sessions. Continue?`,
+					{ modal: false },
+					"Create",
+				);
+				if (choice !== "Create") {
+					return;
+				}
+			}
+			// Write only if the file does not already exist.
+			try {
+				await piAgentProviderInternals.writeFile(
+					filePath,
+					spec.initialContent,
+					{ flag: "wx" },
+				);
+			} catch (error: unknown) {
+				if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+					throw error;
+				}
 			}
 		}
 
@@ -3095,6 +3129,23 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	getSkillDiscovery(): boolean {
 		const config = vscode.workspace.getConfiguration("pi-agent");
 		return !config.get<boolean>("disableSkillDiscovery", false);
+	}
+
+	/**
+	 * Which pi-agent.* settings override PI's SYSTEM.md / APPEND_SYSTEM.md
+	 * discovery: when set, the resource loader never consults the files.
+	 */
+	getSystemPromptOverrides(): { systemPrompt: boolean; appendSystemPrompts: boolean } {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		const systemPrompt = config.get<string | null>("systemPrompt", null);
+		const appendSystemPrompts = config.get<string[]>(
+			"appendSystemPrompts",
+			[],
+		);
+		return {
+			systemPrompt: !!systemPrompt,
+			appendSystemPrompts: appendSystemPrompts.length > 0,
+		};
 	}
 
 	setSkillDiscovery(enabled: boolean): void {

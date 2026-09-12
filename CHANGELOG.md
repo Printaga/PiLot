@@ -6,6 +6,13 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
+- **System prompt file editing from the GUI** (Settings → Configuration Files): "Open SYSTEM.md" and "Open APPEND_SYSTEM.md" buttons create the file in PI's agent directory (default `~/.pi/agent`, configurable via `pi-agent.agentDir`) if missing and open it in a VS Code editor tab. SYSTEM.md replaces PI's default system prompt for new sessions (with a confirmation before first creation); APPEND_SYSTEM.md appends to it. A warning is shown in Settings when `pi-agent.systemPrompt` / `pi-agent.appendSystemPrompts` override these files.
+
+### Fixed
+
+- The `pi-agent.agentDir` setting was never applied; it now takes effect on extension activation (window reload required after changing it).
+- Test launcher silently exiting without running tests on distro VS Code installs where `code` is a wrapper script.
+
 - **PI Light Mode** toggle (Settings → Agent Behavior, or the `pi-agent.lightMode` setting) for running pi in a reduced mode ideal for local LLMs via llama.cpp — equivalent to `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`. Overrides the individual discovery toggles and restricts tools to `read`, `bash`, `edit`, `write` when the tool preset is `default`; toggling restarts the current session with its history preserved.
 
 ## [2.4.1] - 2026-09-08

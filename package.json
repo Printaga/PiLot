@@ -259,7 +259,7 @@
             "type": "string",
             "default": "",
             "order": 2,
-            "markdownDescription": "Directory where pi stores its auth, models, sessions, and other agent files. Leave empty to use `~/.pi/agent`."
+            "markdownDescription": "Directory where pi stores its auth, models, sessions, and other agent files. Leave empty to use `~/.pi/agent`. Changes take effect after a window reload (applied at extension activation)."
           },
           "pi-agent.sessionDir": {
             "type": "string",
