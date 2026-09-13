@@ -213,3 +213,5 @@ We welcome all contributions!
 ## License
 
 [Apache-2.0](LICENSE)
+
+<!-- test probe: ai-findings toggle observation, 2026-09-13, safe to discard -->
