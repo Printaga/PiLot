@@ -16,8 +16,12 @@ function getVscodeExecutablePath(): string | undefined {
 }
 
 // Host-injected electron vars would make the test host reuse the parent IDE's
-// user-data or disable needed APIs; drop them.
+// user-data or disable needed APIs; drop them. ELECTRON_RUN_AS_NODE is the
+// critical one for agent-harness hosts: with it set, the spawned VS Code
+// Electron binary acts as plain Node (rejects every VS Code flag with
+// "bad option", exit 9) instead of starting the extension host.
 const HOST_ELECTRON_ENV_VARS = [
+	"ELECTRON_RUN_AS_NODE",
 	"VSCODE_DEV",
 	"VSCODE_PID",
 	"VSCODE_CWD",

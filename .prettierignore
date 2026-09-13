@@ -6,5 +6,6 @@ out/
 media/
 patches/
 .kilo/
+.freebuff/
 pnpm-lock.yaml
 pnpm-workspace.yaml
