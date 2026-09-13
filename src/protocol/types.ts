@@ -15,6 +15,14 @@ export interface ProviderMessage {
 	isError?: boolean;
 }
 
+/** Keys accepted by openConfigFile; filenames/creation policy live in the provider. */
+export type ConfigFileKey =
+	| "auth"
+	| "models"
+	| "settings"
+	| "system-prompt"
+	| "append-system-prompt";
+
 // ── Provider API interface — used by MessageHandler to avoid importing
 //     the full PiAgentProvider class (breaks circular dependency) ────────
 
@@ -115,7 +123,7 @@ export interface ProviderApi {
 		api?: string;
 		apiKey?: string;
 	}): Promise<Array<{ id: string; name?: string }>>;
-	openConfigFile(file: "auth" | "models" | "settings"): Promise<void>;
+	openConfigFile(file: ConfigFileKey): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
 	listSessions(): Promise<
 		Array<{
@@ -164,6 +172,8 @@ export interface ProviderApi {
 	sendSkillsList(): Promise<void>;
 	getSkillDiscovery(): boolean;
 	setSkillDiscovery(enabled: boolean): void;
+	/** Whether pi-agent.* settings currently override SYSTEM.md / APPEND_SYSTEM.md. */
+	getSystemPromptOverrides(): { systemPrompt: boolean; appendSystemPrompts: boolean };
 	setExtraSkillPaths(paths: string[]): Promise<void>;
 	getExtraSkillPaths(): string[];
 	getLightMode(): boolean;
