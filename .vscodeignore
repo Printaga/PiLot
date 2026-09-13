@@ -1,40 +1,98 @@
+# ── Build / test output (only dist/ ships) ──
 .vscode/**
 .vscode-test/**
-src/**
 out/**
 dist-tsc/**
-node_modules/**
-.git**
-.kilo
-.vscodeignore
-graphify-out
-.pi/**
-.pi-lens/**
-.mcp.json
-!dist/extension.js.map
 dist/webview/assets/*.map
-media/**
-!media/icon.png
-!media/icon.svg
-!media/kofi.png
-!media/kofi.webp
-!media/voice/**
+src/**
+
+# ── Dependencies (bundled via esbuild; PI runtime resolves from user install) ──
+node_modules/**
+**/node_modules/**
+
+# ── VCS / agent tool caches ──
+# Missing entries here pack tens of thousands of files into the VSIX.
+# .freebuff worktrees also contain symlinked node_modules that crash
+# the packager (yazl "not a file" error).
+.git/**
+**/.git/**
+.freebuff/**
+**/.freebuff/**
+.fallow/**
+**/.fallow/**
+.pi/**
+**/.pi/**
+.pi-lens/**
+**/.pi-lens/**
+.kilo/**
+**/.kilo/**
+.kilocode/**
+**/.kilocode/**
+.claude/**
+**/.claude/**
+.agents/**
+**/.agents/**
+.omp/**
+**/.omp/**
+openspec/**
+**/openspec/**
+graphify-out/**
+fallow-baselines/**
+reference/**
+
+# ── Extension scaffolding / hooks (dev-only) ──
+.husky/**
+.github/**
+.vscodeignore
+.gitignore
+.gitattributes
+.mcp.json
+.editorconfig
+.lintstagedrc.json
+.prettierignore
+.prettierrc.json
+.fallowrc.json
+
+# ── Dev-only root docs / scripts ──
 AGENTS.md
-README.md
+TODO.md
 IMPLEMENTATION_PLAN.md
-**/tsconfig.json
-**/tslint.json
-**/*.ts.map
-*.vsix
-.DS_Store
-.env
-.env.*
-*.log
-pnpm-lock.yaml
-pnpm-workspace.yaml
+skill-management-gui.md
+dl-tmp.mjs
+run-clean.mjs
+
+# ── Toolchain configs ──
 eslint.config.mjs
 svelte.config.js
+tsconfig.json
 tsconfig.test.json
 tsconfig.webview.json
 vite.webview.config.mts
 esbuild.config.mjs
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# ── Dev-only dirs (postinstall/verify scripts, patches) ──
+patches/**
+scripts/**
+
+# ── Media: ship runtime assets only ──
+# Needed at runtime: icon.*, kofi.png (sidebar link), voice/ (dictation helpers).
+media/**
+!media/icon.png
+!media/icon.svg
+!media/kofi.png
+!media/voice
+!media/voice/**
+media/kofi.webp
+media/screenshot.png
+
+# ── Misc ──
+*.vsix
+*.log
+.DS_Store
+.env
+.env.*
+**/*.ts.map
+**/tsconfig.json
+**/tslint.json

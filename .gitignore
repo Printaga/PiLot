@@ -26,6 +26,9 @@ reference/
 # PI Lens cache/index (generated)
 .pi-lens/
 
+# FreeBuff worktrees/cache (generated, huge)
+.freebuff/
+
 # Graphify output (generated)
 graphify-out
 
