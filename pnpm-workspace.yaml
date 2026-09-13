@@ -1,3 +1,10 @@
+overrides:
+  # Security: GHSA-2883-xcg3-v3hh (js-yaml < 4.3.2, high)
+  'js-yaml@<4.3.2': '4.3.2'
+  # Security: GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8 (fast-uri < 3.1.6, high)
+  'fast-uri@<3.1.6': '3.1.6'
+  # Security: qs DoS advisories (patched in 6.16.0, moderate)
+  'qs@<6.16.0': '6.16.0'
 allowBuilds:
   '@google/genai': true
   '@vscode/vsce-sign': true
