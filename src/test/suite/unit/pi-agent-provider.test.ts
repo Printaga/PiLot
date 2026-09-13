@@ -26,7 +26,6 @@ import {
 	createMockSettingsManager,
 	createMockSessionManager,
 } from "../../mocks/pi-sdk-mocks.js";
-import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,12 +113,6 @@ function createTestConfig(overrides: Partial<PiAgentConfig> = {}): PiAgentConfig
 		...overrides,
 	};
 }
-
-// Providers built by buildProvider(); disposed after the suite so leaked
-// fs watchers / refresh timers from initialize() tests cannot crash the
-// extension host during shutdown.
-const createdProviders: any[] = [];
-
 function buildProvider(
 	overrides: Partial<PiAgentConfig> = {},
 	options: {
@@ -142,8 +135,11 @@ function buildProvider(
 	};
 
 	const provider = new PiAgentProvider(mockCtx as any, config);
-	provider.resolveWebviewView(view);
 
+	// Install the binary seam before resolveWebviewView() starts its
+	// constructor-triggered background initialize(). The helper's tests do not
+	// exercise real binary discovery; allowing it to run here leaks child
+	// processes and native filesystem work across the suite.
 	const mockBinary = createMockBinaryService({
 		getCliVersion: async () => "0.1.0",
 	});
@@ -153,7 +149,9 @@ function buildProvider(
 		prependToPath: () => {},
 		isBinaryAvailable: () => true,
 	} as any;
-
+	// Tests install the provider's view and dependencies below; do not call
+	// resolveWebviewView(), whose fire-and-forget initialize() would start real
+	// SDK work before the fixture has finished installing its mocks.
 	(provider as any).modelRuntime = createMockModelRuntime();
 	(provider as any).modelRegistry = createMockModelRegistry();
 	(provider as any).sessionManager = createMockSessionManager(options.cwd || "/fake/workspace");
@@ -227,7 +225,6 @@ function buildProvider(
 	(provider as any)._webview = view.webview;
 	(provider as any).isInitialized = true;
 
-	createdProviders.push(provider);
 	return provider;
 }
 // Tests
@@ -289,19 +286,6 @@ suite("PiAgentProvider", () => {
 
 	teardown(() => {
 		restorePiSdkMocks();
-	});
-
-	suiteTeardown(() => {
-		// Dispose providers created by buildProvider() so fs watchers and
-		// refresh timers from initialize() tests do not outlive the suite and
-		// crash the extension host during shutdown.
-		for (const p of createdProviders.splice(0)) {
-			try {
-				p.dispose?.();
-			} catch {
-				/* best effort */
-			}
-		}
 	});
 
 	suite("constructor", () => {
@@ -2139,7 +2123,6 @@ suite("PiAgentProvider", () => {
 		});
 
 		test("surfaces delete failures instead of silently succeeding", async () => {
-			resetVscodeMocks();
 			const provider = buildProvider();
 			const originalListSessions = piAgentProviderInternals.listSessions;
 			const originalUnlinkFile = piAgentProviderInternals.unlinkFile;

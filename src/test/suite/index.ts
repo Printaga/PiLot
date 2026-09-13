@@ -184,9 +184,12 @@ export async function run(): Promise<void> {
 	}
 
 	const testsRoot = path.resolve(import.meta.dirname, ".");
-	const files = await glob("**/**.test.js", { cwd: testsRoot });
+	// Per-file host isolation (see runTest.ts): load only the file under test.
+	const fileFilter = process.env.MOCHA_TEST_FILE
+		? [process.env.MOCHA_TEST_FILE]
+		: await glob("**/**.test.js", { cwd: testsRoot });
 
-	for (const file of files) {
+	for (const file of fileFilter) {
 		mocha.addFile(path.resolve(testsRoot, file));
 	}
 

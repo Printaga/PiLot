@@ -25,7 +25,30 @@ function resolveBaseRef() {
 }
 
 const base = resolveBaseRef();
-const args = ["exec", "fallow", "audit", "--base", base, "--format", "json", "--quiet"];
+// The audit gate carries recorded baselines (fallow-baselines/, generated at
+// the adopted main baseline) for dead-code/complexity/duplication, so the
+// historical debt main already ships never gates new changes. CSS styling
+// analytics is disabled for the gate only: it has no baseline mechanism, and
+// after a full-tree Prettier normalization its base-snapshot attribution
+// misclassifies main's inherited CSS findings as introduced. `pnpm run
+// fallow:review` still reports styling health in full.
+const args = [
+	"exec",
+	"fallow",
+	"audit",
+	"--base",
+	base,
+	"--format",
+	"json",
+	"--quiet",
+	"--no-css",
+	"--dead-code-baseline",
+	"fallow-baselines/dead-code.json",
+	"--health-baseline",
+	"fallow-baselines/health.json",
+	"--dupes-baseline",
+	"fallow-baselines/dupes.json",
+];
 console.log(`fallow audit --base ${base}`);
 const result = spawnSync("pnpm", args, { stdio: "inherit" });
 const code = result.status ?? 2;

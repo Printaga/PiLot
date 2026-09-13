@@ -1,0 +1,319 @@
+{
+  "finding_counts": {
+    "scripts/postinstall-patch.mjs": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/binary-service.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "src/extension-ui-context.ts": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/footer-manager.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/loader.cjs": {
+      "complexity_critical": {
+        "count": 5
+      },
+      "crap_critical": {
+        "count": 5
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "src/message-handler.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/message-serializer.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/package-manager.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/pi-agent-provider.ts": {
+      "complexity_critical": {
+        "count": 4
+      },
+      "complexity_high": {
+        "count": 4
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 6
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "src/pi-binary.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "src/session-manager.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "src/session-resources.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/test/mocks/pi-sdk-mocks.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/test/mocks/vscode-facade.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/test/runTest.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/test/suite/index.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "src/update-checker.ts": {
+      "complexity_high": {
+        "count": 2
+      }
+    },
+    "src/utils/native-addons.ts": {
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "src/voice-manager.ts": {
+      "complexity_high": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "src/webview/App.svelte": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "src/webview/components/ChatPanel.svelte": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 6
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 6
+      }
+    },
+    "src/webview/components/ExportDialog.svelte": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "src/webview/components/Header.svelte": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/MessageBubble.svelte": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "src/webview/components/OnboardingTour.svelte": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/PiPackagesPanel.svelte": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "src/webview/components/ProviderSettings.svelte": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 6
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/SessionTree.svelte": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/SettingsPanel.svelte": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/SkeletonLoader.svelte": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/SkillsPanel.svelte": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/webview/components/StatusLine.svelte": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/webview/components/Toast.svelte": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "src/webview/components/ToolsPanel.svelte": {
+      "crap_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": [
+    "src/test/mocks/vscode-shim.ts:dead code",
+    "src/webview/App.svelte:complexity",
+    "src/test/mocks/pi-sdk-mocks.ts:high impact",
+    "src/pi-agent-provider.ts:complexity",
+    "src/webview/components/Toast.svelte:dead code",
+    "src/webview/components/ChatPanel.svelte:complexity",
+    "src/extension.ts:dead code",
+    "src/package-manager.ts:high impact",
+    "src/binary-service.ts:complexity",
+    "src/webview/components/ProviderSettings.svelte:complexity",
+    "src/webview/components/PiPackagesPanel.svelte:complexity",
+    "src/webview/components/SkillsPanel.svelte:complexity",
+    "src/message-handler.ts:complexity",
+    "src/message-serializer.ts:complexity",
+    "src/webview/components/MessageBubble.svelte:complexity",
+    "src/loader.cjs:complexity"
+  ]
+}
