@@ -3013,8 +3013,9 @@ suite("PiAgentProvider", () => {
 			);
 			assert.ok(eventMsg, "auth_url event should be forwarded");
 			assert.strictEqual(eventMsg.data.event.url, "https://auth.example/start");
-			assert.ok(
-				openedUrls.includes("https://auth.example/start"),
+			assert.deepStrictEqual(
+				openedUrls,
+				["https://auth.example/start"],
 				"browser should open the auth URL",
 			);
 
@@ -3060,8 +3061,9 @@ suite("PiAgentProvider", () => {
 			);
 			assert.ok(eventMsg, "device_code event should be forwarded");
 			assert.strictEqual(eventMsg.data.event.userCode, "ABCD-1234");
-			assert.ok(
-				openedUrls.includes("https://example.com/device"),
+			assert.deepStrictEqual(
+				openedUrls,
+				["https://example.com/device"],
 				"verification URL should be opened in the browser",
 			);
 		});
