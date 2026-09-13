@@ -275,7 +275,7 @@
         {/if}
       </div>
     {:else}
-      {#each filteredSkills as skill (skill.path)}
+      {#each filteredSkills as skill (skill.name)}
         <div class="skill-card">
           <div
             class="skill-header"

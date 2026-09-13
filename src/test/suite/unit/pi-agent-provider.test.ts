@@ -890,6 +890,117 @@ suite("PiAgentProvider", () => {
 
 			harness.dispose();
 		});
+
+		test("session-resources reports the effective (empty) state while light mode is on", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => (key === "lightMode" ? true : def),
+				update: async () => {},
+			});
+
+			// The loader still exposes resources (e.g. from a pre-toggle
+			// session); the webview must see the EFFECTIVE light-mode state
+			// so the chat context row doesn't list packages as active.
+			(provider as any).session = createSessionMock({
+				resourceLoader: {
+					reload: async () => {},
+					getAgentsFiles: () => ({ agentsFiles: [{ path: "/fake/AGENTS.md" }] }),
+					getSkills: () => ({
+						skills: [
+							{
+								name: "s1",
+								description: "d",
+								filePath: "/s/SKILL.md",
+								sourceInfo: { origin: "package", source: "npm:foo", scope: "user" },
+							},
+						],
+					}),
+					getExtensions: () => ({
+						extensions: [{ path: "/e", sourceInfo: { name: "x" } }],
+						errors: [],
+					}),
+					getPrompts: () => ({ prompts: [{ name: "p", description: "" }] }),
+				} as any,
+			});
+			(provider as any).packageManager.listPackages = async () => [
+				{ source: "npm:foo", path: "/pkg/foo" },
+				{ source: "npm:bar", path: "/pkg/bar" },
+			];
+
+			const posted = captureWebviewPosts(provider);
+			await provider.sendSessionResources();
+
+			const msg = posted.find((m) => m.type === "session-resources");
+			assert.ok(msg, "expected session-resources notification");
+			assert.strictEqual(msg.data.packageCount, 0);
+			assert.deepStrictEqual(msg.data.packages, []);
+			assert.strictEqual(msg.data.skillCount, 0);
+			assert.deepStrictEqual(msg.data.skills, []);
+			assert.strictEqual(msg.data.extensionCount, 0);
+			assert.strictEqual(msg.data.promptCount, 0);
+			assert.strictEqual(msg.data.contextFileCount, 0);
+		});
+
+		test("skills keep their file paths so the skills list keys stay unique", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+
+			// The SDK exposes the skill location as filePath (not path) —
+			// dropping it collapses every key to "" and wedges the list.
+			(provider as any).session = createSessionMock({
+				resourceLoader: {
+					reload: async () => {},
+					getSkills: () => ({
+						skills: [
+							{ name: "alpha", description: "a", filePath: "/skills/alpha/SKILL.md" },
+							{ name: "beta", description: "b", filePath: "/skills/beta/SKILL.md" },
+						],
+					}),
+				} as any,
+			});
+
+			const skills = await provider.getAllSkills();
+			assert.strictEqual(skills.length, 2);
+			assert.strictEqual(skills[0].path, "/skills/alpha/SKILL.md");
+			assert.strictEqual(skills[1].path, "/skills/beta/SKILL.md");
+			assert.strictEqual(
+				new Set(skills.map((s: any) => s.path)).size,
+				2,
+				"skill paths must be unique so the Svelte each-key never collides",
+			);
+		});
+
+		test("restart re-sync marks session-history as restored so the webview keeps its tab", async () => {
+			const provider: any = buildProvider();
+			await stabilizeProvider(provider);
+
+			const config = new Map<string, any>([
+				["lightMode", false],
+				["toolPreset", "default"],
+			]);
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript: [{ role: "user", content: "hello" }],
+			});
+
+			await provider.createSession();
+			const posted = captureWebviewPosts(provider);
+
+			config.set("lightMode", true);
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			const history = posted.find((m) => m.type === "session-history");
+			assert.ok(history, "expected session-history re-sync after rebuild");
+			assert.strictEqual(
+				history.data.restored,
+				true,
+				"restarted sessions must not yank the webview back to the chat tab",
+			);
+			harness.dispose();
+		});
 	});
 
 	suite("createSession", () => {

@@ -158,6 +158,30 @@
     }
   });
 
+  // Chat search: auto-expand collapsed thinking/tool blocks that contain the
+  // query so counted matches are actually visible (and highlightable) instead
+  // of hidden inside a collapsed section. Stays expanded after search closes.
+  $effect(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return;
+    if (typeof message.thinking === "string" && message.thinking.toLowerCase().includes(q)) {
+      thinkingExpanded = true;
+    }
+    if (message.toolCalls) {
+      const expanded = $state.snapshot(toolExpanded);
+      const updates: Record<string, boolean> = {};
+      for (const tc of message.toolCalls) {
+        const hay = `${tc.toolName ?? ""}\n${tc.result?.content ?? ""}`.toLowerCase();
+        if (hay.includes(q) && tc.status === "complete" && !expanded[tc.toolCallId]) {
+          updates[tc.toolCallId] = true;
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        toolExpanded = { ...expanded, ...updates };
+      }
+    }
+  });
+
   function parseContent(content: string): Array<string | CodeBlock> {
     const parts: Array<string | CodeBlock> = [];
     let lastIndex = 0;

@@ -16,7 +16,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Fixed
 
 - Standalone .ts files in the PI extension folder were not detected as installed extensions
-- GitHub reported 7 pre-existing Dependabot vulnerabilities on main (6 high, 1 moderate)
+- GitHub reported 7 Dependabot vulnerabilities on main (6 high, 1 moderate)
 - Search the current session chat (ctrl+F) was not working properly
 - Auto naming of new sessions did not work reliably
 - Multiple minor issues

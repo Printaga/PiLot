@@ -12,8 +12,9 @@
   // Props
   interface Props {
     toolPreset?: string | null;
+    lightMode?: boolean;
   }
-  let { toolPreset: propPreset = null }: Props = $props();
+  let { toolPreset: propPreset = null, lightMode = false }: Props = $props();
 
   // Default tools available in PI
   const defaultTools: ToolDef[] = [
@@ -46,6 +47,14 @@
   let toolPreset = $state<string>("default");
   let customToolsInput = $state("");
 
+  // Light Mode restricts the runtime to the core tools (default preset).
+  // Show the EFFECTIVE state and block edits so the UI can't promise tools
+  // the session won't load. Stored settings are kept untouched underneath.
+  const LIGHT_MODE_TOOLS = ["read", "bash", "edit", "write"];
+  const lightRestrictsTools = $derived(lightMode && toolPreset === "default");
+  const isEffectiveEnabled = (name: string, enabled: boolean) =>
+    lightRestrictsTools ? LIGHT_MODE_TOOLS.includes(name) : enabled;
+
   // Derive sync state from prop presence — no effect, no write, no re-render cycle.
   const isSynced = $derived(propPreset !== null);
 
@@ -75,11 +84,13 @@
   }
 
   function toggleTool(index: number) {
+    if (lightMode) return;
     tools = tools.map((t, i) => (i === index ? { ...t, enabled: !t.enabled } : t));
     notifyToolChange();
   }
 
   function notifyToolChange() {
+    if (lightMode) return;
     const enabledTools = tools.filter((t) => t.enabled).map((t) => t.name);
     sendToolUpdate({
       type: "setToolConfig",
@@ -113,6 +124,7 @@
   }
 
   function addCustomTool() {
+    if (lightMode) return;
     const name = customToolsInput.trim().toLowerCase();
     if (!name || tools.some((t) => t.name === name)) return;
     tools = [
@@ -129,6 +141,7 @@
   }
 
   function removeCustomTool(index: number) {
+    if (lightMode) return;
     if (tools[index].category === "builtin") return;
     tools = tools.filter((_, i) => i !== index);
     notifyToolChange();
@@ -137,7 +150,7 @@
   const builtinTools = $derived(tools.filter((t) => t.category === "builtin"));
   const customTools = $derived(tools.filter((t) => t.category !== "builtin"));
 
-  const enabledCount = $derived(tools.filter((t) => t.enabled).length);
+  const enabledCount = $derived(tools.filter((t) => isEffectiveEnabled(t.name, t.enabled)).length);
   const totalCount = $derived(tools.length);
 </script>
 
@@ -160,6 +173,13 @@
       </span>
     {/if}
   </div>
+
+  {#if lightMode}
+    <div class="light-mode-banner">
+      <strong>Light Mode is on.</strong> Only read, bash, edit and write are active — tool settings apply
+      again when Light Mode is off. Turn it off in Settings.
+    </div>
+  {/if}
 
   <div class="tab-nav">
     <button
@@ -191,7 +211,12 @@
                 <span class="tool-description">{tool.description}</span>
               </div>
               <label class="toggle">
-                <input type="checkbox" checked={tool.enabled} onchange={() => toggleTool(index)} />
+                <input
+                  type="checkbox"
+                  checked={isEffectiveEnabled(tool.name, tool.enabled)}
+                  onchange={() => toggleTool(index)}
+                  disabled={lightMode}
+                />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -211,7 +236,8 @@
                   <label class="toggle">
                     <input
                       type="checkbox"
-                      checked={tool.enabled}
+                      checked={isEffectiveEnabled(tool.name, tool.enabled)}
+                      disabled={lightMode}
                       onchange={() => {
                         const idx = tools.findIndex((t) => t.name === tool.name);
                         if (idx >= 0) toggleTool(idx);
@@ -249,11 +275,16 @@
             type="text"
             placeholder="Add custom tool name..."
             bind:value={customToolsInput}
+            disabled={lightMode}
             onkeydown={(e) => e.key === "Enter" && addCustomTool()}
           />
-          <button class="add-btn" onclick={addCustomTool} disabled={!customToolsInput.trim()}
-            >Add</button
+          <button
+            class="add-btn"
+            onclick={addCustomTool}
+            disabled={!customToolsInput.trim() || lightMode}
           >
+            Add
+          </button>
         </div>
       </section>
     {:else if activeTab === "presets"}
@@ -265,6 +296,7 @@
           <button
             class="preset-card"
             class:selected={toolPreset === "default"}
+            disabled={lightMode}
             onclick={() => applyPreset("default")}
           >
             <span class="preset-name">Default</span>
@@ -275,6 +307,7 @@
           <button
             class="preset-card"
             class:selected={toolPreset === "review"}
+            disabled={lightMode}
             onclick={() => applyPreset("review")}
           >
             <span class="preset-name">Review Only</span>
@@ -285,6 +318,7 @@
           <button
             class="preset-card"
             class:selected={toolPreset === "none"}
+            disabled={lightMode}
             onclick={() => applyPreset("none")}
           >
             <span class="preset-name">None</span>
@@ -295,6 +329,7 @@
           <button
             class="preset-card"
             class:selected={toolPreset === "custom"}
+            disabled={lightMode}
             onclick={() => applyPreset("custom")}
           >
             <span class="preset-name">Custom</span>
@@ -314,6 +349,18 @@
     height: 100%;
     padding: var(--space-4);
     overflow-y: auto;
+  }
+
+  .light-mode-banner {
+    padding: var(--space-3);
+    background: color-mix(in oklch, var(--color-warning) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-warning) 30%, transparent);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    margin-bottom: var(--space-3);
+    line-height: 1.4;
+    flex-shrink: 0;
   }
 
   .header {
@@ -565,6 +612,11 @@
     border-color: var(--color-primary);
     background: oklch(from var(--color-primary) l c h / 0.08);
     box-shadow: 0 0 0 1px var(--color-primary);
+  }
+
+  .preset-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .preset-name {

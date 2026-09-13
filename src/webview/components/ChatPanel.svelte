@@ -31,6 +31,10 @@
   interface Package {
     source: string;
     path: string;
+    local?: boolean;
+    skills?: Array<{ name: string }>;
+    extensions?: Array<{ path: string }>;
+    prompts?: Array<{ name: string }>;
   }
   interface PromptTemplate {
     name: string;
@@ -290,9 +294,24 @@
           .join("\n")
       : "No prompts loaded",
   );
+  function displayPackageLabel(pkg: Package): string {
+    const lower = pkg.source.toLowerCase();
+    if (pkg.local || lower.startsWith("local:")) {
+      const scope = lower.split(":")[1];
+      const base =
+        scope === "user" ? "Local (user)" : scope === "project" ? "Local (project)" : "Local";
+      const items = [
+        ...(pkg.extensions ?? []).map((e) => e.path.split("/").pop() || e.path),
+        ...(pkg.skills ?? []).map((s) => s.name),
+        ...(pkg.prompts ?? []).map((p) => p.name),
+      ].filter(Boolean);
+      return items.length > 0 ? `${base} [${items.join(", ")}]` : `${base} (empty)`;
+    }
+    return pkg.source;
+  }
   const packagesTitle = $derived(
     resources.packages.length > 0
-      ? resources.packages.map((pkg, i) => `${i + 1}. ${pkg.source}`).join("\n")
+      ? resources.packages.map((pkg, i) => `${i + 1}. ${displayPackageLabel(pkg)}`).join("\n")
       : "No packages loaded",
   );
 
@@ -312,12 +331,13 @@
     files.filter((f) => f.toLowerCase().includes(autocompleteQuery.toLowerCase())).slice(0, 20),
   );
 
-  // Auto-scroll logic
+  // Auto-scroll logic (suspended while search is open so matches stay in view)
   $effect(() => {
     const el = messagesContainer;
     if (!el) return;
+    const searching = showSearch;
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (isNearBottom || (!userScrolledUp && messages.length > 0)) {
+    if (!searching && (isNearBottom || (!userScrolledUp && messages.length > 0))) {
       el.scrollTop = el.scrollHeight;
     }
     showScrollBtn = !isNearBottom && el.scrollHeight > el.clientHeight + 80;
@@ -536,8 +556,9 @@
   }
 
   /** Searchable text for one message: user input + AI output + thinking +
-   *  tool names/args/results + provider labels. Covers the whole visible
-   *  history, not just `content`. */
+   *  tool names/results + provider labels. Only indexes text that is actually
+   *  rendered (raw tool args JSON is display-truncated, so it is excluded to
+   *  keep the match count aligned with visible highlights). */
   function getMessageHaystack(m: Message): string {
     const parts: string[] = [];
     if (typeof m.content === "string" && m.content) parts.push(m.content);
@@ -546,11 +567,6 @@
     if (m.toolCalls) {
       for (const tc of m.toolCalls) {
         if (tc.toolName) parts.push(tc.toolName);
-        try {
-          if (tc.args) parts.push(JSON.stringify(tc.args));
-        } catch {
-          // non-serializable tool args are skipped in the search index
-        }
         if (tc.result?.content) parts.push(tc.result.content);
       }
     }
@@ -625,22 +641,43 @@
     }
   }
 
-  function scrollToMatch(msgIndex: number) {
+  /** Scroll the messages container so the matched phrase is centered.
+   *  Targets the highlighted `<mark>` inside the message wrapper (falling
+   *  back to the wrapper itself) and writes `scrollTop` directly — this
+   *  avoids fighting the container's `scroll-behavior: smooth` and any
+   *  competing scroll writes. Marks the navigation so auto-scroll stays off. */
+  async function scrollToMatch(msgIndex: number) {
     if (!messagesContainer) return;
-    // Auto-expand visible range if target message is hidden
-    if (msgIndex < messages.length - visibleMessageCount) {
+    userScrolledUp = true;
+    // Auto-expand visible range if target message is hidden. The first
+    // rendered index derives from the actual slice (visibleMessages), not
+    // the requested window size, which can exceed messages.length.
+    const firstVisible = messages.length - visibleMessages.length;
+    if (msgIndex < firstVisible) {
       visibleMessageCount = messages.length - msgIndex + 10;
       // Wait for Svelte to render the newly visible messages before scrolling
-      requestAnimationFrame(() => {
-        if (!messagesContainer) return;
-        const el2 = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
-        if (el2) el2.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+      await tick();
+    }
+    if (!messagesContainer) return;
+    const container = messagesContainer;
+    const wrapper = container.querySelector(`[data-msg-index="${msgIndex}"]`);
+    if (!wrapper) return;
+    const target = wrapper.querySelector("mark.search-highlight") ?? wrapper;
+    for (const m of container.querySelectorAll("mark.search-highlight-current")) {
+      m.classList.remove("search-highlight-current");
+    }
+    if (target !== wrapper) target.classList.add("search-highlight-current");
+    const cRect = container.getBoundingClientRect();
+    const tRect = (target as Element).getBoundingClientRect();
+    if (cRect.height > 0 && tRect.height > 0) {
+      container.scrollTop += tRect.top - cRect.top - container.clientHeight / 2 + tRect.height / 2;
       return;
     }
-    const el = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Fallback for environments without layout (e.g. jsdom tests): use the
+    // wrapper's document position when rects are unavailable.
+    const top = (wrapper as HTMLElement).offsetTop;
+    if (typeof top === "number") {
+      container.scrollTop = Math.max(0, top - container.clientHeight / 2);
     }
   }
 
@@ -1161,11 +1198,11 @@
         </button>
       {/if}
 
-      {#each visibleMessages as message, i (messages.length - visibleMessageCount + i)}
+      {#each visibleMessages as message, i (messages.length - visibleMessages.length + i)}
         <div
           class="message-wrapper"
-          class:search-current={messages.length - visibleMessageCount + i === currentMatchIndex}
-          data-msg-index={messages.length - visibleMessageCount + i}
+          class:search-current={messages.length - visibleMessages.length + i === currentMatchIndex}
+          data-msg-index={messages.length - visibleMessages.length + i}
         >
           <MessageBubble {message} searchQuery={showSearch ? searchQuery : ""} {onForkMessage} />
         </div>
@@ -1735,6 +1772,10 @@
     color: var(--color-text);
     padding: 0 1px;
     border-radius: 2px;
+  }
+  .messages :global(.search-highlight-current) {
+    background: oklch(from var(--color-warning) l c h / 0.65);
+    outline: 1px solid var(--color-warning);
   }
   .messages :global(.message-wrapper.search-current) {
     outline: 1px solid var(--color-warning);

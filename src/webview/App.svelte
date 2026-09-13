@@ -286,7 +286,9 @@
         draftInputText = "";
         draftInputImages = [];
         maybeShowForkHint(messages);
-        activeTab = "chat";
+        // A rebuilt live session (e.g. light-mode toggle) re-sends the
+        // transcript with `restored: true` — stay on the current tab.
+        if (!data?.restored) activeTab = "chat";
         break;
       case "fork-input-restored":
         draftInputText = data?.text || "";
@@ -1393,7 +1395,7 @@
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />
       {:else if activeTab === "tools"}
-        <ToolsPanel {toolPreset} />
+        <ToolsPanel {toolPreset} {lightMode} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel {lightMode} />
       {:else if activeTab === "skills"}

@@ -968,6 +968,18 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				prompts = [];
 			}
 
+			// Light mode unloads every discovered resource: installed packages
+			// stay on disk (the Packages tab still lists them) but none of their
+			// skills, extensions or prompts load into the session. Report the
+			// EFFECTIVE state so the chat context row doesn't show them as active.
+			const lightMode = this.getLightMode();
+			if (lightMode) {
+				contextFiles = [];
+				skills = [];
+				extensions = [];
+				prompts = [];
+			}
+
 			// Collect VS Code active extensions
 			const vscodeExtensions = vscode.extensions.all
 				.filter((ext) => ext.isActive)
@@ -1036,11 +1048,20 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					vscodeExtensionCount: vscodeExtensions.length,
 					contextFiles: contextFiles.map((f: any) => ({ path: f.path })),
 					contextFileCount: contextFiles.length,
-					packages: installedPkgs.map((p) => ({
-						source: p.source,
-						path: p.path,
-					})),
-					packageCount: installedPkgs.length,
+					packages: lightMode
+						? []
+						: installedPkgs.map((p) => ({
+								source: p.source,
+								path: p.path,
+								local: p.local ?? false,
+								types: p.types ?? [],
+								skills: (p.skills ?? []).map((s: any) => ({ name: s.name })),
+								extensions: (p.extensions ?? []).map((e: any) => ({
+									path: e.path,
+								})),
+								prompts: (p.prompts ?? []).map((pr: any) => ({ name: pr.name })),
+							})),
+					packageCount: lightMode ? 0 : installedPkgs.length,
 				},
 			});
 		} catch (e) {
@@ -2977,7 +2998,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				s.sourceInfo?.origin === "package"
 					? s.sourceInfo?.source?.replace(/^npm:/, "")?.replace(/^git:/, "") || null
 					: null,
-			path: s.path || "",
+			path: s.filePath || s.path || "",
 			sourceType:
 				s.sourceInfo?.origin === "package"
 					? "package"
@@ -3080,6 +3101,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				data: {
 					sessionId: this.session?.sessionId,
 					messages,
+					// The live session was rebuilt, not replaced: keep the webview
+					// on its current tab instead of yanking it back to chat.
+					restored: true,
 				},
 			});
 			await this.sendSessionResources();
