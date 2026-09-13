@@ -360,6 +360,84 @@ suite("SessionListManager", () => {
 			assert.strictEqual(result, true);
 			assert.ok(capturedName, "expected session name to be set");
 		});
+
+		test("prefers pendingUserText over polluted persisted message", () => {
+			let capturedName: string | undefined;
+			const session = createMockSession({ sessionName: null });
+			Object.defineProperty(session, "setSessionName", {
+				value: (name: string) => {
+					capturedName = name;
+					session.sessionName = name;
+				},
+			});
+
+			const mgr = new SessionListManager(
+				buildDeps({
+					getSession: () => session,
+					logDebug: () => {},
+				}),
+			);
+			mgr.pendingUserText = "Refactor the auth module";
+
+			const result = mgr.tryAutoSessionNameFromUserMessage({
+				role: "user",
+				content:
+					"Project Root: /home/lenovo/Development/PiLot\nProject Name: pilots-studio\n\nRefactor the auth module",
+			});
+			assert.strictEqual(result, true);
+			assert.strictEqual(capturedName, "Refactor the auth module");
+		});
+
+		test("replaces junk auto-context name with real text", () => {
+			let capturedName: string | undefined;
+			const session = createMockSession({
+				sessionName: "Project Root: /home/lenovo/Development/PiLot",
+			});
+			Object.defineProperty(session, "setSessionName", {
+				value: (name: string) => {
+					capturedName = name;
+					session.sessionName = name;
+				},
+			});
+
+			const mgr = new SessionListManager(
+				buildDeps({
+					getSession: () => session,
+					logDebug: () => {},
+				}),
+			);
+
+			const result = mgr.tryAutoSessionNameFromUserMessage({
+				role: "user",
+				content: "Fix the login redirect bug",
+			});
+			assert.strictEqual(result, true);
+			assert.strictEqual(capturedName, "Fix the login redirect bug");
+		});
+
+		test("keeps an existing real name", () => {
+			const session = createMockSession({ sessionName: "Real name" });
+			let called = false;
+			Object.defineProperty(session, "setSessionName", {
+				value: () => {
+					called = true;
+				},
+			});
+
+			const mgr = new SessionListManager(
+				buildDeps({
+					getSession: () => session,
+					logDebug: () => {},
+				}),
+			);
+
+			const result = mgr.tryAutoSessionNameFromUserMessage({
+				role: "user",
+				content: "Something else",
+			});
+			assert.strictEqual(result, false);
+			assert.strictEqual(called, false);
+		});
 	});
 
 	suite("deleteSessions", () => {

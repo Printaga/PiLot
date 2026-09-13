@@ -94,6 +94,10 @@ export interface VoiceModelDef {
   englishOnly: boolean;
 }
 
+/** Keys for openConfigFile — webview mirror of the host's ConfigFileKey. */
+export type OpenConfigFileKey =
+  "auth" | "models" | "settings" | "system-prompt" | "append-system-prompt";
+
 /** Thinking level enumeration */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 

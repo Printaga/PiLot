@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -37,9 +37,14 @@ function getVscodeExecutablePath(): string | undefined {
 	} else {
 		const linuxPaths = ["/usr/bin/code", "/usr/local/bin/code", "/snap/bin/code"];
 		for (const exePath of linuxPaths) {
-			if (existsSync(exePath)) {
-				return exePath;
-			}
+			if (!existsSync(exePath)) continue;
+			// Distro `code` is a shell wrapper (…/bin/code) that re-forks the GUI via
+			// cli.js; the test runner then loses process ownership and the run exits 0
+			// without ever starting mocha (observed flake). Prefer the real Electron
+			// binary in the resolved install dir when it exists.
+			const wrapper = realpathSync(exePath);
+			const electronBinary = path.join(path.dirname(path.dirname(wrapper)), "code");
+			return existsSync(electronBinary) ? electronBinary : exePath;
 		}
 	}
 

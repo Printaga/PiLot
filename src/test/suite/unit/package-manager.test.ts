@@ -44,18 +44,25 @@ function makeResourceLoader(opts: {
 function makeSkill(skill: {
 	name?: string;
 	description?: string;
-	sourceInfo?: { source?: string };
+	filePath?: string;
+	sourceInfo?: { source?: string; scope?: string; origin?: string; baseDir?: string };
 }) {
 	return {
 		name: skill.name ?? "",
 		description: skill.description ?? "",
+		filePath: skill.filePath ?? "",
 		sourceInfo: skill.sourceInfo ?? {},
 	};
 }
 
-function makeExtension(ext: { path?: string; sourceInfo?: { source?: string } }) {
+function makeExtension(ext: {
+	path?: string;
+	resolvedPath?: string;
+	sourceInfo?: { source?: string; scope?: string; origin?: string; baseDir?: string };
+}) {
 	return {
 		path: ext.path ?? "",
+		resolvedPath: ext.resolvedPath ?? ext.path ?? "",
 		sourceInfo: ext.sourceInfo ?? {},
 	};
 }
@@ -63,11 +70,13 @@ function makeExtension(ext: { path?: string; sourceInfo?: { source?: string } })
 function makePrompt(prompt: {
 	name?: string;
 	description?: string;
-	sourceInfo?: { source?: string };
+	filePath?: string;
+	sourceInfo?: { source?: string; scope?: string; origin?: string; baseDir?: string };
 }) {
 	return {
 		name: prompt.name ?? "",
 		description: prompt.description ?? "",
+		filePath: prompt.filePath ?? "",
 		sourceInfo: prompt.sourceInfo ?? {},
 	};
 }
@@ -389,6 +398,154 @@ suite("PackageManager: enrichPackages", () => {
 });
 
 // ---------------------------------------------------------------------------
+// enrichPackages: local top-level resources
+// ---------------------------------------------------------------------------
+
+suite("PackageManager: enrichPackages local files", () => {
+	let tmpDir: string;
+
+	setup(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-enrich-local-"));
+	});
+
+	teardown(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	test("surfaces top-level user extension as local:user synthetic package", async () => {
+		const loader = makeResourceLoader({
+			extensions: [
+				makeExtension({
+					path: "/home/user/.pi/agent/extensions/nvidia-nim-pacer.ts",
+					sourceInfo: {
+						source: "local",
+						scope: "user",
+						origin: "top-level",
+						baseDir: "/home/user/.pi/agent/extensions",
+					},
+				}),
+			],
+		});
+		const { deps } = createDeps({ resourceLoader: loader });
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([]);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].source, "local:user");
+		assert.strictEqual(result[0].local, true);
+		assert.deepStrictEqual(result[0].types, ["extensions"]);
+		assert.strictEqual(result[0].extensions.length, 1);
+		assert.strictEqual(
+			result[0].extensions[0].path,
+			"/home/user/.pi/agent/extensions/nvidia-nim-pacer.ts",
+		);
+	});
+
+	test("buckets project-scoped resources into a separate local:project entry", async () => {
+		const loader = makeResourceLoader({
+			extensions: [
+				makeExtension({
+					path: "/home/user/.pi/agent/extensions/user-ext.ts",
+					sourceInfo: { source: "local", scope: "user", origin: "top-level" },
+				}),
+			],
+			skills: [
+				makeSkill({
+					name: "proj-skill",
+					filePath: "/proj/.pi/skills/s/SKILL.md",
+					sourceInfo: {
+						source: "local",
+						scope: "project",
+						origin: "top-level",
+					},
+				}),
+			],
+		});
+		const { deps } = createDeps({ resourceLoader: loader });
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([]);
+		assert.strictEqual(result.length, 2);
+		const user = result.find((p: any) => p.source === "local:user");
+		const project = result.find((p: any) => p.source === "local:project");
+		assert.ok(user);
+		assert.ok(project);
+		assert.deepStrictEqual(user.types, ["extensions"]);
+		assert.deepStrictEqual(project.types, ["skills"]);
+		assert.strictEqual(project.skills[0].name, "proj-skill");
+	});
+
+	test("skips inline extensions when building local entries", async () => {
+		const loader = makeResourceLoader({
+			extensions: [
+				makeExtension({
+					path: "<inline:test>",
+					sourceInfo: { source: "test", scope: "temporary", origin: "top-level" },
+				}),
+			],
+		});
+		const { deps } = createDeps({ resourceLoader: loader });
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([]);
+		assert.deepStrictEqual(result, []);
+	});
+
+	test("package-origin resources do not leak into local entries", async () => {
+		const pkgDir = writeManifest(tmpDir, "desc", "1.0.0");
+		const loader = makeResourceLoader({
+			extensions: [
+				makeExtension({
+					path: `${pkgDir}/ext.ts`,
+					sourceInfo: { source: "my-source", origin: "package", scope: "user" },
+				}),
+			],
+		});
+		const { deps } = createDeps({ resourceLoader: loader });
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([
+			makeInstalledPackage({ source: "my-source", path: pkgDir }),
+		]);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].source, "my-source");
+		assert.strictEqual(result[0].local, undefined);
+		assert.strictEqual(result[0].extensions.length, 1);
+	});
+
+	test("matches package resources by install path containment", async () => {
+		const pkgDir = writeManifest(tmpDir, "desc", "1.0.0");
+		const loader = makeResourceLoader({
+			extensions: [
+				makeExtension({
+					path: `${pkgDir}/extensions/extra.ts`,
+					sourceInfo: { source: "other-source", origin: "package" },
+				}),
+			],
+		});
+		const { deps } = createDeps({ resourceLoader: loader });
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([
+			makeInstalledPackage({ source: "my-source", path: pkgDir }),
+		]);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].extensions.length, 1);
+	});
+
+	test("real packages are not flagged local", async () => {
+		const pkgDir = writeManifest(tmpDir, "desc", "1.0.0");
+		const { deps } = createDeps({});
+		const pm = await requirePackageManager(deps);
+
+		const result = pm.enrichPackages([
+			makeInstalledPackage({ source: "my-source", path: pkgDir }),
+		]);
+		assert.strictEqual(result[0].local, undefined);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // listPackages
 // ---------------------------------------------------------------------------
 
@@ -637,6 +794,20 @@ suite("PackageManager: installPackage / uninstallPackage / updatePackages", () =
 
 		await pm.uninstallPackage("my-source");
 		assert.deepStrictEqual(receivedArgs, ["remove", "my-source"]);
+	});
+
+	test("uninstallPackage rejects local: sources without spawning", async () => {
+		const { deps } = createDeps({});
+		const pm = await requirePackageManager(deps);
+
+		let called = false;
+		(pm as any).runPackageCommand = () => {
+			called = true;
+			return Promise.resolve();
+		};
+
+		await assert.rejects(() => pm.uninstallPackage("local:user"));
+		assert.strictEqual(called, false);
 	});
 
 	test("updatePackages forwards ['update'] to runPackageCommand", async () => {

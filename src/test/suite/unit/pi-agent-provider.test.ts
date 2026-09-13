@@ -617,8 +617,8 @@ suite("PiAgentProvider", () => {
 			};
 
 			/** Wait until the listener's async rebuild has created a new session. */
-			const waitForRebuild = async () => {
-				for (let i = 0; i < 500 && createCalls.length < 2; i++) {
+			const waitForRebuild = async (min = 2) => {
+				for (let i = 0; i < 500 && createCalls.length < min; i++) {
 					await new Promise((resolve) => setTimeout(resolve, 20));
 				}
 			};
@@ -698,7 +698,11 @@ suite("PiAgentProvider", () => {
 			harness.fireConfigChange("lightMode");
 			await harness.waitForRebuild();
 
-			assert.deepStrictEqual(harness.errorToasts, [], "rebuild surfaced an error toast");
+			assert.deepStrictEqual(
+				harness.errorToasts,
+				[],
+				`rebuild surfaced error toasts: ${harness.errorToasts.join(" | ")}`,
+			);
 
 			// setLightMode persisted the config change…
 			assert.strictEqual(config.get("lightMode"), true);
@@ -835,6 +839,71 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rl2.noContextFiles, true);
 			assert.strictEqual(rl2.noThemes, true);
 			assert.deepStrictEqual(harness.createCalls[1].tools, ["read", "bash", "edit", "write"]);
+			harness.dispose();
+		});
+
+		test("auto context is forced off while light mode is on and the preference is restored on toggle-off", async () => {
+			// The user runs with auto context ON; light mode must override it
+			// without overwriting the stored preference.
+			const provider: any = buildProvider({ autoContext: true });
+			await stabilizeProvider(provider);
+			const handler = new MessageHandler(provider);
+
+			const config = new Map<string, any>([
+				["lightMode", false],
+				["toolPreset", "default"],
+			]);
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript: [{ role: "user", content: "hello" }],
+			});
+
+			await provider.createSession();
+			const posted = captureWebviewPosts(provider);
+
+			// Toggle ON: the toggle must snap off and the UI be re-synced.
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: true },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			assert.strictEqual(provider.getAutoContext(), false);
+			assert.strictEqual(
+				(provider as any).config.autoContext,
+				true,
+				"the user's auto-context preference must be preserved",
+			);
+			const acOn = posted.find((m) => m.type === "auto-context-changed");
+			assert.ok(acOn, "expected auto-context-changed after enabling light mode");
+			assert.strictEqual(
+				acOn.data.enabled,
+				false,
+				"webview must be told auto context is now off",
+			);
+
+			// Toggle OFF: the preference comes back automatically.
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: false },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild(3);
+
+			const acMsgs = posted.filter((m) => m.type === "auto-context-changed");
+			assert.ok(
+				acMsgs.length >= 2,
+				"expected auto-context-changed after disabling light mode",
+			);
+			const last = acMsgs[acMsgs.length - 1];
+			assert.strictEqual(
+				last.data.enabled,
+				true,
+				"auto context preference must be restored on toggle-off",
+			);
+			assert.strictEqual(provider.getAutoContext(), true);
+
 			harness.dispose();
 		});
 	});
@@ -1886,82 +1955,141 @@ suite("PiAgentProvider", () => {
 	});
 
 	suite("openConfigFile", () => {
-		test("creates missing file with {} and opens document", async () => {
-			const provider = buildProvider();
-			(provider as any).isInitialized = true;
-
-			const writeCalls: any[] = [];
-			const openCalls: any[] = [];
-			const savedMkdir = piAgentProviderInternals.mkdir;
-			const savedWrite = piAgentProviderInternals.writeFile;
-			const savedOpen = vscode.workspace.openTextDocument;
-			const savedShow = vscode.window.showTextDocument;
-
+		/**
+		 * Stub the fs/vscode seams openConfigFile uses. `exists` controls
+		 * existsFile, `infoChoice` the dialog answer. Returns recorded calls
+		 * and a restore function.
+		 */
+		function stubOpenConfig(opts: { exists?: boolean; infoChoice?: string } = {}) {
+			const calls = {
+				writes: [] as Array<{ p: string; content: string }>,
+				opened: [] as string[],
+				prompts: 0,
+			};
+			const saved = {
+				exists: piAgentProviderInternals.existsFile,
+				mkdir: piAgentProviderInternals.mkdir,
+				write: piAgentProviderInternals.writeFile,
+				open: vscode.workspace.openTextDocument,
+				show: vscode.window.showTextDocument,
+				info: vscode.window.showInformationMessage,
+			};
+			piAgentProviderInternals.existsFile = () => opts.exists ?? false;
 			piAgentProviderInternals.mkdir = async () => undefined;
-			piAgentProviderInternals.writeFile = async (p: string, content: string, opts: any) => {
-				assert.strictEqual(opts.flag, "wx");
-				writeCalls.push({ p, content });
+			piAgentProviderInternals.writeFile = async (p: string, content: string, o: any) => {
+				assert.strictEqual(o.flag, "wx");
+				calls.writes.push({ p, content });
 			};
 			vscode.workspace.openTextDocument = async (uri: any) => {
-				openCalls.push(uri.fsPath);
+				calls.opened.push(uri.fsPath);
 				return {} as any;
 			};
 			vscode.window.showTextDocument = (async () => {}) as any;
+			(vscode.window as any).showInformationMessage = async () => {
+				calls.prompts++;
+				return opts.infoChoice;
+			};
+			return {
+				calls,
+				restore() {
+					piAgentProviderInternals.existsFile = saved.exists;
+					piAgentProviderInternals.mkdir = saved.mkdir;
+					piAgentProviderInternals.writeFile = saved.write;
+					vscode.workspace.openTextDocument = saved.open;
+					vscode.window.showTextDocument = saved.show;
+					vscode.window.showInformationMessage = saved.info;
+				},
+			};
+		}
 
+		function buildInitializedProvider() {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			return provider;
+		}
+
+		test("creates missing file with {} and opens document", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig();
 			try {
 				await provider["openConfigFile"]("models");
-
-				assert.strictEqual(writeCalls.length, 1, "writeFile called once");
-				assert.strictEqual(writeCalls[0].content, "{}");
-				assert.ok(writeCalls[0].p.endsWith("models.json"), "path resolves to models.json");
-				assert.ok(openCalls[0].endsWith("models.json"), "opens models.json");
+				assert.strictEqual(calls.writes.length, 1, "writeFile called once");
+				assert.strictEqual(calls.writes[0].content, "{}");
+				assert.ok(calls.writes[0].p.endsWith("models.json"));
+				assert.ok(calls.opened[0].endsWith("models.json"), "opens models.json");
 			} finally {
-				piAgentProviderInternals.mkdir = savedMkdir;
-				piAgentProviderInternals.writeFile = savedWrite;
-				vscode.workspace.openTextDocument = savedOpen;
-				vscode.window.showTextDocument = savedShow;
+				restore();
 			}
 		});
 
-		test("does not overwrite an existing file", async () => {
-			const provider = buildProvider();
-			(provider as any).isInitialized = true;
-
-			let writeAttempted = false;
-			const savedMkdir = piAgentProviderInternals.mkdir;
-			const savedWrite = piAgentProviderInternals.writeFile;
-			const savedOpen = vscode.workspace.openTextDocument;
-			const savedShow = vscode.window.showTextDocument;
-
-			piAgentProviderInternals.mkdir = async () => undefined;
+		test("does not overwrite an existing file (EEXIST ignored)", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig();
 			piAgentProviderInternals.writeFile = async () => {
-				writeAttempted = true;
+				const err: any = new Error("exists");
+				err.code = "EEXIST";
+				throw err;
 			};
-			// openDocument rejects, simulating the file already existing when
-			// writeFile runs with flag "wx" (EEXIST) — implementation must ignore it.
-			vscode.workspace.openTextDocument = async (uri: any) => {
-				return uri as any;
-			};
-			vscode.window.showTextDocument = (async () => {}) as any;
-
 			try {
-				// Force an EEXIST error to exercise the guard branch.
-				piAgentProviderInternals.writeFile = async () => {
-					const err: any = new Error("exists");
-					err.code = "EEXIST";
-					throw err;
-				};
 				await provider["openConfigFile"]("settings");
-				assert.strictEqual(
-					writeAttempted,
-					false,
-					"no write attempted when EEXIST path used",
-				);
+				// EEXIST was swallowed: the flow continued to open the document.
+				assert.strictEqual(calls.opened.length, 1);
 			} finally {
-				piAgentProviderInternals.mkdir = savedMkdir;
-				piAgentProviderInternals.writeFile = savedWrite;
-				vscode.workspace.openTextDocument = savedOpen;
-				vscode.window.showTextDocument = savedShow;
+				restore();
+			}
+		});
+
+		test("maps system-prompt to SYSTEM.md after confirmation", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig({ infoChoice: "Create" });
+			try {
+				await provider["openConfigFile"]("system-prompt");
+				assert.strictEqual(calls.prompts, 1, "warns before creating SYSTEM.md");
+				assert.strictEqual(calls.writes.length, 1);
+				assert.strictEqual(calls.writes[0].content, "");
+				assert.ok(calls.writes[0].p.endsWith("SYSTEM.md"));
+				assert.ok(calls.opened[0].endsWith("SYSTEM.md"), "opens SYSTEM.md");
+			} finally {
+				restore();
+			}
+		});
+
+		test("cancelling the SYSTEM.md prompt creates nothing and opens nothing", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig({ infoChoice: undefined });
+			try {
+				await provider["openConfigFile"]("system-prompt");
+				assert.strictEqual(calls.writes.length, 0, "no file created");
+				assert.strictEqual(calls.opened.length, 0, "no document opened");
+			} finally {
+				restore();
+			}
+		});
+
+		test("existing SYSTEM.md opens without prompting", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig({ exists: true, infoChoice: "Create" });
+			try {
+				await provider["openConfigFile"]("system-prompt");
+				assert.strictEqual(calls.prompts, 0, "no prompt for existing file");
+				assert.strictEqual(calls.writes.length, 0, "not rewritten");
+				assert.ok(calls.opened[0].endsWith("SYSTEM.md"), "opens SYSTEM.md");
+			} finally {
+				restore();
+			}
+		});
+
+		test("maps append-system-prompt to APPEND_SYSTEM.md", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig();
+			try {
+				await provider["openConfigFile"]("append-system-prompt");
+				assert.strictEqual(calls.writes.length, 1);
+				assert.strictEqual(calls.writes[0].content, "");
+				assert.ok(calls.writes[0].p.endsWith("APPEND_SYSTEM.md"));
+				assert.ok(calls.opened[0].endsWith("APPEND_SYSTEM.md"));
+			} finally {
+				restore();
 			}
 		});
 	});

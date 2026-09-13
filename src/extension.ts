@@ -6,6 +6,13 @@ import { startUpdateChecker } from "./update-checker.js";
 export async function activate(context: vscode.ExtensionContext) {
 	const config = vscode.workspace.getConfiguration("pi-agent");
 
+	// pi's SDK reads the agent directory only from PI_CODING_AGENT_DIR, so
+	// bridge the setting into it (applied at activation; reload to apply).
+	const agentDir = config.get<string>("agentDir", "").trim();
+	if (agentDir) {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+	}
+
 	const provider = new PiAgentProvider(context, {
 		defaultModel: config.get("defaultModel", "anthropic/claude-sonnet-4-5"),
 		defaultProvider: config.get("defaultProvider", "anthropic"),

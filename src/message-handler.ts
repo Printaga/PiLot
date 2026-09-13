@@ -2,7 +2,16 @@ import * as vscode from "vscode";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { type ProviderApi } from "./protocol/types.js";
+import { type ProviderApi, type ConfigFileKey } from "./protocol/types.js";
+
+/** Keys openConfigFile accepts; must mirror ConfigFileKey. */
+const OPEN_CONFIG_FILES: readonly string[] = [
+	"auth",
+	"models",
+	"settings",
+	"system-prompt",
+	"append-system-prompt",
+] satisfies readonly ConfigFileKey[];
 
 export class MessageHandler {
 	constructor(private provider: ProviderApi) {}
@@ -288,15 +297,14 @@ export class MessageHandler {
 
 				case "openConfigFile": {
 					const file = message.data?.file;
-					const allowed = ["auth", "models", "settings"];
-					if (typeof file !== "string" || !allowed.includes(file)) {
+					if (typeof file !== "string" || !OPEN_CONFIG_FILES.includes(file)) {
 						result = {
 							error: `Invalid config file: ${String(file)}`,
 						};
 						break;
 					}
 					await this.withErrorReporting(() =>
-						this.provider.openConfigFile(file as "auth" | "models" | "settings"),
+						this.provider.openConfigFile(file as ConfigFileKey),
 					);
 					result = { success: true };
 					break;
@@ -350,6 +358,16 @@ export class MessageHandler {
 				case "getSkills":
 					await this.provider.sendSkillsList();
 					break;
+
+				case "getSystemPromptOverrides": {
+					const overrides = this.provider.getSystemPromptOverrides();
+					this.provider.webview?.postMessage({
+						type: "system-prompt-overrides-changed",
+						data: overrides,
+					});
+					result = overrides;
+					break;
+				}
 
 				case "getSkillDiscovery": {
 					const enabled = this.provider.getSkillDiscovery();
@@ -409,6 +427,16 @@ export class MessageHandler {
 					this.provider.setAutoContext(message.data.enabled);
 					result = { success: true };
 					break;
+
+				case "getAutoContext": {
+					const enabled = this.provider.getAutoContext();
+					this.provider.webview?.postMessage({
+						type: "auto-context-changed",
+						data: { enabled },
+					});
+					result = enabled;
+					break;
+				}
 
 				case "getSessionInfo":
 					result = await this.getSessionInfo();

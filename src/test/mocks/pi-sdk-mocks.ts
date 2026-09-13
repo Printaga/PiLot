@@ -241,6 +241,7 @@ export function resetVscodeMocks(): void {
 	(vscode.workspace.findFiles as any) = async () => [];
 	(vscode.workspace.openTextDocument as any) = async () => ({ getText: () => "" });
 	(vscode.workspace.fs.createDirectory as any) = async () => {};
+	(vscode.workspace.fs.readFile as any) = async () => new Uint8Array();
 	(vscode.workspace.fs.writeFile as any) = async () => {};
 	(vscode.workspace.onDidChangeConfiguration as any) = new (vscode.EventEmitter as any)().event;
 

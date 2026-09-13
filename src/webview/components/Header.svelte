@@ -26,6 +26,7 @@
     hasUpdates?: boolean;
     piUpdateAvailable?: string | null;
     packageUpdateCount?: number;
+    lightMode?: boolean;
   }
 
   let {
@@ -48,6 +49,7 @@
     hasUpdates = false,
     piUpdateAvailable = null,
     packageUpdateCount = 0,
+    lightMode = false,
   }: Props = $props();
 
   let showFavDropdown = $state(false);
@@ -131,6 +133,14 @@
         />
       </svg>
     </div>
+
+    {#if lightMode}
+      <span
+        class="light-mode-badge"
+        title="Light Mode is active: skills, extensions, packages, themes and auto context are disabled — tools restricted to read, bash, edit, write"
+        >Light</span
+      >
+    {/if}
 
     {#if currentModel}
       <div
@@ -359,6 +369,20 @@
     flex-shrink: 0;
     transition: all var(--transition-fast);
     cursor: default;
+  }
+
+  .light-mode-badge {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-warning);
+    background: color-mix(in oklch, var(--color-warning) 15%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-warning) 30%, transparent);
+    cursor: help;
   }
 
   .logo:hover {

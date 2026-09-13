@@ -22,6 +22,38 @@
     return new RegExp(`(${q})`, "gi");
   });
 
+  /** Fresh global copy of the shared search regex. Reusing one /g regex
+   *  across many replace() calls is safe, but a fresh copy guards against
+   *  lastIndex surprises when helpers run in loops. */
+  function freshSearchRegex(): RegExp | undefined {
+    if (!searchRegex) return undefined;
+    return new RegExp(
+      searchRegex.source,
+      searchRegex.flags.includes("g") ? searchRegex.flags : searchRegex.flags + "g",
+    );
+  }
+
+  /** Highlight matches in already-escaped text. Must run AFTER escapeHtml
+   *  so <mark> tags are not double-escaped. */
+  function highlightEscapedText(escaped: string): string {
+    const re = freshSearchRegex();
+    if (!re) return escaped;
+    return escaped.replace(re, '<mark class="search-highlight">$1</mark>');
+  }
+
+  /** Highlight matches in an HTML string without touching tags/attributes.
+   *  Used for tool-result HTML built from escaped segments. */
+  function highlightHtml(html: string): string {
+    const re = freshSearchRegex();
+    if (!re) return html;
+    return html
+      .split(/(<[^>]*>)/g)
+      .map((chunk, i) =>
+        i % 2 === 1 ? chunk : chunk.replace(re, '<mark class="search-highlight">$1</mark>'),
+      )
+      .join("");
+  }
+
   let thinkingExpanded = $state(false);
   let toolExpanded: Record<string, boolean> = $state({});
   let lightboxImage = $state<string | null>(null);
@@ -195,7 +227,9 @@
     const codeBlocks: string[] = [];
     // Match full info strings (same pattern as parseContent)
     let processed = md.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
-      codeBlocks.push(`<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+      codeBlocks.push(
+        `<pre class="md-code"><code>${highlightEscapedText(escapeHtml(code.trimEnd()))}</code></pre>`,
+      );
       return `\x00CODE${codeBlocks.length - 1}\x00`;
     });
 
@@ -587,7 +621,7 @@
           </div>
           {#if toolCall.status === "complete" && toolExpanded[toolCall.toolCallId]}
             <div class="tool-body">
-              {@html renderToolResult(toolCall)}
+              {@html highlightHtml(renderToolResult(toolCall))}
             </div>
           {:else if toolCall.status !== "complete"}
             <div class="tool-body tool-pending">
@@ -660,7 +694,7 @@
             /></svg
           >
         {/if}
-        <span>{message.content}</span>
+        <span>{@html highlightEscapedText(escapeHtml(message.content))}</span>
       </div>
     {:else}
       <div class="content-body">
@@ -701,7 +735,7 @@
             </button>
             {#if thinkingExpanded}
               <div class="thought-content">
-                {@html renderMarkdown(message.thinking)}
+                {@html renderMarkdown(message.thinking, searchRegex)}
               </div>
             {/if}
           </div>
@@ -806,7 +840,9 @@
                     </button>
                   </div>
                 </div>
-                <pre class="language-{part.language}"><code>{part.code}</code></pre>
+                <pre class="language-{part.language}"><code
+                    >{@html highlightEscapedText(escapeHtml(part.code))}</code
+                  ></pre>
               </div>
             {/if}
           {/each}

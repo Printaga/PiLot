@@ -1,5 +1,11 @@
 import * as assert from "assert";
-import { extractTextFromMessage, generateSessionName } from "../../../session-manager.js";
+import {
+	displaySessionLabel,
+	extractTextFromMessage,
+	generateSessionName,
+	isAutoContextDerivedName,
+	stripAutoContextPreamble,
+} from "../../../session-manager.js";
 
 suite("Session naming helpers", () => {
 	test("extractTextFromMessage joins text blocks", () => {
@@ -37,5 +43,37 @@ suite("Session naming helpers", () => {
 		const name = generateSessionName("debug session naming bug", "");
 
 		assert.strictEqual(name, "Debug session naming bug");
+	});
+
+	test("generateSessionName strips the auto-context preamble", () => {
+		const polluted =
+			"Project Root: /home/lenovo/Development/PiLot\n" +
+			"Project Name: pilots-studio\n" +
+			"Project Version: 2.5.0\n\n" +
+			"When starting a new chat, name the session properly";
+		const name = generateSessionName(polluted, "");
+
+		assert.strictEqual(name, "When starting a new chat, name the session properly");
+	});
+
+	test("stripAutoContextPreamble leaves plain messages untouched", () => {
+		assert.strictEqual(stripAutoContextPreamble("fix the login bug"), "fix the login bug");
+	});
+
+	test("isAutoContextDerivedName detects preamble junk", () => {
+		assert.strictEqual(isAutoContextDerivedName("Project Root: /home/lenovo"), true);
+		assert.strictEqual(isAutoContextDerivedName("Fix the login bug"), false);
+		assert.strictEqual(isAutoContextDerivedName(undefined), false);
+	});
+
+	test("displaySessionLabel falls back when name is preamble junk", () => {
+		assert.strictEqual(
+			displaySessionLabel(
+				"Project Root: /home/lenovo/Development/PiLot",
+				"Project Root: /home/lenovo/Development/PiLot\nProject Name: x\n\nfix login",
+			),
+			"fix login",
+		);
+		assert.strictEqual(displaySessionLabel("Real name", "whatever"), "Real name");
 	});
 });

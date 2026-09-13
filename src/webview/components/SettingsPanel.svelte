@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { OpenConfigFileKey } from "../types/index";
   import HelpTooltip from "./HelpTooltip.svelte";
 
   interface Props {
@@ -64,11 +65,52 @@
     window.dispatchEvent(new CustomEvent("show-tour"));
   }
 
-  function openConfigFile(file: "auth" | "models" | "settings") {
+  function openConfigFile(file: OpenConfigFileKey) {
     if (typeof (window as any).vscode?.postMessage === "function") {
       (window as any).vscode.postMessage({ type: "openConfigFile", data: { file } });
     }
   }
+
+  // PI ignores SYSTEM.md / APPEND_SYSTEM.md while pi-agent.systemPrompt or
+  // pi-agent.appendSystemPrompts are set, so surface that here (same
+  // self-fetch pattern as SkillsPanel).
+  let systemPromptOverrides = $state({ systemPrompt: false, appendSystemPrompts: false });
+
+  function getVsCodeApi() {
+    const existing = (window as any).vscode;
+    if (existing?.postMessage) return existing;
+    if (typeof (window as any).acquireVsCodeApi === "function") {
+      const vscode = (window as any).acquireVsCodeApi();
+      (window as any).vscode = vscode;
+      return vscode;
+    }
+    return null;
+  }
+
+  $effect(() => {
+    const vscode = getVsCodeApi();
+    if (!vscode) return;
+
+    function handleOverridesMessage(event: MessageEvent) {
+      const { type, data } = event.data || {};
+      if (type === "system-prompt-overrides-changed") {
+        systemPromptOverrides = {
+          systemPrompt: data?.systemPrompt === true,
+          appendSystemPrompts: data?.appendSystemPrompts === true,
+        };
+      }
+    }
+    window.addEventListener("message", handleOverridesMessage);
+    vscode.postMessage({ type: "getSystemPromptOverrides" });
+    return () => window.removeEventListener("message", handleOverridesMessage);
+  });
+
+  const overridingSettingNames = $derived.by(() => {
+    const names: string[] = [];
+    if (systemPromptOverrides.systemPrompt) names.push("pi-agent.systemPrompt");
+    if (systemPromptOverrides.appendSystemPrompts) names.push("pi-agent.appendSystemPrompts");
+    return names;
+  });
 </script>
 
 <div class="settings-panel">
@@ -105,16 +147,23 @@
           <div class="setting-label-row">
             <span class="setting-label">Auto Context</span>
             <HelpTooltip
-              text="When enabled, automatically includes project context (package.json, git info, tsconfig) in every prompt to give the AI better awareness of your project setup."
+              text="When enabled, automatically includes project context (package.json, git info, tsconfig) in every prompt to give the AI better awareness of your project setup. Forced off while Light Mode is on — every attached token consumes RAM/VRAM a local LLM needs. Your preference is restored when Light Mode is switched off."
               title="Auto Context"
             />
           </div>
           <span class="setting-description">
             Automatically include project context in prompts
+            {#if lightMode}<em class="forced-off-note"> — off in Light Mode</em>{/if}
           </span>
         </div>
         <label class="toggle">
-          <input type="checkbox" checked={autoContext} onchange={handleAutoContextChange} />
+          <input
+            type="checkbox"
+            checked={autoContext}
+            onchange={handleAutoContextChange}
+            disabled={lightMode}
+            title={lightMode ? "Auto context is off while Light Mode is enabled" : undefined}
+          />
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -124,12 +173,13 @@
           <div class="setting-label-row">
             <span class="setting-label">Light Mode (local LLMs)</span>
             <HelpTooltip
-              text="Runs pi in a reduced mode ideal for local models (e.g. via llama.cpp). Equivalent to: pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write — the tool restriction applies while the tool preset is 'default' (explicit presets like review or custom keep their behavior). Disables discovery of skills, extensions, context files, prompt templates and themes. The current session restarts with its history preserved."
+              text="Runs pi in a reduced mode ideal for local models (e.g. via llama.cpp). Equivalent to: pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write — the tool restriction applies while the tool preset is 'default' (explicit presets like review or custom keep their behavior). Disables discovery of skills, extensions, context files, prompt templates and themes, and turns Auto Context off (restored when Light Mode is switched off). The current session restarts with its history preserved."
               title="Light Mode"
             />
           </div>
           <span class="setting-description">
-            Minimal runtime: no discovered resources, core tools only
+            {#if lightMode}Active — skills, packages and auto context are disabled{:else}Minimal
+              runtime: no discovered resources, core tools only{/if}
           </span>
         </div>
         <label class="toggle">
@@ -250,6 +300,27 @@
           Open models.json
         </button>
       </div>
+      <p class="section-description" style="margin-top: var(--space-3);">
+        Customize PI's system prompt. Applies to new sessions.
+      </p>
+      <div class="config-files">
+        <button class="config-btn" onclick={() => openConfigFile("system-prompt")}>
+          Open SYSTEM.md
+        </button>
+        <button class="config-btn" onclick={() => openConfigFile("append-system-prompt")}>
+          Open APPEND_SYSTEM.md
+        </button>
+      </div>
+      <p class="config-hint">
+        SYSTEM.md replaces PI's default system prompt; APPEND_SYSTEM.md appends to it. Files live in
+        PI's agent directory (default ~/.pi/agent).
+      </p>
+      {#if overridingSettingNames.length > 0}
+        <p class="system-prompt-warning" role="alert">
+          Overridden by {overridingSettingNames.join(" and ")}: SYSTEM.md and APPEND_SYSTEM.md are
+          ignored for new sessions until cleared in VS Code settings.
+        </p>
+      {/if}
     </section>
 
     <section class="settings-section">
@@ -390,6 +461,12 @@
     color: var(--color-text-muted);
   }
 
+  .forced-off-note {
+    font-style: normal;
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+  }
+
   .toggle {
     position: relative;
     display: inline-block;
@@ -505,6 +582,18 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
+  }
+
+  .config-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-top: var(--space-2);
+  }
+
+  .system-prompt-warning {
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+    margin-top: var(--space-2);
   }
 
   .config-btn {

@@ -127,6 +127,7 @@
       vscode.postMessage({ type: "ready" });
       vscode.postMessage({ type: "getPiUISettings" });
       vscode.postMessage({ type: "getLightMode" });
+      vscode.postMessage({ type: "getAutoContext" });
 
       return () => {
         window.removeEventListener("message", handleVSCodeMessage);
@@ -358,7 +359,27 @@
 
       case "light-mode-changed":
         if (typeof data?.enabled === "boolean") {
+          // Toast only on a real state change — not on the initial sync that
+          // replays the persisted state when the panel opens.
+          const changed = lightMode !== data.enabled;
           lightMode = data.enabled;
+          if (!changed) break;
+          // Make the runtime switch visible instead of magical: the session
+          // restarts under the hood, so say so.
+          showToast({
+            type: data.enabled ? "info" : "success",
+            title: data.enabled ? "Light Mode enabled" : "Light Mode disabled",
+            message: data.enabled
+              ? "Skills, extensions, packages, themes and auto context are disabled; the session restarted with its history kept."
+              : "Skills, extensions and packages are available again; the session restarted with its history kept.",
+            duration: 6000,
+          });
+        }
+        break;
+
+      case "auto-context-changed":
+        if (typeof data?.enabled === "boolean") {
+          autoContext = data.enabled;
         }
         break;
 
@@ -387,6 +408,16 @@
         }
         break;
       }
+
+      case "focus-search":
+        activeTab = "chat";
+        searchRequestTick++;
+        break;
+
+      case "focus-input":
+        activeTab = "chat";
+        focusInputRequestTick++;
+        break;
 
       case "error":
         isStreaming = false;
@@ -1018,6 +1049,12 @@
 
   let editRequestIndex = $state<number | null>(null);
 
+  // Incremented by the extension host to open chat search (Ctrl+F bridge) or
+  // focus the chat input. Passed to ChatPanel so the request survives a tab
+  // switch (ChatPanel may mount after the message arrives).
+  let searchRequestTick = $state(0);
+  let focusInputRequestTick = $state(0);
+
   function handleEditMessage(index: number, newText: string) {
     // Update local state immediately
     messages = messages.map((msg, i) => {
@@ -1134,6 +1171,7 @@
     {appVersion}
     {currentModel}
     modelName={getModelDisplay(currentModel)}
+    {lightMode}
     {piCliVersion}
     providerName={currentModel?.split("/")[0] || ""}
     {thinkingLevel}
@@ -1327,6 +1365,8 @@
           {autoCompaction}
           onCompact={handleCompact}
           {editRequestIndex}
+          {searchRequestTick}
+          {focusInputRequestTick}
           onEditMessage={handleEditMessage}
           onForkMessage={handleForkMessage}
           onShowExport={() => (showExport = true)}
@@ -1355,9 +1395,9 @@
       {:else if activeTab === "tools"}
         <ToolsPanel {toolPreset} />
       {:else if activeTab === "packages"}
-        <PiPackagesPanel />
+        <PiPackagesPanel {lightMode} />
       {:else if activeTab === "skills"}
-        <SkillsPanel {sessionResources} />
+        <SkillsPanel {sessionResources} {lightMode} />
       {:else}
         <SettingsPanel
           {autoContext}

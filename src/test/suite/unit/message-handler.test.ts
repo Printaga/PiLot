@@ -89,6 +89,10 @@ function createMockProvider(): {
 		editMessage: () => undefined,
 		getSkillDiscovery: () => false,
 		setSkillDiscovery: () => undefined,
+		getSystemPromptOverrides: () => ({
+			systemPrompt: false,
+			appendSystemPrompts: false,
+		}),
 		setExtraSkillPaths: () => undefined,
 		getExtraSkillPaths: () => [],
 		sendSkillsList: () => undefined,
@@ -730,6 +734,27 @@ suite("MessageHandler", () => {
 		const msg = webviewMessages.find((m: any) => m.type === "skill-discovery-changed");
 		assert.ok(msg);
 		assert.strictEqual(msg.data.enabled, true);
+	});
+
+	test("getSystemPromptOverrides - sends system-prompt-overrides-changed", async () => {
+		provider.getSystemPromptOverrides = () => ({
+			systemPrompt: true,
+			appendSystemPrompts: false,
+		});
+		const result = await handler.handle({
+			type: "getSystemPromptOverrides",
+			data: {},
+		});
+		assert.deepStrictEqual(result, {
+			systemPrompt: true,
+			appendSystemPrompts: false,
+		});
+		const msg = webviewMessages.find((m: any) => m.type === "system-prompt-overrides-changed");
+		assert.ok(msg);
+		assert.deepStrictEqual(msg.data, {
+			systemPrompt: true,
+			appendSystemPrompts: false,
+		});
 	});
 
 	test("setSkillDiscovery - returns success", async () => {
@@ -1442,6 +1467,15 @@ suite("MessageHandler", () => {
 			data: { file: "models" },
 		});
 		assert.deepStrictEqual(provider.calls.openConfigFile[0], ["models"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("openConfigFile routes system-prompt file", async () => {
+		const result = await handler.handle({
+			type: "openConfigFile",
+			data: { file: "system-prompt" },
+		});
+		assert.deepStrictEqual(provider.calls.openConfigFile[0], ["system-prompt"]);
 		assert.strictEqual(result.success, true);
 	});
 

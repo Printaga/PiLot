@@ -74,6 +74,47 @@ export function extractTextFromMessage(msg: {
 }
 
 /**
+ * Lines injected by the extension's auto-context preamble
+ * (see SessionResources.getProjectContext). They are metadata, not the
+ * user's actual request, and must never leak into session titles.
+ */
+export function stripAutoContextPreamble(text: string): string {
+	const lines = text.split("\n");
+	let i = 0;
+	let stripped = false;
+	for (; i < lines.length; i++) {
+		const trimmed = lines[i].trim();
+		if (trimmed === "") {
+			if (stripped) continue; // skip blank lines inside/after preamble
+			break; // leading blank line with no preamble seen — keep rest
+		}
+		if (/^project\s+(root|name|version)\s*:/i.test(trimmed)) {
+			stripped = true;
+			continue;
+		}
+		break;
+	}
+	if (!stripped) return text;
+	return lines.slice(i).join("\n").trimStart();
+}
+
+/** True when a session name was derived from the auto-context preamble. */
+export function isAutoContextDerivedName(name: string | undefined | null): boolean {
+	if (!name) return false;
+	return /^project\s+(root|name|version)\s*:/i.test(name.trim());
+}
+
+/** Display label: real names win; junk auto-context names fall back to first message. */
+export function displaySessionLabel(
+	name: string | undefined,
+	firstMessage: string | undefined,
+): string {
+	if (name && !isAutoContextDerivedName(name)) return name;
+	const stripped = stripAutoContextPreamble(firstMessage || "").slice(0, 60);
+	return stripped || name || "Untitled";
+}
+
+/**
  * Generate a concise, descriptive session name (≤60 chars) from the first
  * user and assistant messages in a conversation.
  *
@@ -101,7 +142,9 @@ export function generateSessionName(userText: string, assistantText: string): st
 	};
 
 	const cleanAssistant = clean(assistantText);
-	const cleanUser = clean(userText);
+	// The stored user message includes the auto-context preamble
+	// ("Project Root: ..."), so strip it before deriving a title.
+	const cleanUser = clean(stripAutoContextPreamble(userText));
 
 	// 1 — Try the assistant's first substantive line (best signal)
 	if (cleanAssistant) {
@@ -177,9 +220,14 @@ export class SessionListManager {
 		return this._sessionListFullCache;
 	}
 
+	/** Raw user text for the in-flight prompt (without auto-context preamble). */
+	pendingUserText?: string;
+
 	tryAutoSessionName(): boolean {
 		const session = this.deps.getSession();
-		if (!session || session.sessionName) return false;
+		// A junk auto-context name may be overwritten with a better one.
+		if (!session) return false;
+		if (session.sessionName && !isAutoContextDerivedName(session.sessionName)) return false;
 
 		const messages = session.messages;
 		const firstUserMsg = messages.find((m) => m.role === "user");
@@ -205,9 +253,15 @@ export class SessionListManager {
 		content: string | Array<{ type: string; text?: string }> | null;
 	}): boolean {
 		const session = this.deps.getSession();
-		if (!session || session.sessionName) return false;
+		if (!session) return false;
+		if (session.sessionName && !isAutoContextDerivedName(session.sessionName)) return false;
 
-		const userText = extractTextFromMessage(userMessage);
+		// Prefer the raw prompt text stashed by prompt() — the persisted
+		// message has the auto-context preamble prepended.
+		const rawPending = this.pendingUserText?.trim();
+		this.pendingUserText = undefined;
+		const userText =
+			rawPending || stripAutoContextPreamble(extractTextFromMessage(userMessage));
 		if (!userText) return false;
 
 		const name = generateSessionName(userText, "");
@@ -237,7 +291,7 @@ export class SessionListManager {
 			// Cache full info for internal use (includes file path)
 			this._sessionListFullCache = sessions.map((s) => ({
 				id: s.id,
-				label: s.name || s.firstMessage.slice(0, 60) || "Untitled",
+				label: displaySessionLabel(s.name, s.firstMessage),
 				timestamp: s.modified.getTime(),
 				messageCount: s.messageCount,
 				path: s.path,

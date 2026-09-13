@@ -55,6 +55,11 @@ function installVscodeFacade(): void {
 		((globalThis as any).__vscodeFacade as Record<string, any> | undefined) ?? {};
 	const isPlainObject = (v: any): boolean =>
 		!!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+	// A frozen plain object cannot take mock writes either. VS Code 1.137 ships
+	// workspace.fs as exactly that (frozen, Object.prototype), so treat any
+	// non-extensible value as a real namespace: never copy it onto the facade
+	// by reference, always replace it with a fresh object.
+	const isMockable = (v: any): boolean => isPlainObject(v) && Object.isExtensible(v);
 	// Nested API namespaces are composed explicitly below; copying them here
 	// would put the REAL frozen namespaces (getter-only props on newer VS Code)
 	// on the facade and break every mock assignment.
@@ -82,7 +87,7 @@ function installVscodeFacade(): void {
 			const isCtor = typeof value === "function" && value.prototype?.constructor === value;
 			// Skip nested API namespaces (e.g. workspace.fs): they are composed
 			// explicitly and copying the real frozen namespace breaks mocks.
-			if (!isCtor && typeof value === "object" && !isPlainObject(value)) {
+			if (!isCtor && typeof value === "object" && !isMockable(value)) {
 				continue;
 			}
 			const assigned =
@@ -99,16 +104,16 @@ function installVscodeFacade(): void {
 	};
 	assignProps(facade, real, false);
 	const ensureObj = (parent: any, name: string): any => {
-		// Never keep a non-plain object (e.g. the real frozen API namespace):
-		// mocks must be able to assign arbitrary props on it.
-		if (!isPlainObject(parent[name])) {
+		// Never keep a real namespace (non-plain, or frozen like VS Code 1.137's
+		// workspace.fs): mocks must be able to assign arbitrary props on it.
+		if (!isMockable(parent[name])) {
 			try {
 				parent[name] = {};
 			} catch {
 				/* unreplaceable: fall through */
 			}
 		}
-		return isPlainObject(parent[name]) ? parent[name] : {};
+		return isMockable(parent[name]) ? parent[name] : {};
 	};
 	assignProps(ensureObj(facade, "window"), real.window, true);
 	const ws = ensureObj(facade, "workspace");

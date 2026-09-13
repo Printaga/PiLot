@@ -102,9 +102,23 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 	// Focus Input command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.focusInput", async () => {
+			if (provider.postToActiveEditorChatPanel("focus-input", {})) return;
 			await focusSidebar();
 			// Send message to webview to focus input
 			provider.notifyWebviewFromCommand("focus-input", {});
+		}),
+	);
+
+	// Search Chat History command — Ctrl+F is intercepted by VS Code before it
+	// reaches the webview, so this scoped keybinding (sidebar chat view or
+	// editor chat panel) bridges it into the webview's in-chat search bar.
+	// When an editor chat panel is focused the message goes there directly;
+	// falling back to the sidebar would yank focus out of the editor.
+	context.subscriptions.push(
+		vscode.commands.registerCommand("pi-agent.searchChat", async () => {
+			if (provider.postToActiveEditorChatPanel("focus-search", {})) return;
+			await focusSidebar();
+			provider.notifyWebviewFromCommand("focus-search", {});
 		}),
 	);
 
@@ -238,6 +252,44 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				logDiagnostics(`[Update Checker] Manual update check failed: ${err}`);
 				vscode.window.showErrorMessage("Failed to check for updates.");
 			}
+		}),
+	);
+
+	// Light Mode: palette toggle + status-bar indicator. Both drive the same
+	// config-update path as the webview toggle, so the extension.ts config
+	// listener performs the history-preserving session rebuild.
+	const lightModeStatusBar = vscode.window.createStatusBarItem(
+		vscode.StatusBarAlignment.Right,
+		50,
+	);
+	lightModeStatusBar.command = "pi-agent.toggleLightMode";
+	const syncLightModeStatusBar = () => {
+		if (provider.getLightMode()) {
+			lightModeStatusBar.text = "$(zap) PI Light";
+			lightModeStatusBar.tooltip =
+				"Light Mode active: skills, extensions, packages, themes and auto context are disabled. Click to turn off.";
+			lightModeStatusBar.show();
+		} else {
+			lightModeStatusBar.text = "";
+			lightModeStatusBar.hide();
+		}
+	};
+	syncLightModeStatusBar();
+	context.subscriptions.push(lightModeStatusBar);
+
+	// The config is the single source of truth: re-sync on ANY light-mode
+	// change (palette, webview toggle, or the VS Code settings UI).
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			if (e.affectsConfiguration("pi-agent.lightMode")) {
+				syncLightModeStatusBar();
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("pi-agent.toggleLightMode", async () => {
+			await provider.setLightMode(!provider.getLightMode());
 		}),
 	);
 

@@ -21,7 +21,21 @@
     skills: Array<{ name: string; description: string }>;
     extensions: Array<{ path: string; sourceName: string | null }>;
     prompts: Array<{ name: string; description: string }>;
+    local?: boolean;
   }
+
+  function displayPackageName(pkg: InstalledPackage): string {
+    if (pkg.local || pkg.source.toLowerCase().startsWith("local:")) {
+      const scope = pkg.source.split(":")[1]?.toLowerCase();
+      if (scope === "user") return "Local (user)";
+      if (scope === "project") return "Local (project)";
+      return "Local";
+    }
+    return pkg.source.replace(/^npm:|^github:|^http/i, "");
+  }
+
+  // Props — lightMode reflects the runtime's light mode state
+  let { lightMode = false }: { lightMode?: boolean } = $props();
 
   // State
   let activeTab = $state<"installed" | "available">("installed");
@@ -64,7 +78,24 @@
 
   // Check if package is installed
   function isInstalled(name: string): boolean {
-    return installedPackages.some((p) => p.source.toLowerCase().includes(name.toLowerCase()));
+    return installedPackages.some(
+      (p) =>
+        !p.local &&
+        !p.source.toLowerCase().startsWith("local:") &&
+        p.source.toLowerCase().includes(name.toLowerCase()),
+    );
+  }
+
+  function matchesInstalledQuery(pkg: InstalledPackage, q: string): boolean {
+    const query = q.toLowerCase();
+    if (!query) return true;
+    if (pkg.source.toLowerCase().includes(query)) return true;
+    if (displayPackageName(pkg).toLowerCase().includes(query)) return true;
+    if (pkg.path?.toLowerCase().includes(query)) return true;
+    if (pkg.skills?.some((s) => s.name.toLowerCase().includes(query))) return true;
+    if (pkg.prompts?.some((p) => p.name.toLowerCase().includes(query))) return true;
+    if (pkg.extensions?.some((e) => e.path.toLowerCase().includes(query))) return true;
+    return false;
   }
 
   function getVsCodeApi() {
@@ -230,6 +261,13 @@
 </script>
 
 <div class="packages-panel">
+  {#if lightMode}
+    <div class="light-mode-banner">
+      <strong>Light Mode is on.</strong> Package management is disabled — installed packages' skills,
+      extensions and prompts don't load while Light Mode is active. Turn it off in Settings.
+    </div>
+  {/if}
+
   <div class="tab-nav">
     <button
       class="tab-btn"
@@ -261,12 +299,10 @@
           />
           <button class="refresh-btn" onclick={refreshInstalled} title="Refresh">↻</button>
         </div>
-        {#each installedPackages.filter((p) => p.source
-            .toLowerCase()
-            .includes(installedQuery.toLowerCase())) as pkg (pkg.source)}
+        {#each installedPackages.filter( (p) => matchesInstalledQuery(p, installedQuery) ) as pkg (pkg.source)}
           <div class="package-card installed">
             <div class="package-header">
-              <span class="package-name">{pkg.source.replace(/^npm:|^github:|^http/i, "")}</span>
+              <span class="package-name" title={pkg.source}>{displayPackageName(pkg)}</span>
               {#if pkg.types?.length > 0}
                 <div class="package-badges">
                   {#each pkg.types as type (type)}
@@ -313,9 +349,9 @@
             {#if pkg.extensions?.length > 0}
               <div class="package-resources">
                 <span class="resources-label">Extensions:</span>
-                {#each pkg.extensions as ext (ext.sourceName || ext.path)}
-                  <span class="resource-item"
-                    >{ext.sourceName || ext.path.split("/").pop() || "extension"}</span
+                {#each pkg.extensions as ext (ext.path)}
+                  <span class="resource-item" title={ext.path}
+                    >{ext.path.split("/").pop() || ext.sourceName || "extension"}</span
                   >
                 {/each}
               </div>
@@ -329,8 +365,15 @@
               </div>
             {/if}
             <div class="package-actions">
-              <button class="uninstall-btn" onclick={() => removePackage(pkg.source)}>Remove</button
-              >
+              {#if pkg.local || pkg.source.toLowerCase().startsWith("local:")}
+                <span class="meta-item"
+                  >Managed manually — edit files in {pkg.path || "agent extensions dir"}</span
+                >
+              {:else}
+                <button class="uninstall-btn" onclick={() => removePackage(pkg.source)}
+                  >Remove</button
+                >
+              {/if}
             </div>
           </div>
         {/each}
@@ -450,6 +493,18 @@
     height: 100%;
     padding: var(--space-4);
     overflow-y: hidden;
+  }
+
+  .light-mode-banner {
+    padding: var(--space-3);
+    background: color-mix(in oklch, var(--color-warning) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-warning) 30%, transparent);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    margin-bottom: var(--space-3);
+    line-height: 1.4;
+    flex-shrink: 0;
   }
 
   .tab-nav {
