@@ -84,14 +84,21 @@
 				<div class="setting-info">
 					<div class="setting-label-row">
 						<span class="setting-label">Auto Context</span>
-						<HelpTooltip text="When enabled, automatically includes project context (package.json, git info, tsconfig) in every prompt to give the AI better awareness of your project setup." title="Auto Context" />
+						<HelpTooltip text="When enabled, automatically includes project context (package.json, git info, tsconfig) in every prompt to give the AI better awareness of your project setup. Forced off while Light Mode is on — every attached token consumes RAM/VRAM a local LLM needs. Your preference is restored when Light Mode is switched off." title="Auto Context" />
 					</div>
 					<span class="setting-description">
 						Automatically include project context in prompts
+						{#if lightMode}<em class="forced-off-note"> — off in Light Mode</em>{/if}
 					</span>
 				</div>
 				<label class="toggle">
-					<input type="checkbox" checked={autoContext} onchange={handleAutoContextChange} />
+					<input
+						type="checkbox"
+						checked={autoContext}
+						onchange={handleAutoContextChange}
+						disabled={lightMode}
+						title={lightMode ? "Auto context is off while Light Mode is enabled" : undefined}
+					/>
 					<span class="toggle-slider"></span>
 				</label>
 			</div>
@@ -100,10 +107,10 @@
 				<div class="setting-info">
 					<div class="setting-label-row">
 						<span class="setting-label">Light Mode (local LLMs)</span>
-						<HelpTooltip text="Runs pi in a reduced mode ideal for local models (e.g. via llama.cpp). Equivalent to: pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write — the tool restriction applies while the tool preset is 'default' (explicit presets like review or custom keep their behavior). Disables discovery of skills, extensions, context files, prompt templates and themes. The current session restarts with its history preserved." title="Light Mode" />
+						<HelpTooltip text="Runs pi in a reduced mode ideal for local models (e.g. via llama.cpp). Equivalent to: pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write — the tool restriction applies while the tool preset is 'default' (explicit presets like review or custom keep their behavior). Disables discovery of skills, extensions, context files, prompt templates and themes, and turns Auto Context off (restored when Light Mode is switched off). The current session restarts with its history preserved." title="Light Mode" />
 					</div>
 					<span class="setting-description">
-						Minimal runtime: no discovered resources, core tools only
+						{#if lightMode}Active — skills, packages and auto context are disabled{:else}Minimal runtime: no discovered resources, core tools only{/if}
 					</span>
 				</div>
 				<label class="toggle">
@@ -362,6 +369,12 @@
 	.setting-description {
 		font-size: var(--text-sm);
 		color: var(--color-text-muted);
+	}
+
+	.forced-off-note {
+		font-style: normal;
+		font-size: var(--text-xs);
+		color: var(--color-warning);
 	}
 
 	.toggle {

@@ -1,13 +1,7 @@
 - Slash command support for packages
-- System prompt display/extend/replace
 - Improve default prompt templates
 - Prompt auto-enhancement button
-- Fix session naming
 - Detect all custom tools
-- GUI rules management
-- Persistant chat expand
 - Session tabs
-- Diff view
-- Search chat history
-- Detect standalone packages
-- Pause packages (temp disable)
+- Pause packages and skills (temp disable)
+- OMP as backend support

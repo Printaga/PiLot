@@ -16,6 +16,8 @@ export type EnrichedPackage = InstalledPackage & {
 	skills: Array<{ name: string; description: string }>;
 	extensions: Array<{ path: string; sourceName: string | null }>;
 	prompts: Array<{ name: string; description: string }>;
+	/** True for synthetic local entries (e.g. local:user) that are not pi packages. */
+	local?: boolean;
 };
 type PackageSettingEntry = string | { source?: string };
 

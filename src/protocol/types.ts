@@ -135,6 +135,7 @@ export interface ProviderApi {
 			skills: Array<{ name: string; description: string }>;
 			extensions: Array<{ path: string; sourceName: string | null }>;
 			prompts: Array<{ name: string; description: string }>;
+			local?: boolean;
 		}>
 	>;
 	installPackage(source: string): Promise<void>;

@@ -2,11 +2,27 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [2.5.0] - 2026-09-12
 
 ### Added
 
 - **PI Light Mode** toggle (Settings → Agent Behavior, or the `pi-agent.lightMode` setting) for running pi in a reduced mode ideal for local LLMs via llama.cpp — equivalent to `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`. Overrides the individual discovery toggles and restricts tools to `read`, `bash`, `edit`, `write` when the tool preset is `default`; toggling restarts the current session with its history preserved.
+- **Toggle Light Mode** command (`pi-agent.toggleLightMode`) in the command palette, plus a `PI Light` status-bar indicator while active.
+- Light Mode is reflected across the UI: a `Light` header badge, banners in the Skills and Packages panels, and Auto Context is forced off (toggle disabled) while active — the user's preference is restored when Light Mode is switched off.
+- Add GUI buttons in settings to edit SYSTEM.md (replace the system prompt) and APPEND_SYSTEM (append to the system prompt)
+
+### Changed
+
+- Improved tooling for tests and verification in development
+
+### Fixed
+
+- Standalone .ts files in the PI extention folder were not detected as installed extensions
+- Auto naming of new sessions did not work reliably
+- GitHub reported 7 pre-existing Dependabot vulnerabilities on main (6 high, 1 moderate)
+- Search the current session chat (ctrl+F)
+
+
 
 ## [2.4.1] - 2026-09-08
 

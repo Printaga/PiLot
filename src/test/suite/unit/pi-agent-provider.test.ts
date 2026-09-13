@@ -666,10 +666,10 @@ suite("PiAgentProvider", () => {
 			};
 
 			/** Wait until the listener's async rebuild has created a new session. */
-			const waitForRebuild = async () => {
+			const waitForRebuild = async (min = 2) => {
 				for (
 					let i = 0;
-					i < 500 && createCalls.length < 2;
+					i < 500 && createCalls.length < min;
 					i++
 				) {
 					await new Promise((resolve) => setTimeout(resolve, 20));
@@ -754,7 +754,7 @@ suite("PiAgentProvider", () => {
 			assert.deepStrictEqual(
 				harness.errorToasts,
 				[],
-				"rebuild surfaced an error toast",
+				`rebuild surfaced error toasts: ${harness.errorToasts.join(" | ")}`,
 			);
 
 			// setLightMode persisted the config change…
@@ -904,6 +904,73 @@ suite("PiAgentProvider", () => {
 				"edit",
 				"write",
 			]);
+			harness.dispose();
+		});
+
+		test("auto context is forced off while light mode is on and the preference is restored on toggle-off", async () => {
+			// The user runs with auto context ON; light mode must override it
+			// without overwriting the stored preference.
+			const provider: any = buildProvider({ autoContext: true });
+			await stabilizeProvider(provider);
+			const handler = new MessageHandler(provider);
+
+			const config = new Map<string, any>([
+				["lightMode", false],
+				["toolPreset", "default"],
+			]);
+			const harness = installLiveApplyHarness(provider, {
+				config,
+				transcript: [{ role: "user", content: "hello" }],
+			});
+
+			await provider.createSession();
+			const posted = captureWebviewPosts(provider);
+
+			// Toggle ON: the toggle must snap off and the UI be re-synced.
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: true },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild();
+
+			assert.strictEqual(provider.getAutoContext(), false);
+			assert.strictEqual(
+				(provider as any).config.autoContext,
+				true,
+				"the user's auto-context preference must be preserved",
+			);
+			const acOn = posted.find((m) => m.type === "auto-context-changed");
+			assert.ok(
+				acOn,
+				"expected auto-context-changed after enabling light mode",
+			);
+			assert.strictEqual(
+				acOn.data.enabled,
+				false,
+				"webview must be told auto context is now off",
+			);
+
+			// Toggle OFF: the preference comes back automatically.
+			await handler.handle({
+				type: "setLightMode",
+				data: { enabled: false },
+			});
+			harness.fireConfigChange("lightMode");
+			await harness.waitForRebuild(3);
+
+			const acMsgs = posted.filter((m) => m.type === "auto-context-changed");
+			assert.ok(
+				acMsgs.length >= 2,
+				"expected auto-context-changed after disabling light mode",
+			);
+			const last = acMsgs[acMsgs.length - 1];
+			assert.strictEqual(
+				last.data.enabled,
+				true,
+				"auto context preference must be restored on toggle-off",
+			);			assert.strictEqual(provider.getAutoContext(), true);
+
 			harness.dispose();
 		});
 	});

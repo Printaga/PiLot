@@ -39,7 +39,11 @@ import {
 	THINKING_LEVELS,
 } from "./model-registry-handler.js";
 import { PackageManager } from "./package-manager.js";
-import { SessionListManager, type SessionItem } from "./session-manager.js";
+import {
+	SessionListManager,
+	type SessionItem,
+	isAutoContextDerivedName,
+} from "./session-manager.js";
 
 import { type EnrichedPackage } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
@@ -132,6 +136,10 @@ export class PiAgentProvider
 {
 	private _webview?: vscode.Webview;
 	private view?: vscode.WebviewView;
+	/** Editor-panel chat webviews (piChatEditor). Retained so commands can
+	 *  reach the active editor chat the same way notifyWebview reaches the
+	 *  sidebar — VS Code keybindings (e.g. Ctrl+F) fire per focused webview. */
+	private editorChatPanels = new Set<vscode.WebviewPanel>();
 	private session?: AgentSession;
 	// Cached update info for re-sending to webview on visibility change
 	private lastPiVersion: string | null = null;
@@ -933,6 +941,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async newSession() {
 		this.sessionListManager.autoNamingTriggered = false;
+		this.sessionListManager.pendingUserText = undefined;
 		await this.tearDownCurrentSession();
 		// Create a new session file on disk — resets the SessionManager state
 		// so createAgentSession starts fresh instead of continuing.
@@ -1111,6 +1120,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async switchSession(sessionId: string) {
 		this.sessionListManager.autoNamingTriggered = false;
+		this.sessionListManager.pendingUserText = undefined;
 		// Invalidate cache to get fresh session list
 		this.sessionListManager.invalidateSessionListCache();
 		// Find the session info from the list (use full cache for path)
@@ -1173,6 +1183,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 	async forkSession(entryId?: string) {
 		if (!this.session) return;
+		this.sessionListManager.pendingUserText = undefined;
 
 		const sm = this.session.sessionManager;
 		const currentSessionFile = sm.getSessionFile();
@@ -1422,11 +1433,19 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Resolve @file mentions to actual file content
 		const textWithFiles = await this.resolveFileMentions(text);
 
+		// Stash the raw user text for session auto-naming. The persisted
+		// message gets the auto-context preamble prepended below, which
+		// must not leak into the session title.
+		this.sessionListManager.pendingUserText = textWithFiles;
+
 		// Slash commands must arrive at session.prompt() starting with "/".
 		// PI SDK guards on text.startsWith("/") for skill/template/extension
 		// command expansion. Prepending auto-context would break that.
 		// Built-in slash commands are intercepted first by tryHandleBuiltinCommand.
 		if (textWithFiles.startsWith("/")) {
+			// Slash commands never produce a user chat message — drop the
+			// stashed naming text so it can't leak into the next title.
+			this.sessionListManager.pendingUserText = undefined;
 			const handled = await this.tryHandleBuiltinCommand(textWithFiles);
 			if (!handled) {
 				try {
@@ -1439,9 +1458,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			return;
 		}
 
-		const context = this.config.autoContext
-			? await this.getProjectContext()
-			: "";
+		// Light mode forces auto-context off: every attached token eats
+		// RAM/VRAM a local LLM needs for weights and KV cache.
+		const context =
+			this.config.autoContext && !this.getLightMode()
+				? await this.getProjectContext()
+				: "";
 		const fullPrompt = context
 			? `${context}\n\n${textWithFiles}`
 			: textWithFiles;
@@ -1849,12 +1871,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
+	/**
+	 * Effective auto-context: the user's preference, forced off while light
+	 * mode is on. The preference itself is kept untouched so it comes back
+	 * automatically when light mode is switched off.
+	 */
 	getAutoContext(): boolean {
-		return this.config.autoContext;
+		return this.config.autoContext && !this.getLightMode();
 	}
 
 	setAutoContext(enabled: boolean) {
 		this.config.autoContext = enabled;
+		// Echo the EFFECTIVE state: while light mode is on the toggle must
+		// snap back off instead of showing an unapplied preference.
+		this.notifyWebview({
+			type: "auto-context-changed",
+			data: { enabled: this.getAutoContext() },
+		});
 	}
 
 	async getAvailableModels() {
@@ -2756,12 +2789,15 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		// ── Session auto-naming flow ──────────────────
 		// Title the session on first user message (matching PI CLI behavior:
 		// first user message becomes the session display name immediately).
+		// A name derived from the auto-context preamble counts as unnamed
+		// so it can be replaced with the real request text.
 		if (
 			event.type === "message_start" &&
 			event.message?.role === "user" &&
 			!this.sessionListManager.autoNamingTriggered &&
 			this.session &&
-			!this.session.sessionName
+			(!this.session.sessionName ||
+				isAutoContextDerivedName(this.session.sessionName))
 		) {
 			this.logDebug(
 				"[PI] Auto-naming: first user message received, attempting to name session",
@@ -2778,13 +2814,17 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		}
 
 		// Also try to improve the name after the first assistant response,
-		// but only if we didn't already set a name from the user message.
+		// but only if we didn't already set a real name from the user message.
+		// A junk auto-context name is always eligible for replacement.
 		if (
 			event.type === "agent_end" &&
 			!event.willRetry &&
-			!this.sessionListManager.autoNamingTriggered &&
 			this.session &&
-			!this.session.sessionName
+			(!this.session.sessionName ||
+				isAutoContextDerivedName(this.session.sessionName)) &&
+			(!this.sessionListManager.autoNamingTriggered ||
+				(this.session.sessionName !== undefined &&
+					isAutoContextDerivedName(this.session.sessionName)))
 		) {
 			this.logDebug(
 				"[PI] Auto-naming: agent response complete, attempting to improve session name",
@@ -3154,9 +3194,15 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 				},
 			});
 			await this.sendSessionResources();
+			// Re-sync the runtime state the webview reflects: light mode itself
+			// plus the auto-context toggle it forces off (and restores on exit).
 			this.notifyWebview({
 				type: "light-mode-changed",
 				data: { enabled: this.getLightMode() },
+			});
+			this.notifyWebview({
+				type: "auto-context-changed",
+				data: { enabled: this.getAutoContext() },
 			});
 			this._onDidChangeTreeData.fire();
 		} catch (e) {
@@ -3219,6 +3265,10 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		panel.webview.onDidReceiveMessage(
 			this.messageHandler.handle.bind(this.messageHandler),
 		);
+		this.editorChatPanels.add(panel);
+		panel.onDidDispose(() => {
+			this.editorChatPanels.delete(panel);
+		});
 	}
 
 	async openCurrentSessionInEditor() {
@@ -3274,6 +3324,19 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	// Public method for commands to notify webview
 	notifyWebviewFromCommand(type: string, data?: unknown) {
 		this.notifyWebview({ type, data });
+	}
+
+	/** Post a command message to the focused editor chat panel, if any.
+	 *  Returns true when handled so callers can skip the sidebar fallback
+	 *  (which would yank focus out of the editor panel). */
+	postToActiveEditorChatPanel(type: string, data?: unknown): boolean {
+		for (const panel of this.editorChatPanels) {
+			if (panel.active) {
+				void panel.webview.postMessage({ type, data });
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// Voice Capture Methods — delegated to VoiceManager

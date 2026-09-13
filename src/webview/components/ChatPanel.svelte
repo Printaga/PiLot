@@ -85,6 +85,8 @@
     contextTokens?: number | null;
     contextWindow?: number;
     editRequestIndex?: number | null;
+    searchRequestTick?: number;
+    focusInputRequestTick?: number;
     autoCompaction?: boolean;
     onCompact?: () => void;
     onEditMessage?: (index: number, newText: string) => void;
@@ -103,6 +105,8 @@
 
   let {
     editRequestIndex = null,
+    searchRequestTick = 0,
+    focusInputRequestTick = 0,
     messages,
     isStreaming,
     onSend,
@@ -208,10 +212,42 @@
       .slice(0, 20);
   });
 
-  // Chat search state
+  // Chat search state (Ctrl+F; bridged from VS Code via `focus-search` since
+  // VS Code intercepts Ctrl+F before it reaches the webview).
   let searchQuery = $state("");
   let showSearch = $state(false);
   let currentSearchIdx = $state(0);
+  let searchInputEl = $state<HTMLInputElement | null>(null);
+
+  function openSearch() {
+    showSearch = true;
+    tick().then(() => searchInputEl?.focus());
+  }
+
+  function closeSearch() {
+    showSearch = false;
+    searchQuery = "";
+  }
+
+  function toggleSearch() {
+    if (showSearch) closeSearch();
+    else openSearch();
+  }
+
+  function focusChatInput() {
+    tick().then(() => textareaEl?.focus());
+  }
+
+  // Extension-host bridge: `pi-agent.searchChat` / `pi-agent.focusInput`.
+  // A prop counter (not a bare window message) survives tab switches where
+  // ChatPanel mounts after the message was posted.
+  $effect(() => {
+    if (searchRequestTick > 0) openSearch();
+  });
+
+  $effect(() => {
+    if (focusInputRequestTick > 0) focusChatInput();
+  });
 
   // Message editing state (Feature 7)
   let editingMessageIndex = $state<number | null>(null);
@@ -313,6 +349,8 @@
       const { type, data } = event.data;
       if (type === "add-file-to-chat") addPathToInput(data.path);
       if (type === "workspace-files") files = data.files || [];
+      if (type === "focus-search") openSearch();
+      if (type === "focus-input") focusChatInput();
       if (type === "files-attached") {
         if (data?.paths && data.paths.length > 0) {
           const cursorPos = textareaEl?.selectionStart || inputText.length;
@@ -357,6 +395,29 @@
   $effect(() => {
     if (!textareaEl) return;
     lastAutoTextareaHeight = textareaEl.getBoundingClientRect().height;
+  });
+
+  // Window-level fallback so Ctrl+F works when focus is outside the chat
+  // panel (e.g. header buttons). Skips events already handled (div/textarea
+  // handlers call preventDefault first, and the VS Code `searchChat` command
+  // bridges the case where VS Code swallows Ctrl+F entirely).
+  $effect(() => {
+    function handleWindowKeydown(e: KeyboardEvent) {
+      const isF = (e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F");
+      if (isF) {
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        toggleSearch();
+        return;
+      }
+      if (showSearch && e.key === "F3" && !e.defaultPrevented) {
+        e.preventDefault();
+        if (e.shiftKey) goToPrevMatch();
+        else goToNextMatch();
+      }
+    }
+    window.addEventListener("keydown", handleWindowKeydown);
+    return () => window.removeEventListener("keydown", handleWindowKeydown);
   });
 
   function handleSubmit() {
@@ -409,19 +470,13 @@
   }
 
   function focusSearchInput() {
-    requestAnimationFrame(() => {
-      const si =
-        messagesContainer?.querySelector<HTMLInputElement>(".search-input");
-      si?.focus();
-    });
+    tick().then(() => searchInputEl?.focus());
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
       e.preventDefault();
-      showSearch = !showSearch;
-      if (!showSearch) searchQuery = "";
-      if (showSearch) focusSearchInput();
+      toggleSearch();
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -487,12 +542,41 @@
   function handleGlobalKeydown(e: KeyboardEvent) {
     // Ignore keydowns from the textarea (handled by handleKeydown)
     if (e.target === textareaEl) return;
-    if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
       e.preventDefault();
-      showSearch = !showSearch;
-      if (!showSearch) searchQuery = "";
-      if (showSearch) focusSearchInput();
+      // Ctrl+F while already in the search box keeps it open (refocus).
+      if (showSearch && e.target === searchInputEl) {
+        searchInputEl?.select();
+        return;
+      }
+      toggleSearch();
     }
+    // F3 navigates matches when search is open (Shift+F3 = previous).
+    if (showSearch && e.key === "F3") {
+      e.preventDefault();
+      if (e.shiftKey) goToPrevMatch();
+      else goToNextMatch();
+    }
+  }
+
+  /** Searchable text for one message: user input + AI output + thinking +
+   *  tool names/args/results + provider labels. Covers the whole visible
+   *  history, not just `content`. */
+  function getMessageHaystack(m: Message): string {
+    const parts: string[] = [];
+    if (typeof m.content === "string" && m.content) parts.push(m.content);
+    if (typeof m.thinking === "string" && m.thinking) parts.push(m.thinking);
+    if (typeof m.label === "string" && m.label) parts.push(m.label);
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) {
+        if (tc.toolName) parts.push(tc.toolName);
+        try {
+          if (tc.args) parts.push(JSON.stringify(tc.args));
+        } catch {}
+        if (tc.result?.content) parts.push(tc.result.content);
+      }
+    }
+    return parts.join("\n");
   }
 
   const searchResults = $derived.by(() => {
@@ -500,8 +584,14 @@
     const q = searchQuery.toLowerCase();
     return messages
       .map((m, i) => ({ index: i, message: m }))
-      .filter(({ message }) => message.content.toLowerCase().includes(q));
+      .filter(({ message }) => getMessageHaystack(message).toLowerCase().includes(q));
   });
+
+  const currentMatchIndex = $derived(
+    searchResults.length > 0
+      ? (searchResults[Math.min(currentSearchIdx, searchResults.length - 1)]?.index ?? -1)
+      : -1,
+  );
 
   // Reset search nav index when query changes
   $effect(() => {
@@ -509,17 +599,53 @@
     currentSearchIdx = 0;
   });
 
+  // Auto-scroll to the first match as the user types.
+  $effect(() => {
+    const idx = currentMatchIndex;
+    if (showSearch && searchQuery.trim() && idx >= 0) {
+      scrollToMatch(idx);
+    }
+  });
+
   function goToNextMatch() {
-    if (searchResults.length <= 1) return;
+    if (searchResults.length === 0) return;
+    if (searchResults.length === 1) {
+      scrollToMatch(searchResults[0].index);
+      return;
+    }
     currentSearchIdx = (currentSearchIdx + 1) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
   }
 
   function goToPrevMatch() {
-    if (searchResults.length <= 1) return;
+    if (searchResults.length === 0) return;
+    if (searchResults.length === 1) {
+      scrollToMatch(searchResults[0].index);
+      return;
+    }
     currentSearchIdx =
       (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
+  }
+
+  function handleSearchInputKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (e.shiftKey) goToPrevMatch();
+      else goToNextMatch();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearch();
+      return;
+    }
+    if (e.key === "F3") {
+      e.preventDefault();
+      if (e.shiftKey) goToPrevMatch();
+      else goToNextMatch();
+    }
   }
 
   function scrollToMatch(msgIndex: number) {
@@ -869,6 +995,9 @@
           type="text"
           placeholder="Search messages... (Ctrl+F)"
           bind:value={searchQuery}
+          bind:this={searchInputEl}
+          onkeydown={handleSearchInputKeydown}
+          aria-label="Search chat history"
           class="search-input"
         />
         {#if searchResults.length > 0}
@@ -910,10 +1039,7 @@
         {/if}
         <button
           class="search-close"
-          onclick={() => {
-            showSearch = false;
-            searchQuery = "";
-          }}
+          onclick={closeSearch}
           aria-label="Close search"
         >
           <svg
@@ -1118,8 +1244,12 @@
         </button>
       {/if}
 
-      {#each visibleMessages as message, i (i)}
-        <div class="message-wrapper" data-msg-index={messages.indexOf(message)}>
+      {#each visibleMessages as message, i (messages.length - visibleMessageCount + i)}
+        <div
+          class="message-wrapper"
+          class:search-current={messages.length - visibleMessageCount + i === currentMatchIndex}
+          data-msg-index={messages.length - visibleMessageCount + i}
+        >
           <MessageBubble
             {message}
             searchQuery={showSearch ? searchQuery : ""}
@@ -1251,6 +1381,30 @@
     <div class="input-wrapper">
       <div class="input-actions">
         <VoiceCapture {isListening} onToggle={onToggleVoice} />
+        <button
+          class="action-btn"
+          class:active={showSearch}
+          onclick={toggleSearch}
+          title="Search chat history (Ctrl+F)"
+          aria-label="Search chat history"
+          aria-pressed={showSearch}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8" /><line
+              x1="21"
+              y1="21"
+              x2="16.65"
+              y2="16.65"
+            />
+          </svg>
+        </button>
         <button
           class="action-btn"
           onclick={onShowPromptTemplates}
@@ -1662,6 +1816,9 @@
     border-radius: 0;
     margin-bottom: var(--space-2);
     flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
   .messages :global(.search-bar svg) {
     color: var(--color-text-muted);
@@ -1717,6 +1874,14 @@
     color: var(--color-text);
     padding: 0 1px;
     border-radius: 2px;
+  }
+  .messages :global(.message-wrapper.search-current) {
+    outline: 1px solid var(--color-warning);
+    outline-offset: 2px;
+  }
+  .messages :global(.action-btn.active) {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
   }
 
   .empty-state {

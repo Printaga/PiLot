@@ -10,7 +10,7 @@
   }
 
   // Props — sessionResources passed from parent App.svelte
-  let { sessionResources = null }: { sessionResources?: any } = $props();
+  let { sessionResources = null, lightMode = false }: { sessionResources?: any; lightMode?: boolean } = $props();
 
   // State
   let skills = $state<SkillInfo[]>([]);
@@ -96,6 +96,7 @@
   }
 
   function toggleSkillDiscovery() {
+    if (lightMode) return; // discovery is forced off while light mode is on
     skillDiscoveryEnabled = !skillDiscoveryEnabled;
     sendMessage({
       type: "setSkillDiscovery",
@@ -198,21 +199,32 @@
 <div class="skills-panel">
   <div class="header">
     <h3>Skills</h3>
-    <span class="skill-count">{skills.length} loaded</span>
+    {#if lightMode}
+      <span class="skill-count light-mode-badge" title="Light Mode disables skill discovery">Disabled by Light Mode</span>
+    {:else}
+      <span class="skill-count">{skills.length} loaded</span>
+    {/if}
   </div>
+
+  {#if lightMode}
+    <div class="light-mode-banner">
+      <strong>Light Mode is on.</strong> Skill discovery is disabled — no skills load from any source. Turn it off in Settings to use skills.
+    </div>
+  {/if}
 
   <div class="discovery-toggle">
     <div class="toggle-info">
       <span class="toggle-label">Skill Discovery</span>
       <span class="toggle-desc">
-        {skillDiscoveryEnabled ? "Enabled — skills loaded from all sources" : "Disabled — no skills loaded"}
+        {#if lightMode}Off — disabled by Light Mode{:else if skillDiscoveryEnabled}Enabled — skills loaded from all sources{:else}Disabled — no skills loaded{/if}
       </span>
     </div>
     <label class="toggle">
       <input
         type="checkbox"
-        checked={skillDiscoveryEnabled}
+        checked={skillDiscoveryEnabled && !lightMode}
         onchange={toggleSkillDiscovery}
+        disabled={lightMode}
       />
       <span class="toggle-slider"></span>
     </label>
@@ -388,6 +400,23 @@
     padding: 2px 8px;
     background: var(--color-surface-2);
     border-radius: var(--radius-sm);
+  }
+
+  .light-mode-badge {
+    color: var(--color-warning);
+    background: color-mix(in oklch, var(--color-warning) 15%, transparent);
+    font-weight: 600;
+  }
+
+  .light-mode-banner {
+    padding: var(--space-3);
+    background: color-mix(in oklch, var(--color-warning) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--color-warning) 30%, transparent);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    margin-bottom: var(--space-3);
+    line-height: 1.4;
   }
 
   .discovery-toggle {

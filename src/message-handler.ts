@@ -433,6 +433,16 @@ export class MessageHandler {
 					result = { success: true };
 					break;
 
+				case "getAutoContext": {
+					const enabled = this.provider.getAutoContext();
+					this.provider.webview?.postMessage({
+						type: "auto-context-changed",
+						data: { enabled },
+					});
+					result = enabled;
+					break;
+				}
+
 				case "getSessionInfo":
 					result = await this.getSessionInfo();
 					break;
