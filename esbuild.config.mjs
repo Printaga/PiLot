@@ -37,12 +37,14 @@ async function main() {
 	} else {
 		await esbuild.build(buildOptions);
 		console.log("[esbuild] Build complete - bundled dist/extension.cjs");
-		
+
 		// Copy loader.cjs to dist/
 		fs.copyFileSync("src/loader.cjs", "dist/loader.cjs");
 		console.log("[esbuild] Copied loader.cjs to dist/");
-		
-		console.log("[esbuild] PI SDK and assets will be loaded from global installation at runtime");
+
+		console.log(
+			"[esbuild] PI SDK and assets will be loaded from global installation at runtime",
+		);
 	}
 }
 

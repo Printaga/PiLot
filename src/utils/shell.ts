@@ -62,25 +62,20 @@ async function execFileAsyncImpl(
 ): Promise<CommandResult> {
 	return new Promise((resolve) => {
 		let settled = false;
-		const child = execFile(
-			command,
-			args,
-			{ shell: true },
-			(error, stdout, stderr) => {
-				if (settled) return;
-				settled = true;
-				resolve({
-					code:
-						error && "code" in error && typeof error.code === "number"
-							? error.code
-							: error
-								? 1
-								: 0,
-					stdout: stdout || "",
-					stderr: stderr || "",
-				});
-			},
-		);
+		const child = execFile(command, args, { shell: true }, (error, stdout, stderr) => {
+			if (settled) return;
+			settled = true;
+			resolve({
+				code:
+					error && "code" in error && typeof error.code === "number"
+						? error.code
+						: error
+							? 1
+							: 0,
+				stdout: stdout || "",
+				stderr: stderr || "",
+			});
+		});
 
 		const timer = setTimeout(() => {
 			if (settled) return;

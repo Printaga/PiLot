@@ -10,7 +10,10 @@
   }
 
   // Props — sessionResources passed from parent App.svelte
-  let { sessionResources = null, lightMode = false }: { sessionResources?: any; lightMode?: boolean } = $props();
+  let {
+    sessionResources = null,
+    lightMode = false,
+  }: { sessionResources?: any; lightMode?: boolean } = $props();
 
   // State
   let skills = $state<SkillInfo[]>([]);
@@ -21,7 +24,7 @@
   let expandedSkill = $state<string | null>(null);
   let skillDiscoveryEnabled = $state(true);
   let extraSkillPaths = $state<string[]>([]);
-  let newSkillPath = $state('');
+  let newSkillPath = $state("");
 
   // Derived: filtered installed skills
   let filteredSkills = $derived(
@@ -67,7 +70,9 @@
       description: s.description || "",
       sourceName: s.sourceName || null,
       path: s.path || "",
-      sourceType: s.sourceType || (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
+      sourceType:
+        s.sourceType ||
+        (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
     };
   }
 
@@ -108,13 +113,13 @@
     const trimmed = newSkillPath.trim();
     if (!trimmed || extraSkillPaths.includes(trimmed)) return;
     extraSkillPaths = [...extraSkillPaths, trimmed];
-    newSkillPath = '';
-    sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
+    newSkillPath = "";
+    sendMessage({ type: "setExtraSkillPaths", data: { paths: extraSkillPaths } });
   }
 
   function removeSkillPath(index: number) {
     extraSkillPaths = extraSkillPaths.filter((_, i) => i !== index);
-    sendMessage({ type: 'setExtraSkillPaths', data: { paths: extraSkillPaths } });
+    sendMessage({ type: "setExtraSkillPaths", data: { paths: extraSkillPaths } });
   }
 
   function sourceTypeBadge(type: string): string {
@@ -134,9 +139,7 @@
     if (skill.sourceName) return skill.sourceName;
     if (skill.path) {
       const parts = skill.path.split("/");
-      return parts.length > 2
-        ? `.../${parts.slice(-2).join("/")}`
-        : skill.path;
+      return parts.length > 2 ? `.../${parts.slice(-2).join("/")}` : skill.path;
     }
     return "unknown";
   }
@@ -169,7 +172,7 @@
       if (type === "skill-discovery-changed") {
         skillDiscoveryEnabled = data?.enabled !== false;
       }
-      if (type === 'extra-skill-paths') {
+      if (type === "extra-skill-paths") {
         extraSkillPaths = data?.paths || [];
       }
       if (type === "loading") {
@@ -192,7 +195,7 @@
     sendMessage({ type: "getSkills" });
     sendMessage({ type: "getSessionResources" });
     sendMessage({ type: "getSkillDiscovery" });
-    sendMessage({ type: 'getExtraSkillPaths' });
+    sendMessage({ type: "getExtraSkillPaths" });
   });
 </script>
 
@@ -200,7 +203,9 @@
   <div class="header">
     <h3>Skills</h3>
     {#if lightMode}
-      <span class="skill-count light-mode-badge" title="Light Mode disables skill discovery">Disabled by Light Mode</span>
+      <span class="skill-count light-mode-badge" title="Light Mode disables skill discovery"
+        >Disabled by Light Mode</span
+      >
     {:else}
       <span class="skill-count">{skills.length} loaded</span>
     {/if}
@@ -208,7 +213,8 @@
 
   {#if lightMode}
     <div class="light-mode-banner">
-      <strong>Light Mode is on.</strong> Skill discovery is disabled — no skills load from any source. Turn it off in Settings to use skills.
+      <strong>Light Mode is on.</strong> Skill discovery is disabled — no skills load from any source.
+      Turn it off in Settings to use skills.
     </div>
   {/if}
 
@@ -216,7 +222,8 @@
     <div class="toggle-info">
       <span class="toggle-label">Skill Discovery</span>
       <span class="toggle-desc">
-        {#if lightMode}Off — disabled by Light Mode{:else if skillDiscoveryEnabled}Enabled — skills loaded from all sources{:else}Disabled — no skills loaded{/if}
+        {#if lightMode}Off — disabled by Light Mode{:else if skillDiscoveryEnabled}Enabled — skills
+          loaded from all sources{:else}Disabled — no skills loaded{/if}
       </span>
     </div>
     <label class="toggle">
@@ -237,9 +244,7 @@
       bind:value={searchQuery}
       class="search-input"
     />
-    <button class="refresh-btn" onclick={refreshSkills} title="Refresh skills"
-      >↻</button
-    >
+    <button class="refresh-btn" onclick={refreshSkills} title="Refresh skills">↻</button>
   </div>
 
   <div class="skills-content">
@@ -249,24 +254,36 @@
       <div class="empty-state">
         {#if skills.length === 0}
           <div class="empty-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
           </div>
           <p class="empty-title">No skills loaded</p>
           <p class="empty-desc">
-            Skills provide specialized agent instructions. Install a PI package
-            that contains skills via the <strong>Packages</strong> tab, or add
-            skill paths below.
+            Skills provide specialized agent instructions. Install a PI package that contains skills
+            via the <strong>Packages</strong> tab, or add skill paths below.
           </p>
         {:else}
           <p class="empty-title">No skills match "{searchQuery}"</p>
         {/if}
       </div>
     {:else}
-      {#each filteredSkills as skill}
+      {#each filteredSkills as skill (skill.path)}
         <div class="skill-card">
-          <div class="skill-header" role="button" tabindex="0" onclick={() => expandSkill(skill)} onkeydown={(e) => e.key === 'Enter' && expandSkill(skill)}>
+          <div
+            class="skill-header"
+            role="button"
+            tabindex="0"
+            onclick={() => expandSkill(skill)}
+            onkeydown={(e) => e.key === "Enter" && expandSkill(skill)}
+          >
             <div class="skill-name-row">
               <span class="skill-name">{skill.name}</span>
               <span class="badge badge-{sourceTypeBadge(skill.sourceType)}">
@@ -297,7 +314,9 @@
               {#if skill.sourceType === "package" && skill.sourceName}
                 <div class="detail-row">
                   <span class="detail-label">Package:</span>
-                  <a href={npmUrl(skill.sourceName)} target="_blank" class="detail-link">{skill.sourceName}</a>
+                  <a href={npmUrl(skill.sourceName)} target="_blank" class="detail-link"
+                    >{skill.sourceName}</a
+                  >
                 </div>
               {/if}
             </div>
@@ -320,22 +339,30 @@
 
   <div class="footer">
     <p class="footer-hint">
-      Install skill packages via the <strong>Packages</strong> tab, or
-      configure extra skill paths below.
+      Install skill packages via the <strong>Packages</strong> tab, or configure extra skill paths below.
     </p>
   </div>
 
   <section class="skill-paths-section">
     <h4>Skill Paths</h4>
-    <p class="section-desc">Additional local skill directories (paths to folders containing SKILL.md files)</p>
+    <p class="section-desc">
+      Additional local skill directories (paths to folders containing SKILL.md files)
+    </p>
 
     <div class="skill-paths-list">
-      {#each extraSkillPaths as path, i}
+      {#each extraSkillPaths as path, i (path)}
         <div class="skill-path-item">
           <span class="skill-path-text">{path}</span>
           <button class="remove-path-btn" onclick={() => removeSkillPath(i)} title="Remove path">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
@@ -346,9 +373,11 @@
         type="text"
         placeholder="/path/to/skill/directory"
         bind:value={newSkillPath}
-        onkeydown={(e) => e.key === 'Enter' && addSkillPath()}
+        onkeydown={(e) => e.key === "Enter" && addSkillPath()}
       />
-      <button class="add-path-btn" onclick={addSkillPath} disabled={!newSkillPath.trim()}>Add</button>
+      <button class="add-path-btn" onclick={addSkillPath} disabled={!newSkillPath.trim()}
+        >Add</button
+      >
     </div>
   </section>
 </div>

@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  // Prettier auto-loads this plugin from the config; there is no direct import.
+  "ignoreDependencies": ["prettier-plugin-svelte"],
+  "duplicates": {
+    "minOccurrences": 3
+  }
+}

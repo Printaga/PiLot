@@ -2,10 +2,9 @@ import * as vscode from "vscode";
 
 // ── Diagnostics output channel and log buffer ──────────────────────────────
 
-export const diagnosticsChannel = vscode.window.createOutputChannel(
-	"PiLot Studio Diagnostics",
-	{ log: true },
-);
+export const diagnosticsChannel = vscode.window.createOutputChannel("PiLot Studio Diagnostics", {
+	log: true,
+});
 
 const diagnosticsBuffer: string[] = [];
 let isDiagnosticsEnabled = false;
@@ -35,8 +34,7 @@ export function logDiagnostics(message: string, ...args: unknown[]) {
 	diagnosticsBuffer.push(line);
 	if (args.length > 0) {
 		for (const arg of args) {
-			const argLine =
-				typeof arg === "string" ? arg : JSON.stringify(arg, null, 2);
+			const argLine = typeof arg === "string" ? arg : JSON.stringify(arg, null, 2);
 			diagnosticsChannel.appendLine(argLine);
 			diagnosticsBuffer.push(argLine);
 		}

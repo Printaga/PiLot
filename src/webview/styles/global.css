@@ -8,12 +8,12 @@
   --color-text-inverse: #09090b;
   --color-border: #3f3f46;
   --color-divider: #3f3f46;
-  
+
   /* Acid Green Accent */
   --color-primary: #bef264;
   --color-primary-hover: #d9f99d;
   --color-primary-active: #a3e635;
-  
+
   --color-error: #ef4444;
   --color-success: #22c55e;
   --color-warning: #eab308;
@@ -38,8 +38,8 @@
   --space-16: 120px;
 
   /* Typography: Utilitarian Monospace Dominance */
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
-  
+  @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
+
   --font-body: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --font-display: "JetBrains Mono", monospace;
@@ -98,7 +98,7 @@ body {
   display: flex;
   flex-direction: column;
   background-color: var(--color-bg);
-  background-image: 
+  background-image:
     linear-gradient(rgba(63, 63, 70, 0.1) 1px, transparent 1px),
     linear-gradient(90deg, rgba(63, 63, 70, 0.1) 1px, transparent 1px);
   background-size: 20px 20px;

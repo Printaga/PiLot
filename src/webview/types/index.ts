@@ -2,25 +2,25 @@
 
 /** Image content block in a message */
 export interface ImageContent {
-	type: "image";
-	data: string; // base64-encoded image data
-	mimeType: string; // e.g. "image/png"
-	name?: string;
+  type: "image";
+  data: string; // base64-encoded image data
+  mimeType: string; // e.g. "image/png"
+  name?: string;
 }
 
 export interface ToolCallResult {
-	content?: string;
-	details?: any;
-	isError?: boolean;
+  content?: string;
+  details?: any;
+  isError?: boolean;
 }
 
 export interface ToolCallMessage {
-	toolCallId: string;
-	toolName: string;
-	args: Record<string, unknown>;
-	result?: ToolCallResult;
-	isError?: boolean;
-	status: "pending" | "streaming" | "complete";
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: ToolCallResult;
+  isError?: boolean;
+  status: "pending" | "streaming" | "complete";
 }
 
 /** A chat message in the webview.
@@ -29,95 +29,84 @@ export interface ToolCallMessage {
  * messages, i.e. `pi.sendMessage({ display: true })`). These render like the
  * PI CLI's CustomMessageComponent with markdown and a source label. */
 export interface Message {
-	role: "user" | "assistant" | "system" | "provider";
-	content: string;
-	thinking?: string;
-	images?: ImageContent[];
-	timestamp: number;
-	entryId?: string;
-	parentId?: string | null;
-	isStreaming?: boolean;
-	toolCalls?: ToolCallMessage[];
-	/** Optional source label (e.g. custom message `customType`) shown in the header. */
-	label?: string;
+  role: "user" | "assistant" | "system" | "provider";
+  content: string;
+  thinking?: string;
+  images?: ImageContent[];
+  timestamp: number;
+  entryId?: string;
+  parentId?: string | null;
+  isStreaming?: boolean;
+  toolCalls?: ToolCallMessage[];
+  /** Optional source label (e.g. custom message `customType`) shown in the header. */
+  label?: string;
 }
 
 /** Model definition sent from extension to webview */
 export interface Model {
-	id: string; // "provider/id"
-	provider: string;
-	name: string;
-	/** Thinking levels this model supports; absent when unknown (full set assumed). */
-	availableThinkingLevels?: ThinkingLevel[];
+  id: string; // "provider/id"
+  provider: string;
+  name: string;
+  /** Thinking levels this model supports; absent when unknown (full set assumed). */
+  availableThinkingLevels?: ThinkingLevel[];
 }
 
 /** Session list item */
 export interface SessionItem {
-	id: string;
-	label: string;
-	timestamp: number;
-	messageCount: number;
+  id: string;
+  label: string;
+  timestamp: number;
+  messageCount: number;
 }
 
 /** Session tree node (for tree view) */
 export interface SessionNode {
-	id: string;
-	label: string;
-	timestamp: number;
-	children: SessionNode[];
-	parent: string | null;
+  id: string;
+  label: string;
+  timestamp: number;
+  children: SessionNode[];
+  parent: string | null;
 }
 
 /** Tool configuration for getSettings/setToolConfig */
 export interface ToolConfig {
-	toolPreset: string;
-	customTools?: string[];
+  toolPreset: string;
+  customTools?: string[];
 }
 
 /** Voice helper message from the native process */
 export interface VoiceHelperMessage {
-	type: string;
-	message?: string;
-	text?: string;
-	error?: string;
-	code?: string;
-	level?: number;
-	speechActive?: boolean;
+  type: string;
+  message?: string;
+  text?: string;
+  error?: string;
+  code?: string;
+  level?: number;
+  speechActive?: boolean;
 }
 
 /** Voice model definition */
 export interface VoiceModelDef {
-	label: string;
-	remoteFilename: string;
-	cacheFilename: string;
-	expectedSizeMb: number;
-	englishOnly: boolean;
+  label: string;
+  remoteFilename: string;
+  cacheFilename: string;
+  expectedSizeMb: number;
+  englishOnly: boolean;
 }
 
 /** Keys for openConfigFile — webview mirror of the host's ConfigFileKey. */
 export type OpenConfigFileKey =
-	| "auth"
-	| "models"
-	| "settings"
-	| "system-prompt"
-	| "append-system-prompt";
+  "auth" | "models" | "settings" | "system-prompt" | "append-system-prompt";
 
 /** Thinking level enumeration */
-export type ThinkingLevel =
-	| "off"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh"
-	| "max";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Pi agent configuration */
 export interface PiAgentConfig {
-	defaultModel: string;
-	defaultProvider: string;
-	autoContext: boolean;
-	maxTokens: number;
-	thinkingLevel: ThinkingLevel;
-	sessionDir?: string;
+  defaultModel: string;
+  defaultProvider: string;
+  autoContext: boolean;
+  maxTokens: number;
+  thinkingLevel: ThinkingLevel;
+  sessionDir?: string;
 }

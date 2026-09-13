@@ -65,19 +65,13 @@ interface RawSessionEntry {
 	message?: RawAgentMessage;
 }
 
-function normalizeMessage(
-	entryOrMessage: RawAgentMessage | RawSessionEntry,
-): {
+function normalizeMessage(entryOrMessage: RawAgentMessage | RawSessionEntry): {
 	message: RawAgentMessage;
 	entryId?: string;
 	parentId?: string | null;
 	timestamp?: number;
 } | null {
-	if (
-		"type" in entryOrMessage &&
-		entryOrMessage.type === "message" &&
-		entryOrMessage.message
-	) {
+	if ("type" in entryOrMessage && entryOrMessage.type === "message" && entryOrMessage.message) {
 		const timestamp =
 			typeof entryOrMessage.timestamp === "string"
 				? Date.parse(entryOrMessage.timestamp)
@@ -126,8 +120,7 @@ export function serializeMessages(
 				});
 			} else if (Array.isArray(msg.content)) {
 				const textParts: string[] = [];
-				const images: Array<{ type: "image"; data: string; mimeType: string }> =
-					[];
+				const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
 				for (const c of msg.content) {
 					if (c.type === "text" && "text" in c) {
 						textParts.push(c.text || "");
@@ -165,8 +158,7 @@ export function serializeMessages(
 						)
 						.map((c) => c.thinking)
 				: [];
-			const thinking =
-				thinkingParts.length > 0 ? thinkingParts.join("\n") : undefined;
+			const thinking = thinkingParts.length > 0 ? thinkingParts.join("\n") : undefined;
 			// Skip assistant messages that carry no renderable content (e.g. tool-call
 			// only turns or redacted/empty thinking). The PI CLI renders these as tool
 			// executions or nothing at all — emitting them here produced empty bubbles.

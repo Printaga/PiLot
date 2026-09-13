@@ -4,19 +4,13 @@ import * as assert from "node:assert";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import {
-	BinaryService,
-	binaryServiceInternals,
-} from "../../../binary-service.js";
+import { BinaryService, binaryServiceInternals } from "../../../binary-service.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createDeps(_opts?: {
-	logDebugCalls?: any[][];
-	logErrorCalls?: any[][];
-}) {
+function createDeps(_opts?: { logDebugCalls?: any[][]; logErrorCalls?: any[][] }) {
 	const logDebugCalls: any[][] = [];
 	const logErrorCalls: any[][] = [];
 
@@ -74,10 +68,7 @@ async function importShell() {
 	return await import("../../../utils/shell.js");
 }
 
-function setupResolver(
-	binaryPath: string,
-	_tmpDir?: string,
-) {
+function setupResolver(binaryPath: string, _tmpDir?: string) {
 	makeVSCodeConfigWithBinary(binaryPath);
 }
 
@@ -111,9 +102,7 @@ suite("BinaryService: resolveAtStartup", () => {
 				"expected resolvedBinaryPath to be set",
 			);
 			assert.ok(
-				logDebugCalls.some((args) =>
-					args[0]?.includes?.("Resolved pi binary"),
-				),
+				logDebugCalls.some((args) => args[0]?.includes?.("Resolved pi binary")),
 				"expected logDebug to have been called",
 			);
 			binaryServiceInternals.resolvePiBinary = origResolve;
@@ -144,11 +133,7 @@ suite("BinaryService: resolveAtStartup", () => {
 			service.resolveAtStartup();
 			const dbgCountAfterSecond = logDebugCalls.length;
 
-			assert.strictEqual(
-				callCount,
-				1,
-				"findPiBinary should be called only once",
-			);
+			assert.strictEqual(callCount, 1, "findPiBinary should be called only once");
 			assert.strictEqual(
 				dbgCountAfterFirst,
 				dbgCountAfterSecond,
@@ -163,7 +148,7 @@ suite("BinaryService: resolveAtStartup", () => {
 	test("shows error message via vscode.window.showErrorMessage when binary is not found", async () => {
 		const { service, logErrorCalls } = makeBinaryService({});
 		const vscode = (globalThis as any).vscode;
-		const origShow = (vscode.window.showErrorMessage as any);
+		const origShow = vscode.window.showErrorMessage as any;
 		const messages: string[] = [];
 		(vscode.window.showErrorMessage as any) = (_msg: string) => {
 			messages.push(_msg);
@@ -182,10 +167,7 @@ suite("BinaryService: resolveAtStartup", () => {
 				),
 				"expected logError to contain 'Could not locate pi binary'",
 			);
-			assert.ok(
-				messages.length > 0,
-				"expected showErrorMessage to have been invoked",
-			);
+			assert.ok(messages.length > 0, "expected showErrorMessage to have been invoked");
 		} finally {
 			binaryServiceInternals.resolvePiBinary = origResolve;
 			(vscode.window.showErrorMessage as any) = origShow;
@@ -465,14 +447,8 @@ suite("BinaryService: resolveGitBranch", () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-git-sub-"));
 		const actualGitDir = path.join(tmpDir, "actual-git");
 		fs.mkdirSync(actualGitDir);
-		fs.writeFileSync(
-			path.join(actualGitDir, "HEAD"),
-			"ref: refs/heads/feature\n",
-		);
-		fs.writeFileSync(
-			path.join(tmpDir, ".git"),
-			"gitdir: actual-git\n",
-		);
+		fs.writeFileSync(path.join(actualGitDir, "HEAD"), "ref: refs/heads/feature\n");
+		fs.writeFileSync(path.join(tmpDir, ".git"), "gitdir: actual-git\n");
 
 		const { service } = makeBinaryService({});
 		try {
@@ -488,10 +464,7 @@ suite("BinaryService: resolveGitBranch", () => {
 		const actualGitDir = path.join(tmpDir, "actual-git-submod");
 		fs.mkdirSync(actualGitDir);
 		fs.writeFileSync(path.join(actualGitDir, "HEAD"), "deadbeef\n");
-		fs.writeFileSync(
-			path.join(tmpDir, ".git"),
-			"gitdir: actual-git-submod\n",
-		);
+		fs.writeFileSync(path.join(tmpDir, ".git"), "gitdir: actual-git-submod\n");
 
 		const { service } = makeBinaryService({});
 		try {

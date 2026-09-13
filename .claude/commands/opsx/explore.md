@@ -15,6 +15,7 @@ Enter explore mode. Think deeply. Visualize freely. Follow the conversation wher
 **Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
 **Input**: The argument after `/opsx:explore` is whatever the user wants to think about. Could be:
+
 - A vague idea: "real-time collaboration"
 - A specific problem: "the auth system is getting unwieldy"
 - A change name: "add-dark-mode" (to explore in context of that change)
@@ -63,24 +64,28 @@ adding a service to operate; shared state would need a separate sync design.
 Depending on what the user brings, you might:
 
 **Explore the problem space**
+
 - Ask clarifying questions that emerge from what they said
 - Challenge assumptions
 - Reframe the problem
 - Find analogies
 
 **Investigate the codebase**
+
 - Map existing architecture relevant to the discussion
 - Find integration points
 - Identify patterns already in use
 - Surface hidden complexity
 
 **Compare options**
+
 - Brainstorm multiple approaches
 - Build comparison tables
 - Sketch tradeoffs
 - Recommend a path (if asked)
 
 **Visualize**
+
 ```
 +------------------------------------------+
 |     Use ASCII diagrams liberally         |
@@ -102,6 +107,7 @@ Depending on what the user brings, you might:
 Unicode diagram glyphs can render at different widths across terminals, fonts, and locales, so padded boxes and aligned tables can drift. Keep every diagram character ASCII.
 
 **Surface risks and unknowns**
+
 - Identify what could go wrong
 - Find gaps in understanding
 - Suggest spikes or investigations
@@ -115,16 +121,19 @@ You have full context of the OpenSpec system. Use it naturally, don't force it.
 ### Check for context
 
 At the start, quickly check what exists:
+
 ```bash
 openspec list --json
 ```
 
 This tells you:
+
 - If there are active changes
 - Their names, schemas, and status
 - What the user might be working on
 
 Then read the project's own context from the resolved root - `<root.path>/openspec/config.yaml` (or `config.yml`). Use the `root.path` returned above, and skip this if neither file exists:
+
 - `context`: project background - tech stack, conventions, constraints
 - `rules`: keyed by artifact id - the entries for an artifact apply only when you write that artifact
 
@@ -153,31 +162,31 @@ Capture the artifact(s) the user requested without asking them to invoke another
 If the user mentions a change or you detect one is relevant:
 
 1. **Resolve and read existing artifacts for context**
-   - Run `openspec status --change "<name>" --json`.
-   - Use `changeRoot`, `artifactPaths`, and `actionContext` from the status JSON.
-   - Read existing files from `artifactPaths.<artifact>.existingOutputPaths`.
+    - Run `openspec status --change "<name>" --json`.
+    - Use `changeRoot`, `artifactPaths`, and `actionContext` from the status JSON.
+    - Read existing files from `artifactPaths.<artifact>.existingOutputPaths`.
 
 2. **Reference them naturally in conversation**
-   - "Your design mentions using Redis, but we just realized SQLite fits better..."
-   - "The proposal scopes this to premium users, but we're now thinking everyone..."
+    - "Your design mentions using Redis, but we just realized SQLite fits better..."
+    - "The proposal scopes this to premium users, but we're now thinking everyone..."
 
 3. **Offer to capture when decisions are made**
 
-   `<capability-path>` is the spec directory relative to `specs/` (for example, `user-auth` or `identity/user-auth`). Preserve an existing capability's full path and follow the project's established organization for new capabilities.
+    `<capability-path>` is the spec directory relative to `specs/` (for example, `user-auth` or `identity/user-auth`). Preserve an existing capability's full path and follow the project's established organization for new capabilities.
 
-    | Insight Type               | Where to Capture                    |
-    |----------------------------|-------------------------------------|
+    | Insight Type               | Where to Capture                  |
+    | -------------------------- | --------------------------------- |
     | New requirement discovered | `specs/<capability-path>/spec.md` |
     | Requirement changed        | `specs/<capability-path>/spec.md` |
     | Design decision made       | `design.md`                       |
     | Scope changed              | `proposal.md`                     |
     | New work identified        | `tasks.md`                        |
-    | Assumption invalidated     | Relevant artifact                   |
+    | Assumption invalidated     | Relevant artifact                 |
 
-   Example offers:
-   - "That's a design decision. Capture it in design.md?"
-   - "This is a new requirement. Add it to specs?"
-   - "This changes scope. Update the proposal?"
+    Example offers:
+    - "That's a design decision. Capture it in design.md?"
+    - "This is a new requirement. Add it to specs?"
+    - "This changes scope. Update the proposal?"
 
 4. **The user decides** - Offer and move on. Don't pressure. Don't auto-capture.
 

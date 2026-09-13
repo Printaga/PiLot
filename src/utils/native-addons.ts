@@ -109,12 +109,7 @@ export function checkBetterSqlite3(paths?: string[]): {
 	for (const betterDir of searchPaths) {
 		if (!fs.existsSync(betterDir)) continue;
 
-		const nodeFile = path.join(
-			betterDir,
-			"build",
-			"Release",
-			"better_sqlite3.node",
-		);
+		const nodeFile = path.join(betterDir, "build", "Release", "better_sqlite3.node");
 		if (fs.existsSync(nodeFile)) {
 			const content = fs.readFileSync(nodeFile, "utf-8");
 			const match = content.match(/node_register_module_v(\d+)/);
@@ -163,10 +158,7 @@ export function checkBetterSqlite3(paths?: string[]): {
  * Run prebuild-install in a better-sqlite3 directory to download a
  * prebuilt binary for the given Electron target.
  */
-function tryPrebuildInstall(
-	targetDir: string,
-	electronVersion: string,
-): string | null {
+function tryPrebuildInstall(targetDir: string, electronVersion: string): string | null {
 	try {
 		const result = execSync(
 			`npx --yes prebuild-install --runtime electron --target ${electronVersion} --arch x64`,
@@ -259,9 +251,7 @@ export function rebuildBetterSqlite3(): {
 				);
 				continue;
 			}
-			outputParts.push(
-				`${copy.dir}: rebuild succeeded but ABI still mismatched`,
-			);
+			outputParts.push(`${copy.dir}: rebuild succeeded but ABI still mismatched`);
 			allOk = false;
 		} else {
 			// v11.x can't compile for newer Electron — try upgrading to v12 via top-level copy
@@ -278,9 +268,7 @@ export function rebuildBetterSqlite3(): {
 					continue;
 				}
 			}
-			outputParts.push(
-				`${copy.dir}: rebuild failed (${result.output.slice(0, 200)})`,
-			);
+			outputParts.push(`${copy.dir}: rebuild failed (${result.output.slice(0, 200)})`);
 			allOk = false;
 		}
 	}
@@ -300,12 +288,7 @@ export function rebuildBetterSqlite3(): {
  * Read the ABI version from a compiled better_sqlite3.node file.
  */
 function readABI(targetDir: string): number | null {
-	const nodeFile = path.join(
-		targetDir,
-		"build",
-		"Release",
-		"better_sqlite3.node",
-	);
+	const nodeFile = path.join(targetDir, "build", "Release", "better_sqlite3.node");
 	if (!fs.existsSync(nodeFile)) return null;
 	const content = fs.readFileSync(nodeFile, "utf-8");
 	const match = content.match(/node_register_module_v(\d+)/);
@@ -328,18 +311,9 @@ function tryUpgradeToV12(brokenDir: string): boolean {
 
 		// Find the top-level v12+ copy
 		const home = os.homedir();
-		const topLevel = path.join(
-			home,
-			".pi",
-			"agent",
-			"npm",
-			"node_modules",
-			"better-sqlite3",
-		);
+		const topLevel = path.join(home, ".pi", "agent", "npm", "node_modules", "better-sqlite3");
 		if (!fs.existsSync(topLevel)) return false;
-		const topPkg = JSON.parse(
-			fs.readFileSync(path.join(topLevel, "package.json"), "utf-8"),
-		);
+		const topPkg = JSON.parse(fs.readFileSync(path.join(topLevel, "package.json"), "utf-8"));
 		const topMajor = parseInt(topPkg.version?.split(".")[0] ?? "0", 10);
 		if (topMajor < 12) return false;
 
@@ -380,16 +354,11 @@ export function ensureBetterSqlite3Compatible(): {
 /**
  * Human-readable description of ABI status.
  */
-export function describeABIStatus(
-	runtimeABI: number,
-	moduleABI: number | null,
-): string {
-	const runtimeName =
-		NODE_MODULE_VERSIONS[runtimeABI] || `unknown (${runtimeABI})`;
+export function describeABIStatus(runtimeABI: number, moduleABI: number | null): string {
+	const runtimeName = NODE_MODULE_VERSIONS[runtimeABI] || `unknown (${runtimeABI})`;
 	if (moduleABI === null) {
 		return `Runtime Node.js ${runtimeName} (ABI ${runtimeABI}), no compiled module found`;
 	}
-	const moduleName =
-		NODE_MODULE_VERSIONS[moduleABI] || `unknown (${moduleABI})`;
+	const moduleName = NODE_MODULE_VERSIONS[moduleABI] || `unknown (${moduleABI})`;
 	return `Runtime Node.js ${runtimeName} (ABI ${runtimeABI}), module compiled for ${moduleName} (ABI ${moduleABI})`;
 }

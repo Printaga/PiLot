@@ -6,10 +6,7 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import {
-	type VoiceHelperMessage,
-	type VoiceModelDef,
-} from "./webview/types/index.js";
+import { type VoiceHelperMessage, type VoiceModelDef } from "./webview/types/index.js";
 
 // ── Voice model definitions (whisper.cpp models from Hugging Face) ────────
 
@@ -58,8 +55,7 @@ const VOICE_MODELS: Record<string, VoiceModelDef> = {
 	},
 };
 
-const VOICE_MODEL_BASE_URL =
-	"https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const VOICE_MODEL_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 export const voiceManagerInternals = {
 	spawn,
@@ -76,8 +72,7 @@ function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
 	const arch = process.arch;
 	const extensionPath =
 		extensionUri?.fsPath ||
-		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")
-			?.extensionPath ||
+		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")?.extensionPath ||
 		"";
 	const voiceDir = path.join(extensionPath, "media", "voice");
 
@@ -136,13 +131,8 @@ async function downloadVoiceModel(
 	if (voiceManagerInternals.existsSync(destPath)) {
 		const stats = await fs.promises.stat(destPath);
 		const sizeMb = stats.size / (1024 * 1024);
-		if (
-			Math.abs(sizeMb - modelDef.expectedSizeMb) <=
-			modelDef.expectedSizeMb * 0.2
-		) {
-			logDebug?.(
-				`[PI Voice] Model already cached: ${destPath} (${sizeMb.toFixed(1)} MB)`,
-			);
+		if (Math.abs(sizeMb - modelDef.expectedSizeMb) <= modelDef.expectedSizeMb * 0.2) {
+			logDebug?.(`[PI Voice] Model already cached: ${destPath} (${sizeMb.toFixed(1)} MB)`);
 			onPhase?.("ready", "Voice model ready.");
 			return destPath;
 		}
@@ -152,10 +142,7 @@ async function downloadVoiceModel(
 	}
 
 	const url = `${VOICE_MODEL_BASE_URL}/${modelDef.remoteFilename}`;
-	onPhase?.(
-		"downloading",
-		`Downloading ${modelDef.label} (~${modelDef.expectedSizeMb} MB)...`,
-	);
+	onPhase?.("downloading", `Downloading ${modelDef.label} (~${modelDef.expectedSizeMb} MB)...`);
 
 	const https = await import("node:https");
 	const { createWriteStream } = await import("node:fs");
@@ -186,10 +173,7 @@ async function downloadVoiceModel(
 						return;
 					}
 
-					const totalSize = parseInt(
-						response.headers["content-length"] || "0",
-						10,
-					);
+					const totalSize = parseInt(response.headers["content-length"] || "0", 10);
 					let downloaded = 0;
 
 					const fileStream = createWriteStream(tmpPath);
@@ -275,9 +259,7 @@ export class VoiceManager {
 		try {
 			const config = vscode.workspace.getConfiguration("pi-agent");
 			if (config.get<boolean>("voice.enabled") === false) {
-				vscode.window.showInformationMessage(
-					"Voice dictation is disabled in settings",
-				);
+				vscode.window.showInformationMessage("Voice dictation is disabled in settings");
 				return;
 			}
 
@@ -362,8 +344,7 @@ export class VoiceManager {
 						},
 					);
 				} catch (err) {
-					if (err instanceof Error && err.message === "Download cancelled")
-						return;
+					if (err instanceof Error && err.message === "Download cancelled") return;
 					vscode.window.showErrorMessage(
 						`Failed to download voice model: ${err instanceof Error ? err.message : String(err)}`,
 					);
@@ -454,9 +435,7 @@ export class VoiceManager {
 
 	private stopVoiceCapture() {
 		if (this.voiceHelperProcess && this.isListening) {
-			this.voiceHelperProcess.stdin?.write(
-				JSON.stringify({ type: "stop" }) + "\n",
-			);
+			this.voiceHelperProcess.stdin?.write(JSON.stringify({ type: "stop" }) + "\n");
 			this.voiceHelperProcess.stdin?.end();
 			this.voiceHelperProcess = undefined;
 		}

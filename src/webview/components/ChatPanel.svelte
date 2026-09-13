@@ -161,7 +161,10 @@
   const BUILTIN_SLASH_COMMANDS = [
     { name: "/settings", description: "Open settings menu" },
     { name: "/model", description: "Select model (opens selector UI)" },
-    { name: "/export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
+    {
+      name: "/export",
+      description: "Export session (HTML default, or specify path: .html/.jsonl)",
+    },
     { name: "/name ", description: "Set session display name (e.g. /name my-session)" },
     { name: "/compact", description: "Manually compact the session context" },
     { name: "/new", description: "Start a new session" },
@@ -204,10 +207,7 @@
       .filter((c) => {
         if (!q) return true;
         const name = c.name.replace(/\s+$/, "").toLowerCase();
-        return (
-          name.toLowerCase().includes(q) ||
-          c.description.toLowerCase().includes(q)
-        );
+        return name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q);
       })
       .slice(0, 20);
   });
@@ -267,9 +267,9 @@
   const hasSessionResources = $derived(
     Boolean(
       resources.contextFileCount > 0 ||
-        resources.skillCount > 0 ||
-        resources.promptCount > 0 ||
-        resources.packageCount > 0,
+      resources.skillCount > 0 ||
+      resources.promptCount > 0 ||
+      resources.packageCount > 0,
     ),
   );
 
@@ -286,10 +286,7 @@
   const promptsTitle = $derived(
     resources.prompts.length > 0
       ? resources.prompts
-          .map(
-            (p, i) =>
-              `${i + 1}. ${p.name}${p.description ? ` — ${p.description}` : ""}`,
-          )
+          .map((p, i) => `${i + 1}. ${p.name}${p.description ? ` — ${p.description}` : ""}`)
           .join("\n")
       : "No prompts loaded",
   );
@@ -312,9 +309,7 @@
   const visibleMessages = $derived(messages.slice(-visibleMessageCount));
   const hasMoreMessages = $derived(messages.length > visibleMessageCount);
   const filteredFiles = $derived(
-    files
-      .filter((f) => f.toLowerCase().includes(autocompleteQuery.toLowerCase()))
-      .slice(0, 20),
+    files.filter((f) => f.toLowerCase().includes(autocompleteQuery.toLowerCase())).slice(0, 20),
   );
 
   // Auto-scroll logic
@@ -330,8 +325,7 @@
 
   function scrollToBottom() {
     userScrolledUp = false;
-    if (messagesContainer)
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
     showScrollBtn = false;
   }
 
@@ -358,11 +352,7 @@
           const textAfterCursor = inputText.slice(cursorPos);
           const fileMentions = data.paths.map((p: string) => "@" + p).join(" ");
           inputText =
-            textBeforeCursor +
-            (textBeforeCursor ? " " : "") +
-            fileMentions +
-            " " +
-            textAfterCursor;
+            textBeforeCursor + (textBeforeCursor ? " " : "") + fileMentions + " " + textAfterCursor;
         }
       }
     }
@@ -377,19 +367,12 @@
       if (!text) return;
       textareaEl?.focus();
       const cursorPos = textareaEl?.selectionStart || inputText.length;
-      inputText =
-        inputText.slice(0, cursorPos) + text + inputText.slice(cursorPos);
+      inputText = inputText.slice(0, cursorPos) + text + inputText.slice(cursorPos);
       closeAllAutocompletes();
     }
-    window.addEventListener(
-      "voice-transcription",
-      handleVoiceTranscription as EventListener,
-    );
+    window.addEventListener("voice-transcription", handleVoiceTranscription as EventListener);
     return () =>
-      window.removeEventListener(
-        "voice-transcription",
-        handleVoiceTranscription as EventListener,
-      );
+      window.removeEventListener("voice-transcription", handleVoiceTranscription as EventListener);
   });
 
   $effect(() => {
@@ -469,10 +452,6 @@
     }
   }
 
-  function focusSearchInput() {
-    tick().then(() => searchInputEl?.focus());
-  }
-
   function handleKeydown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
       e.preventDefault();
@@ -510,10 +489,7 @@
     if (showSlashAutocomplete) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        selectedSlashIndex = Math.min(
-          selectedSlashIndex + 1,
-          filteredSlashCommands.length - 1,
-        );
+        selectedSlashIndex = Math.min(selectedSlashIndex + 1, filteredSlashCommands.length - 1);
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
@@ -572,7 +548,9 @@
         if (tc.toolName) parts.push(tc.toolName);
         try {
           if (tc.args) parts.push(JSON.stringify(tc.args));
-        } catch {}
+        } catch {
+          // non-serializable tool args are skipped in the search index
+        }
         if (tc.result?.content) parts.push(tc.result.content);
       }
     }
@@ -595,7 +573,7 @@
 
   // Reset search nav index when query changes
   $effect(() => {
-    searchQuery;
+    void searchQuery; // track the query so the nav index resets when it changes
     currentSearchIdx = 0;
   });
 
@@ -623,8 +601,7 @@
       scrollToMatch(searchResults[0].index);
       return;
     }
-    currentSearchIdx =
-      (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
+    currentSearchIdx = (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
   }
 
@@ -656,16 +633,12 @@
       // Wait for Svelte to render the newly visible messages before scrolling
       requestAnimationFrame(() => {
         if (!messagesContainer) return;
-        const el2 = messagesContainer.querySelector(
-          `[data-msg-index="${msgIndex}"]`,
-        );
+        const el2 = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
         if (el2) el2.scrollIntoView({ behavior: "smooth", block: "center" });
       });
       return;
     }
-    const el = messagesContainer.querySelector(
-      `[data-msg-index="${msgIndex}"]`,
-    );
+    const el = messagesContainer.querySelector(`[data-msg-index="${msgIndex}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
@@ -709,8 +682,7 @@
 
   function requestWorkspaceFiles() {
     const vscode = (window as any).vscode;
-    if (vscode?.postMessage)
-      vscode.postMessage({ type: "get-workspace-files" });
+    if (vscode?.postMessage) vscode.postMessage({ type: "get-workspace-files" });
   }
 
   // Each close helper now owns a single dropdown's state. Do not cascade
@@ -746,18 +718,11 @@
     const slashTokenRegex = /\/\S*$/;
     const match = textBeforeCursor.match(slashTokenRegex);
     const insertName =
-      item.source === "builtin" && item.name.endsWith(" ")
-        ? item.name
-        : `${item.name} `;
+      item.source === "builtin" && item.name.endsWith(" ") ? item.name : `${item.name} `;
 
     if (match && match.index !== undefined) {
-      const replacement = match[0].startsWith(insertName)
-        ? `${match[0]} `
-        : insertName;
-      inputText =
-        inputText.slice(0, match.index) +
-        replacement +
-        textAfterCursor;
+      const replacement = match[0].startsWith(insertName) ? `${match[0]} ` : insertName;
+      inputText = inputText.slice(0, match.index) + replacement + textAfterCursor;
     } else {
       inputText =
         (textBeforeCursor ? textBeforeCursor + (textBeforeCursor.endsWith(" ") ? "" : " ") : "") +
@@ -768,17 +733,17 @@
     requestAnimationFrame(() => {
       textareaEl?.focus();
       // Position cursor after the inserted command + trailing space.
-      const newPos = match && match.index !== undefined
-        ? match.index + insertName.length
-        : textBeforeCursor.length + insertName.length;
+      const newPos =
+        match && match.index !== undefined
+          ? match.index + insertName.length
+          : textBeforeCursor.length + insertName.length;
       textareaEl?.setSelectionRange(newPos, newPos);
     });
   }
 
   function handleAttachFile() {
     const vscode = (window as any).vscode;
-    if (vscode?.postMessage)
-      vscode.postMessage({ type: "openFileAttachmentDialog" });
+    if (vscode?.postMessage) vscode.postMessage({ type: "openFileAttachmentDialog" });
   }
 
   // Drag-and-drop
@@ -854,17 +819,11 @@
     const textAfterCursor = inputText.slice(cursorPos);
     const match = textBeforeCursor.match(/@\S*$/);
     if (match && match.index !== undefined) {
-      inputText =
-        inputText.slice(0, match.index) + "@" + path + " " + textAfterCursor;
+      inputText = inputText.slice(0, match.index) + "@" + path + " " + textAfterCursor;
       closeAllAutocompletes();
     } else {
       inputText =
-        textBeforeCursor +
-        (textBeforeCursor ? " " : "") +
-        "@" +
-        path +
-        " " +
-        textAfterCursor;
+        textBeforeCursor + (textBeforeCursor ? " " : "") + "@" + path + " " + textAfterCursor;
       requestAnimationFrame(() => {
         const pos = textBeforeCursor.length + path.length + 2;
         textareaEl?.setSelectionRange(pos, pos);
@@ -880,22 +839,14 @@
     const textAfterCursor = inputText.slice(cursorPos);
     const match = textBeforeCursor.match(/@\S*$/);
     if (match && match.index !== undefined) {
-      inputText =
-        inputText.slice(0, match.index) +
-        "@" +
-        filepath +
-        " " +
-        textAfterCursor;
+      inputText = inputText.slice(0, match.index) + "@" + filepath + " " + textAfterCursor;
       closeAllAutocompletes();
       setTimeout(() => textareaEl?.focus(), 0);
     }
   }
 
   function handleShowMore() {
-    visibleMessageCount = Math.min(
-      visibleMessageCount + transcriptWindowSize,
-      messages.length,
-    );
+    visibleMessageCount = Math.min(visibleMessageCount + transcriptWindowSize, messages.length);
   }
 </script>
 
@@ -970,11 +921,7 @@
     </div>
   {/if}
 
-  <div
-    class="messages"
-    bind:this={messagesContainer}
-    onscroll={handleMessagesScroll}
-  >
+  <div class="messages" bind:this={messagesContainer} onscroll={handleMessagesScroll}>
     {#if showSearch}
       <div class="search-bar">
         <svg
@@ -984,12 +931,7 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2.5"
-          ><circle cx="11" cy="11" r="8" /><line
-            x1="21"
-            y1="21"
-            x2="16.65"
-            y2="16.65"
-          /></svg
+          ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
         >
         <input
           type="text"
@@ -1016,9 +958,7 @@
               stroke-width="3"><polyline points="15 18 9 12 15 6" /></svg
             >
           </button>
-          <span class="search-count"
-            >{currentSearchIdx + 1}/{searchResults.length}</span
-          >
+          <span class="search-count">{currentSearchIdx + 1}/{searchResults.length}</span>
           <button
             class="search-nav"
             onclick={goToNextMatch}
@@ -1037,11 +977,7 @@
         {:else}
           <span class="search-count">0 matches</span>
         {/if}
-        <button
-          class="search-close"
-          onclick={closeSearch}
-          aria-label="Close search"
-        >
+        <button class="search-close" onclick={closeSearch} aria-label="Close search">
           <svg
             width="12"
             height="12"
@@ -1049,12 +985,7 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2.5"
-            ><line x1="18" y1="6" x2="6" y2="18" /><line
-              x1="6"
-              y1="6"
-              x2="18"
-              y2="18"
-            /></svg
+            ><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg
           >
         </button>
       </div>
@@ -1082,9 +1013,8 @@
         <h1>PiLot Studio for VS Code</h1>
         <p class="subtitle">
           An unofficial GUI for the
-          <a href="https://pi.dev/" target="_blank" rel="noopener noreferrer"
-            >PI coding agent</a
-          >. Type a message below to start.
+          <a href="https://pi.dev/" target="_blank" rel="noopener noreferrer">PI coding agent</a>.
+          Type a message below to start.
         </p>
 
         <div class="setup-card">
@@ -1158,20 +1088,13 @@
                 stroke="currentColor"
                 stroke-width="2.5"
               >
-                <line x1="12" y1="5" x2="12" y2="19" /><line
-                  x1="5"
-                  y1="12"
-                  x2="19"
-                  y2="12"
-                />
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
               </svg>
               New Session
             </button>
           {/if}
           <div class="action-group">
-            <button
-              onclick={() => onSend("What files are in the current project?")}
-            >
+            <button onclick={() => onSend("What files are in the current project?")}>
               <svg
                 width="14"
                 height="14"
@@ -1186,9 +1109,7 @@
               </svg>
               List Files
             </button>
-            <button
-              onclick={() => onSend("Explain the architecture of this project")}
-            >
+            <button onclick={() => onSend("Explain the architecture of this project")}>
               <svg
                 width="14"
                 height="14"
@@ -1216,9 +1137,7 @@
               </svg>
               Debug Issue
             </button>
-            <button
-              onclick={() => onSend("Write tests for the main functionality")}
-            >
+            <button onclick={() => onSend("Write tests for the main functionality")}>
               <svg
                 width="14"
                 height="14"
@@ -1228,9 +1147,7 @@
                 stroke-width="2"
               >
                 <polyline points="9 11 12 14 22 4" />
-                <path
-                  d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
-                />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
               </svg>
               Write Tests
             </button>
@@ -1250,11 +1167,7 @@
           class:search-current={messages.length - visibleMessageCount + i === currentMatchIndex}
           data-msg-index={messages.length - visibleMessageCount + i}
         >
-          <MessageBubble
-            {message}
-            searchQuery={showSearch ? searchQuery : ""}
-            {onForkMessage}
-          />
+          <MessageBubble {message} searchQuery={showSearch ? searchQuery : ""} {onForkMessage} />
         </div>
       {/each}
 
@@ -1264,11 +1177,7 @@
           <div class="edit-message-card">
             <div class="edit-header">
               <span class="edit-title">Edit Message</span>
-              <button
-                class="edit-close"
-                onclick={cancelEdit}
-                aria-label="Close edit"
-              >
+              <button class="edit-close" onclick={cancelEdit} aria-label="Close edit">
                 <svg
                   width="14"
                   height="14"
@@ -1277,12 +1186,7 @@
                   stroke="currentColor"
                   stroke-width="2.5"
                 >
-                  <line x1="18" y1="6" x2="6" y2="18" /><line
-                    x1="6"
-                    y1="6"
-                    x2="18"
-                    y2="18"
-                  />
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
@@ -1290,16 +1194,11 @@
               bind:value={editText}
               onkeydown={handleEditKeydown}
               class="edit-textarea"
-              rows="3"
-            ></textarea>
+              rows="3"></textarea>
             <div class="edit-actions">
-              <button class="edit-cancel-btn" onclick={cancelEdit}
-                >Cancel</button
-              >
-              <button
-                class="edit-save-btn"
-                onclick={saveEdit}
-                disabled={!editText.trim()}>Save & Resend</button
+              <button class="edit-cancel-btn" onclick={cancelEdit}>Cancel</button>
+              <button class="edit-save-btn" onclick={saveEdit} disabled={!editText.trim()}
+                >Save & Resend</button
               >
             </div>
           </div>
@@ -1345,7 +1244,7 @@
   >
     {#if inputImages.length > 0}
       <div class="image-preview-bar">
-        {#each inputImages as img, i}
+        {#each inputImages as img, i (i)}
           <div class="image-preview-item">
             <img
               src={getImageDataUrl(img)}
@@ -1365,12 +1264,7 @@
                 stroke="currentColor"
                 stroke-width="3"
               >
-                <line x1="18" y1="6" x2="6" y2="18" /><line
-                  x1="6"
-                  y1="6"
-                  x2="18"
-                  y2="18"
-                />
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
             <span class="image-preview-name">{img.name || "image"}</span>
@@ -1397,19 +1291,10 @@
             stroke="currentColor"
             stroke-width="2"
           >
-            <circle cx="11" cy="11" r="8" /><line
-              x1="21"
-              y1="21"
-              x2="16.65"
-              y2="16.65"
-            />
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
         </button>
-        <button
-          class="action-btn"
-          onclick={onShowPromptTemplates}
-          title="Prompt Templates"
-        >
+        <button class="action-btn" onclick={onShowPromptTemplates} title="Prompt Templates">
           <svg
             width="14"
             height="14"
@@ -1426,11 +1311,7 @@
             /><line x1="9" y1="21" x2="9" y2="9" />
           </svg>
         </button>
-        <button
-          class="action-btn"
-          onclick={handleAttachFile}
-          title="Attach file (Ctrl+Shift+A)"
-        >
+        <button class="action-btn" onclick={handleAttachFile} title="Attach file (Ctrl+Shift+A)">
           <svg
             width="14"
             height="14"
@@ -1444,11 +1325,7 @@
             />
           </svg>
         </button>
-        <button
-          class="action-btn"
-          onclick={onShowExport}
-          title="Export session"
-        >
+        <button class="action-btn" onclick={onShowExport} title="Export session">
           <svg
             width="14"
             height="14"
@@ -1471,10 +1348,7 @@
         oninput={(e) => {
           const el = e.currentTarget;
           const currentHeight = el.getBoundingClientRect().height;
-          if (
-            lastAutoTextareaHeight > 0 &&
-            Math.abs(currentHeight - lastAutoTextareaHeight) > 4
-          ) {
+          if (lastAutoTextareaHeight > 0 && Math.abs(currentHeight - lastAutoTextareaHeight) > 4) {
             userResizedTextarea = true;
           }
 
@@ -1494,8 +1368,7 @@
           handleInput();
         }}
         placeholder="Type a message... / for commands, @ to mention files"
-        rows="4"
-      ></textarea>
+        rows="4"></textarea>
       {#if isStreaming}
         <button class="abort-btn" onclick={onAbort} title="Stop generation">
           <svg
@@ -1531,7 +1404,7 @@
 
     {#if showAutocomplete && filteredFiles.length > 0}
       <div class="autocomplete-dropdown">
-        {#each filteredFiles as file, i}
+        {#each filteredFiles as file, i (file)}
           <button
             class="autocomplete-item"
             class:selected={i === selectedIndex}
@@ -1546,9 +1419,7 @@
               stroke="currentColor"
               stroke-width="2"
             >
-              <path
-                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-              />
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             </svg>
             <span class="file-path">{file}</span>
           </button>
@@ -1558,7 +1429,7 @@
 
     {#if showSlashAutocomplete && filteredSlashCommands.length > 0}
       <div class="autocomplete-dropdown slash-autocomplete">
-        {#each filteredSlashCommands as cmd, i}
+        {#each filteredSlashCommands as cmd, i (cmd.name)}
           <button
             class="autocomplete-item"
             class:selected={i === selectedSlashIndex}
@@ -1590,9 +1461,7 @@
           stroke="currentColor"
           stroke-width="2"
         >
-          <path
-            d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z"
-          />
+          <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z" />
           <path d="M12 6v6l4 2" />
         </svg>
         <span class="token-label">In</span>
@@ -1623,9 +1492,7 @@
           stroke="currentColor"
           stroke-width="2"
         >
-          <rect x="2" y="4" width="20" height="16" rx="2" /><polyline
-            points="2 10 22 10"
-          />
+          <rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="2 10 22 10" />
         </svg>
         <span class="token-label">CACHE</span>
         <span class="token-value">{tokensCacheRead.toLocaleString()}</span>
@@ -1640,14 +1507,8 @@
           stroke="currentColor"
           stroke-width="2"
         >
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle
-            cx="9"
-            cy="7"
-            r="4"
-          />
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path
-            d="M16 3.13a4 4 0 0 1 0 7.75"
-          />
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
         <span class="token-label">Total</span>
         <span class="token-value">{tokensTotal.toLocaleString()}</span>
@@ -1920,11 +1781,7 @@
     transform: translate(-50%, -50%);
     width: 120px;
     height: 120px;
-    background: radial-gradient(
-      circle,
-      var(--color-primary) 0%,
-      transparent 70%
-    );
+    background: radial-gradient(circle, var(--color-primary) 0%, transparent 70%);
     opacity: 0.12;
     filter: blur(20px);
     animation: orb-pulse 5s ease-in-out infinite;

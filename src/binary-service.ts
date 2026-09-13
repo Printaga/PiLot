@@ -53,8 +53,7 @@ export class BinaryService {
 	async getCliVersion(): Promise<string | null> {
 		if (this.cachedVersion) return this.cachedVersion;
 		try {
-			const binaryPath =
-				this.resolvedBinaryPath || binaryServiceInternals.findPiBinary();
+			const binaryPath = this.resolvedBinaryPath || binaryServiceInternals.findPiBinary();
 			const result = await execFileAsync(binaryPath, ["--version"]);
 			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
 			if (result.code === 0 && versionOutput) {

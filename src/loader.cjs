@@ -54,11 +54,7 @@ function findPiSdkAtPath(nodeModulesPath) {
 	}
 
 	// Check direct @earendil-works/pi-coding-agent path
-	const directSdkPath = path.join(
-		nodeModulesPath,
-		"@earendil-works",
-		"pi-coding-agent",
-	);
+	const directSdkPath = path.join(nodeModulesPath, "@earendil-works", "pi-coding-agent");
 	if (fs.existsSync(directSdkPath)) {
 		// Resolve to real path for pnpm store symlinks, then find the real node_modules.
 		// Use lastIndexOf so that for mise's nested layout
@@ -75,9 +71,7 @@ function findPiSdkAtPath(nodeModulesPath) {
 				);
 				// Verify this real path has all required @earendil-works packages
 				if (
-					fs.existsSync(
-						path.join(realNodeModules, "@earendil-works", "pi-coding-agent"),
-					)
+					fs.existsSync(path.join(realNodeModules, "@earendil-works", "pi-coding-agent"))
 				) {
 					return realNodeModules;
 				}
@@ -93,9 +87,7 @@ function findPiSdkAtPath(nodeModulesPath) {
 	for (const entry of entries) {
 		if (entry.name.startsWith(".pi-coding-agent-") && entry.isSymbolicLink()) {
 			try {
-				const linkTarget = fs.realpathSync(
-					path.join(nodeModulesPath, entry.name),
-				);
+				const linkTarget = fs.realpathSync(path.join(nodeModulesPath, entry.name));
 				// The real path points to the actual package in pnpm store
 				const sdkNodeModules = path.join(
 					linkTarget,
@@ -153,13 +145,7 @@ function findGlobalPiInstallation() {
 		);
 
 		// pnpm global installations - check multiple versions
-		const pnpmGlobalBase = path.join(
-			homeDir,
-			".local",
-			"share",
-			"pnpm",
-			"global",
-		);
+		const pnpmGlobalBase = path.join(homeDir, ".local", "share", "pnpm", "global");
 		if (fs.existsSync(pnpmGlobalBase)) {
 			// pnpm v9+ uses v11 subdirectories with hashed folder names
 			const pnpmVersionDirs = fs
@@ -169,15 +155,9 @@ function findGlobalPiInstallation() {
 				const versionedPath = path.join(pnpmGlobalBase, versionDir);
 				const entries = fs
 					.readdirSync(versionedPath)
-					.filter(
-						(name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."),
-					);
+					.filter((name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."));
 				for (const hashDir of entries) {
-					const nodeModulesPath = path.join(
-						versionedPath,
-						hashDir,
-						"node_modules",
-					);
+					const nodeModulesPath = path.join(versionedPath, hashDir, "node_modules");
 					if (fs.existsSync(nodeModulesPath)) {
 						possiblePaths.push(nodeModulesPath);
 					}
@@ -186,47 +166,19 @@ function findGlobalPiInstallation() {
 		}
 
 		// bun global installation
-		const bunGlobalPath = path.join(
-			homeDir,
-			".bun",
-			"install",
-			"global",
-			"node_modules",
-		);
+		const bunGlobalPath = path.join(homeDir, ".bun", "install", "global", "node_modules");
 		if (fs.existsSync(bunGlobalPath)) {
 			possiblePaths.push(bunGlobalPath);
 		}
 
 		// Windows installation locations
 		possiblePaths.push(
-			path.join(
-				homeDir,
-				"AppData",
-				"Roaming",
-				"pi",
-				"agent",
-				"npm",
-				"node_modules",
-			),
-			path.join(
-				homeDir,
-				"AppData",
-				"Local",
-				"pi",
-				"agent",
-				"npm",
-				"node_modules",
-			),
+			path.join(homeDir, "AppData", "Roaming", "pi", "agent", "npm", "node_modules"),
+			path.join(homeDir, "AppData", "Local", "pi", "agent", "npm", "node_modules"),
 		);
 
 		// Windows pnpm global installations (versioned dirs like Linux)
-		const pnpmWinBase = path.join(
-			homeDir,
-			"AppData",
-			"Local",
-			"pnpm",
-			"global",
-		);
+		const pnpmWinBase = path.join(homeDir, "AppData", "Local", "pnpm", "global");
 		if (fs.existsSync(pnpmWinBase)) {
 			const pnpmVersionDirs = fs
 				.readdirSync(pnpmWinBase)
@@ -235,15 +187,9 @@ function findGlobalPiInstallation() {
 				const versionedPath = path.join(pnpmWinBase, versionDir);
 				const entries = fs
 					.readdirSync(versionedPath)
-					.filter(
-						(name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."),
-					);
+					.filter((name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."));
 				for (const hashDir of entries) {
-					const nodeModulesPath = path.join(
-						versionedPath,
-						hashDir,
-						"node_modules",
-					);
+					const nodeModulesPath = path.join(versionedPath, hashDir, "node_modules");
 					if (fs.existsSync(nodeModulesPath)) {
 						possiblePaths.push(nodeModulesPath);
 					}
@@ -253,29 +199,18 @@ function findGlobalPiInstallation() {
 
 		// Windows Roaming pnpm (less common, flat structure)
 		possiblePaths.push(
-			path.join(
-				homeDir,
-				"AppData",
-				"Roaming",
-				"pnpm",
-				"global",
-				"node_modules",
-			),
+			path.join(homeDir, "AppData", "Roaming", "pnpm", "global", "node_modules"),
 		);
 	}
 
 	// Check environment variable overrides
 	if (process.env.PI_AGENT_DIR) {
-		possiblePaths.unshift(
-			path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"),
-		);
+		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"));
 		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "node_modules"));
 	}
 
 	if (process.env.PI_HOME) {
-		possiblePaths.unshift(
-			path.join(process.env.PI_HOME, "agent", "npm", "node_modules"),
-		);
+		possiblePaths.unshift(path.join(process.env.PI_HOME, "agent", "npm", "node_modules"));
 		possiblePaths.unshift(path.join(process.env.PI_HOME, "node_modules"));
 	}
 
@@ -310,13 +245,7 @@ function findGlobalPiInstallation() {
 	// Check mise installations (covers installs where the 'pi' binary is not on
 	// PATH seen by VS Code, e.g. launched from desktop dock instead of terminal)
 	if (homeDir) {
-		const miseInstallsBase = path.join(
-			homeDir,
-			".local",
-			"share",
-			"mise",
-			"installs",
-		);
+		const miseInstallsBase = path.join(homeDir, ".local", "share", "mise", "installs");
 		if (fs.existsSync(miseInstallsBase)) {
 			try {
 				for (const category of fs.readdirSync(miseInstallsBase)) {
@@ -335,10 +264,7 @@ function findGlobalPiInstallation() {
 							const entryPath = path.join(categoryPath, entry);
 							if (!fs.statSync(entryPath).isDirectory()) continue;
 							const nmEntry = path.join(entryPath, "node_modules");
-							if (
-								fs.existsSync(nmEntry) &&
-								fs.statSync(nmEntry).isDirectory()
-							) {
+							if (fs.existsSync(nmEntry) && fs.statSync(nmEntry).isDirectory()) {
 								possiblePaths.push(nmEntry);
 								// Also check .mise subdirectory (aube-bin-shim layout:
 								// node_modules/.mise/@earendel-works+pi-coding-agent@ver/node_modules/)
@@ -346,10 +272,7 @@ function findGlobalPiInstallation() {
 								if (fs.existsSync(miseSubdir)) {
 									for (const miseEntry of fs.readdirSync(miseSubdir)) {
 										if (!miseEntry.includes("pi-coding-agent")) continue;
-										const miseEntryPath = path.join(
-											miseSubdir,
-											miseEntry,
-										);
+										const miseEntryPath = path.join(miseSubdir, miseEntry);
 										if (!fs.statSync(miseEntryPath).isDirectory()) continue;
 										for (const subVer of fs.readdirSync(miseEntryPath)) {
 											const subNodeModules = path.join(
@@ -444,9 +367,7 @@ function findPiSdkFromCommand() {
 				const resolved = fs.realpathSync(piPath);
 				const baseName = path.basename(resolved).toLowerCase();
 				if (baseName === "mise" || baseName === "mise.exe") {
-					console.error(
-						"[PiLot] Skipping mise binary shim (not a text shim): " + piPath,
-					);
+					console.error("[PiLot] Skipping mise binary shim (not a text shim): " + piPath);
 					return null;
 				}
 			}
@@ -471,7 +392,9 @@ function findPiSdkFromCommand() {
 		const result = deriveSdkPathFromBinary(piPath);
 		if (!result) {
 			console.error("[PiLot] Found 'pi' at: " + piPath);
-			console.error("[PiLot] Could not derive SDK path from binary (unrecognized shim format)");
+			console.error(
+				"[PiLot] Could not derive SDK path from binary (unrecognized shim format)",
+			);
 		}
 		return result;
 	} catch (e) {
@@ -531,9 +454,7 @@ function deriveSdkPathFromBinary(piPath) {
 			const sdkNodeModules = extractNodeModulesPath(targetPath);
 			if (
 				sdkNodeModules &&
-				fs.existsSync(
-					path.join(sdkNodeModules, "@earendil-works", "pi-coding-agent"),
-				)
+				fs.existsSync(path.join(sdkNodeModules, "@earendil-works", "pi-coding-agent"))
 			) {
 				return sdkNodeModules;
 			}
@@ -547,25 +468,18 @@ function deriveSdkPathFromBinary(piPath) {
 			// Resolve relative to the shim file's real directory (follows symlinks
 			// so "latest" style symlinks resolve to the real version path)
 			const realPiPath = fs.realpathSync(piPath);
-			const resolvedTarget = path.resolve(
-				path.dirname(realPiPath),
-				targetPath,
-			);
+			const resolvedTarget = path.resolve(path.dirname(realPiPath), targetPath);
 			const sdkNodeModules = extractNodeModulesPath(resolvedTarget);
 			if (
 				sdkNodeModules &&
-				fs.existsSync(
-					path.join(sdkNodeModules, "@earendel-works", "pi-coding-agent"),
-				)
+				fs.existsSync(path.join(sdkNodeModules, "@earendel-works", "pi-coding-agent"))
 			) {
 				return sdkNodeModules;
 			}
 		}
 
 		// Check pnpm exec line
-		const pnpmExecMatch = content.match(
-			/node_modules[^'"]*pi-coding-agent[^'"]*cli\.js/,
-		);
+		const pnpmExecMatch = content.match(/node_modules[^'"]*pi-coding-agent[^'"]*cli\.js/);
 		if (pnpmExecMatch) {
 			const fullMatch = pnpmExecMatch[0];
 			// Resolve relative path fragments relative to the binary's directory
@@ -575,9 +489,7 @@ function deriveSdkPathFromBinary(piPath) {
 			const sdkNodeModules = extractNodeModulesPath(resolvedPath);
 			if (
 				sdkNodeModules &&
-				fs.existsSync(
-					path.join(sdkNodeModules, "@earendil-works", "pi-coding-agent"),
-				)
+				fs.existsSync(path.join(sdkNodeModules, "@earendil-works", "pi-coding-agent"))
 			) {
 				return sdkNodeModules;
 			}
@@ -589,11 +501,7 @@ function deriveSdkPathFromBinary(piPath) {
 		const distIndex = normalizedPiPath.indexOf("/dist/");
 		if (distIndex > 0) {
 			const nodeModulesPath = piPath.substring(0, distIndex);
-			if (
-				fs.existsSync(
-					path.join(nodeModulesPath, "@earendil-works", "pi-coding-agent"),
-				)
-			) {
+			if (fs.existsSync(path.join(nodeModulesPath, "@earendil-works", "pi-coding-agent"))) {
 				return nodeModulesPath;
 			}
 		}
@@ -675,10 +583,7 @@ function hookModuleResolution(piNodeModules) {
 							const pkgJson = JSON.parse(
 								fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8"),
 							);
-							const mainFile = path.resolve(
-								pkgDir,
-								pkgJson.main || "dist/index.js",
-							);
+							const mainFile = path.resolve(pkgDir, pkgJson.main || "dist/index.js");
 							if (fs.existsSync(mainFile)) {
 								return mainFile;
 							}
@@ -754,11 +659,7 @@ function load() {
 					"Or visit the documentation for alternative installation methods.";
 
 				vscode.window
-					.showErrorMessage(
-						message,
-						"Open Documentation",
-						"Copy Install Command",
-					)
+					.showErrorMessage(message, "Open Documentation", "Copy Install Command")
 					.then(function (selection) {
 						if (selection === "Open Documentation") {
 							vscode.env.openExternal(
@@ -783,9 +684,7 @@ function load() {
 					console.error("  - %APPDATA%/pi/agent/npm/node_modules");
 					console.error("  - %LOCALAPPDATA%/pi/agent/npm/node_modules");
 				}
-				console.error(
-					"  - ~/.local/share/pnpm/global/[version]/node_modules (pnpm)",
-				);
+				console.error("  - ~/.local/share/pnpm/global/[version]/node_modules (pnpm)");
 				console.error("  - ~/.bun/install/global/node_modules (bun)");
 				console.error("  - npm global installation directory");
 				console.error("  - pnpm global installation directory");

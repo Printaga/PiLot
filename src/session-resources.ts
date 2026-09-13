@@ -8,10 +8,7 @@ import {
 	getAgentDir,
 	type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import {
-	readPackageSourcesFromSettingsFile,
-	type InstalledPackage,
-} from "./pi-binary.js";
+import { readPackageSourcesFromSettingsFile, type InstalledPackage } from "./pi-binary.js";
 
 /** Check whether a file extension indicates a binary (non-text) file. */
 export function isBinaryExtension(filePath: string): boolean {
@@ -120,21 +117,11 @@ export class SessionResources {
 		const workspacePath = this.getWorkspacePath();
 		const agentDir = getAgentDir();
 		const userSettingsPath = path.join(agentDir, "settings.json");
-		const projectSettingsPath = path.join(
-			workspacePath,
-			".pi",
-			"settings.json",
-		);
+		const projectSettingsPath = path.join(workspacePath, ".pi", "settings.json");
 
 		const packageSources = [
-			...readPackageSourcesFromSettingsFile(
-				userSettingsPath,
-				this.deps.logDebug,
-			),
-			...readPackageSourcesFromSettingsFile(
-				projectSettingsPath,
-				this.deps.logDebug,
-			),
+			...readPackageSourcesFromSettingsFile(userSettingsPath, this.deps.logDebug),
+			...readPackageSourcesFromSettingsFile(projectSettingsPath, this.deps.logDebug),
 		];
 
 		const packages = new Map<string, InstalledPackage>();
@@ -179,8 +166,7 @@ export class SessionResources {
 		const root = workspaceFolders[0].uri.fsPath;
 
 		const mentionRegex = /@([^\s]+)/g;
-		const mentions: Array<{ match: string; filePath: string; index: number }> =
-			[];
+		const mentions: Array<{ match: string; filePath: string; index: number }> = [];
 		let match: RegExpExecArray | null;
 		while ((match = mentionRegex.exec(text)) !== null) {
 			mentions.push({
@@ -207,9 +193,7 @@ export class SessionResources {
 					content.length > maxBytes
 						? content.slice(0, maxBytes) + "\n... [file truncated at 50KB]"
 						: content;
-				fileContexts.push(
-					`<file path="${mention.filePath}">\n${truncated}\n</file>`,
-				);
+				fileContexts.push(`<file path="${mention.filePath}">\n${truncated}\n</file>`);
 				resolvedText = resolvedText.replace(mention.match, "");
 			} catch (e) {
 				this.deps.logError(`[PI] Failed to read file ${absPath}:`, e);
@@ -232,12 +216,8 @@ export class SessionResources {
 		const root = workspaceFolders[0].uri.fsPath;
 
 		try {
-			const packageJsonPath = vscode.Uri.joinPath(
-				workspaceFolders[0].uri,
-				"package.json",
-			);
-			const packageJsonContent =
-				await vscode.workspace.fs.readFile(packageJsonPath);
+			const packageJsonPath = vscode.Uri.joinPath(workspaceFolders[0].uri, "package.json");
+			const packageJsonContent = await vscode.workspace.fs.readFile(packageJsonPath);
 			const pkg = JSON.parse(packageJsonContent.toString());
 
 			return `

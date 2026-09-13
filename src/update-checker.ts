@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import { VERSION, getAgentDir, DefaultPackageManager, type SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+	VERSION,
+	getAgentDir,
+	DefaultPackageManager,
+	type SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { PiAgentProvider } from "./pi-agent-provider.js";
 import { logDiagnostics } from "./commands/diagnostics.js";
 
@@ -88,12 +93,11 @@ export async function fetchLatestPiRelease(): Promise<PiReleaseInfo | undefined>
 
 		return {
 			version: data.version.trim(),
-			packageName: typeof data.packageName === "string" && data.packageName.trim()
-				? data.packageName.trim()
-				: undefined,
-			note: typeof data.note === "string" && data.note.trim()
-				? data.note.trim()
-				: undefined,
+			packageName:
+				typeof data.packageName === "string" && data.packageName.trim()
+					? data.packageName.trim()
+					: undefined,
+			note: typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined,
 		};
 	} catch {
 		return undefined;
@@ -127,8 +131,7 @@ export async function checkForPackageUpdates(
 	if (process.env.PI_OFFLINE) return [];
 
 	try {
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 
 		if (!settingsManager) return [];
 
@@ -171,7 +174,9 @@ export async function showUpdateNotification(
 			.slice(0, 3)
 			.map((p) => p.displayName)
 			.join(", ");
-		parts.push(`**${packageUpdates.length} package update(s)** (${displayNames}${packageUpdates.length > 3 ? ", …" : ""})`);
+		parts.push(
+			`**${packageUpdates.length} package update(s)** (${displayNames}${packageUpdates.length > 3 ? ", …" : ""})`,
+		);
 	}
 
 	if (parts.length === 0) return undefined;
@@ -216,9 +221,7 @@ async function runPiExtensionsUpdateInTerminal(): Promise<void> {
  * Perform a full update check and notify the user if updates are available.
  * This is the main entry point for a check cycle.
  */
-export async function runUpdateCheck(
-	provider: PiAgentProvider,
-): Promise<void> {
+export async function runUpdateCheck(provider: PiAgentProvider): Promise<void> {
 	logDiagnostics("[Update Checker] Starting update check…");
 	logDiagnostics(`[Update Checker] Current PI version: ${VERSION}`);
 
@@ -232,9 +235,7 @@ export async function runUpdateCheck(
 
 	// Check for package updates
 	const settingsManager = provider.getSettingsManager();
-	const packageUpdates = settingsManager
-		? await checkForPackageUpdates(settingsManager)
-		: [];
+	const packageUpdates = settingsManager ? await checkForPackageUpdates(settingsManager) : [];
 
 	if (packageUpdates.length > 0) {
 		logDiagnostics(
@@ -245,17 +246,12 @@ export async function runUpdateCheck(
 	}
 
 	// Notify the webview about update status
-	provider.sendUpdatesToWebview(
-		piUpdate?.version ?? null,
-		packageUpdates.length,
-	);
+	provider.sendUpdatesToWebview(piUpdate?.version ?? null, packageUpdates.length);
 
 	// Nothing to update
 	if (!piUpdate && packageUpdates.length === 0) {
 		logDiagnostics("[Update Checker] No updates found.");
-		vscode.window.showInformationMessage(
-			`✓ PiLot Studio is up to date (PI v${VERSION})`,
-		);
+		vscode.window.showInformationMessage(`✓ PiLot Studio is up to date (PI v${VERSION})`);
 		return;
 	}
 
@@ -303,18 +299,20 @@ export async function runUpdateCheck(
 					details.push(`  • ${pkg.displayName} (${pkg.type})`);
 				}
 			}
-			vscode.window.showInformationMessage(
-				`Package Updates Available\n${details.join("\n")}`,
-				"Update All",
-				"Update Extensions Only",
-				"Close",
-			).then(async (choice) => {
-				if (choice === "Update All") {
-					await runPiUpdateInTerminal();
-				} else if (choice === "Update Extensions Only") {
-					await runPiExtensionsUpdateInTerminal();
-				}
-			});
+			vscode.window
+				.showInformationMessage(
+					`Package Updates Available\n${details.join("\n")}`,
+					"Update All",
+					"Update Extensions Only",
+					"Close",
+				)
+				.then(async (choice) => {
+					if (choice === "Update All") {
+						await runPiUpdateInTerminal();
+					} else if (choice === "Update Extensions Only") {
+						await runPiExtensionsUpdateInTerminal();
+					}
+				});
 			break;
 		}
 	}
@@ -400,30 +398,32 @@ export async function performCheckWithDeduplication(
 	const settingsManager = provider.getSettingsManager();
 	let packageUpdates: PackageUpdateInfo[];
 	try {
-		packageUpdates = settingsManager
-			? await checkForPackageUpdates(settingsManager)
-			: [];
+		packageUpdates = settingsManager ? await checkForPackageUpdates(settingsManager) : [];
 	} catch {
 		packageUpdates = [];
 	}
 
 	// Build update identifiers for deduplication
 	const piUpdateId = piUpdate ? `pi:v${piUpdate.version}` : "";
-	const packageUpdateIds = packageUpdates.map((p) => `pkg:${p.source}`).sort().join(",");
+	const packageUpdateIds = packageUpdates
+		.map((p) => `pkg:${p.source}`)
+		.sort()
+		.join(",");
 
 	// Get previously known updates
 	const knownPiUpdate = context.globalState.get<string>(STORAGE_KEY_KNOWN_PI_UPDATE, "");
-	const knownPackageUpdates = context.globalState.get<string>(STORAGE_KEY_KNOWN_PACKAGE_UPDATES, "");
+	const knownPackageUpdates = context.globalState.get<string>(
+		STORAGE_KEY_KNOWN_PACKAGE_UPDATES,
+		"",
+	);
 
 	// Determine if there are new updates to report
 	const hasNewPiUpdate = piUpdate && piUpdateId !== knownPiUpdate;
-	const hasNewPackageUpdates = packageUpdates.length > 0 && packageUpdateIds !== knownPackageUpdates;
+	const hasNewPackageUpdates =
+		packageUpdates.length > 0 && packageUpdateIds !== knownPackageUpdates;
 
 	// Notify the webview about current update state (even if already known)
-	provider.sendUpdatesToWebview(
-		piUpdate?.version ?? null,
-		packageUpdates.length,
-	);
+	provider.sendUpdatesToWebview(piUpdate?.version ?? null, packageUpdates.length);
 
 	if (!hasNewPiUpdate && !hasNewPackageUpdates) {
 		logDiagnostics("[Update Checker] No new updates since last notification.");
@@ -471,18 +471,20 @@ export async function performCheckWithDeduplication(
 					details.push(`  • ${pkg.displayName} (${pkg.type})`);
 				}
 			}
-			vscode.window.showInformationMessage(
-				`Package Updates Available\n${details.join("\n")}`,
-				"Update All",
-				"Update Extensions Only",
-				"Close",
-			).then(async (choice) => {
-				if (choice === "Update All") {
-					await runPiUpdateInTerminal();
-				} else if (choice === "Update Extensions Only") {
-					await runPiExtensionsUpdateInTerminal();
-				}
-			});
+			vscode.window
+				.showInformationMessage(
+					`Package Updates Available\n${details.join("\n")}`,
+					"Update All",
+					"Update Extensions Only",
+					"Close",
+				)
+				.then(async (choice) => {
+					if (choice === "Update All") {
+						await runPiUpdateInTerminal();
+					} else if (choice === "Update Extensions Only") {
+						await runPiExtensionsUpdateInTerminal();
+					}
+				});
 			break;
 		}
 	}

@@ -1,17 +1,17 @@
-import * as path from 'path';
-import * as fs from 'fs';
-import { registerHooks } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import Mocha from 'mocha';
-import { glob } from 'glob';
-import * as vscode from 'vscode';
+import * as path from "path";
+import * as fs from "fs";
+import { registerHooks } from "node:module";
+import { pathToFileURL } from "node:url";
+import Mocha from "mocha";
+import { glob } from "glob";
+import * as vscode from "vscode";
 
 process.env.PI_TEST = "1";
 
 // Inside the VS Code extension host, console output is routed to the Output
 // channel rather than stdout, so the default reporter's results are swallowed.
 // Mirror results to a file we can read back after the run.
-const reportPath = path.resolve(import.meta.dirname, 'test-results.log');
+const reportPath = path.resolve(import.meta.dirname, "test-results.log");
 
 // ── VS Code test facade ─────────────────────────────────────────────────────
 //
@@ -22,24 +22,20 @@ const reportPath = path.resolve(import.meta.dirname, 'test-results.log');
 // writes are captured per property, and nested objects like `workspace.fs`
 // get the same treatment.
 
-function mutableCopy(
-	target: object,
-	bindFunctions = false,
-): Record<string, unknown> {
+function mutableCopy(target: object, bindFunctions = false): Record<string, unknown> {
 	const copy: Record<string, unknown> = {};
 	for (const key of Object.getOwnPropertyNames(target)) {
 		try {
 			const value = (target as any)[key];
-			if (typeof value === 'undefined') {
+			if (typeof value === "undefined") {
 				continue;
 			}
 			// Never bind classes/constructors: binding strips statics like
 			// `Uri.file`. Plain host methods keep their receiver via bind().
 			const isConstructor =
-				typeof value === 'function' &&
-				value.prototype?.constructor === value;
+				typeof value === "function" && value.prototype?.constructor === value;
 			copy[key] =
-				bindFunctions && typeof value === 'function' && !isConstructor
+				bindFunctions && typeof value === "function" && !isConstructor
 					? value.bind(target)
 					: value;
 		} catch {
@@ -58,7 +54,7 @@ function installVscodeFacade(): void {
 	const facade: Record<string, any> =
 		((globalThis as any).__vscodeFacade as Record<string, any> | undefined) ?? {};
 	const isPlainObject = (v: any): boolean =>
-		!!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
+		!!v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
 	// A frozen plain object cannot take mock writes either. VS Code 1.137 ships
 	// workspace.fs as exactly that (frozen, Object.prototype), so treat any
 	// non-extensible value as a real namespace: never copy it onto the facade
@@ -68,15 +64,15 @@ function installVscodeFacade(): void {
 	// would put the REAL frozen namespaces (getter-only props on newer VS Code)
 	// on the facade and break every mock assignment.
 	const namespaceKeys = new Set([
-		'window',
-		'workspace',
-		'commands',
-		'env',
-		'extensions',
-		'languages',
+		"window",
+		"workspace",
+		"commands",
+		"env",
+		"extensions",
+		"languages",
 	]);
 	const assignProps = (target: any, src: any, bind = false): void => {
-		if (!src || typeof src !== 'object') return;
+		if (!src || typeof src !== "object") return;
 		for (const key of Object.getOwnPropertyNames(src)) {
 			if (namespaceKeys.has(key)) continue;
 			// Proposed-API accessors (e.g. window.linkPresentationRules on newer
@@ -87,22 +83,15 @@ function installVscodeFacade(): void {
 			} catch {
 				continue;
 			}
-			if (typeof value === 'undefined') continue;
-			const isCtor =
-				typeof value === 'function' && value.prototype?.constructor === value;
+			if (typeof value === "undefined") continue;
+			const isCtor = typeof value === "function" && value.prototype?.constructor === value;
 			// Skip nested API namespaces (e.g. workspace.fs): they are composed
 			// explicitly and copying the real frozen namespace breaks mocks.
-			if (
-				!isCtor &&
-				typeof value === 'object' &&
-				!isMockable(value)
-			) {
+			if (!isCtor && typeof value === "object" && !isMockable(value)) {
 				continue;
 			}
 			const assigned =
-				bind && typeof value === 'function' && !isCtor
-					? value.bind(src)
-					: value;
+				bind && typeof value === "function" && !isCtor ? value.bind(src) : value;
 			// Newer VS Code APIs expose getter-only properties (e.g.
 			// window.visibleTextEditors); skip them so reads still fall through
 			// to the real API instead of crashing the whole suite.
@@ -126,10 +115,10 @@ function installVscodeFacade(): void {
 		}
 		return isMockable(parent[name]) ? parent[name] : {};
 	};
-	assignProps(ensureObj(facade, 'window'), real.window, true);
-	const ws = ensureObj(facade, 'workspace');
+	assignProps(ensureObj(facade, "window"), real.window, true);
+	const ws = ensureObj(facade, "workspace");
 	assignProps(ws, real.workspace, true);
-	assignProps(ensureObj(ws, 'fs'), real.workspace?.fs, true);
+	assignProps(ensureObj(ws, "fs"), real.workspace?.fs, true);
 	facade.commands = facade.commands ?? mutableCopy(real.commands);
 	facade.env = facade.env ?? mutableCopy(real.env);
 	facade.extensions = facade.extensions ?? mutableCopy(real.extensions);
@@ -144,15 +133,15 @@ function installVscodeFacade(): void {
 // shim must not import `"vscode"` itself.
 function redirectVscodeImportsForCompiledModules(): void {
 	const shimUrl = pathToFileURL(
-		path.resolve(import.meta.dirname, '../mocks/vscode-shim.js'),
+		path.resolve(import.meta.dirname, "../mocks/vscode-shim.js"),
 	).href;
 
 	registerHooks({
 		resolve(specifier, context, nextResolve) {
 			if (
-				specifier === 'vscode' &&
-				typeof context.parentURL === 'string' &&
-				context.parentURL.includes('/dist-tsc/')
+				specifier === "vscode" &&
+				typeof context.parentURL === "string" &&
+				context.parentURL.includes("/dist-tsc/")
 			) {
 				return { url: shimUrl, shortCircuit: true };
 			}
@@ -167,31 +156,40 @@ export async function run(): Promise<void> {
 
 	const appendReport = (line: string) => {
 		try {
-			fs.appendFileSync(reportPath, line + '\n');
+			fs.appendFileSync(reportPath, line + "\n");
 		} catch {
 			/* ignore */
 		}
 	};
 
 	// Surface uncaught errors so a crash still leaves a trail in the report.
-	process.on('uncaughtException', (err) => appendReport(`UNCAUGHT: ${err && err.stack ? err.stack : String(err)}`));
-	process.on('unhandledRejection', (reason) => appendReport(`UNHANDLED: ${reason && (reason as any).stack ? (reason as any).stack : String(reason)}`));
+	process.on("uncaughtException", (err) =>
+		appendReport(`UNCAUGHT: ${err && err.stack ? err.stack : String(err)}`),
+	);
+	process.on("unhandledRejection", (reason) =>
+		appendReport(
+			`UNHANDLED: ${reason && (reason as any).stack ? (reason as any).stack : String(reason)}`,
+		),
+	);
 
 	const mocha = new Mocha({
-		ui: 'tdd',
+		ui: "tdd",
 		color: false,
 		timeout: 10000,
-		reporter: 'spec',
+		reporter: "spec",
 	});
 	// Optional focused runs: MOCHA_GREP="toggleVoiceCapture" node dist-tsc/test/runTest.js
 	if (process.env.MOCHA_GREP) {
 		mocha.grep(new RegExp(process.env.MOCHA_GREP));
 	}
 
-	const testsRoot = path.resolve(import.meta.dirname, '.');
-	const files = await glob('**/**.test.js', { cwd: testsRoot });
+	const testsRoot = path.resolve(import.meta.dirname, ".");
+	// Per-file host isolation (see runTest.ts): load only the file under test.
+	const fileFilter = process.env.MOCHA_TEST_FILE
+		? [process.env.MOCHA_TEST_FILE]
+		: await glob("**/**.test.js", { cwd: testsRoot });
 
-	for (const file of files) {
+	for (const file of fileFilter) {
 		mocha.addFile(path.resolve(testsRoot, file));
 	}
 
@@ -203,7 +201,7 @@ export async function run(): Promise<void> {
 				for (const f of results.failures) {
 					lines.push(`FAIL: ${f}`);
 				}
-				fs.writeFileSync(reportPath, lines.join('\n') + '\n');
+				fs.writeFileSync(reportPath, lines.join("\n") + "\n");
 				if (failures > 0) {
 					reject(new Error(`${failures} tests failed.`));
 				} else {
@@ -214,10 +212,10 @@ export async function run(): Promise<void> {
 			// Inside the VS Code extension host, console output is routed to the
 			// Output channel rather than stdout, so the reporter's results are
 			// swallowed. Mirror pass/fail results to a file we can read back.
-			runner.on('pass', () => {
+			runner.on("pass", () => {
 				results.pass++;
 			});
-			runner.on('fail', (test: any, err: any) => {
+			runner.on("fail", (test: any, err: any) => {
 				results.fail++;
 				results.failures.push(
 					`${test.fullTitle()}: ${err && err.message ? err.message : String(err)}`,
@@ -236,7 +234,7 @@ export async function run(): Promise<void> {
 // there. This also lets the suite run under plain Node (no Electron host),
 // which avoids the inotify/Agent-Host resource limits of the full IDE.
 const isMain =
-	typeof process !== 'undefined' &&
+	typeof process !== "undefined" &&
 	!!process.argv[1] &&
 	pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isMain) {

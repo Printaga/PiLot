@@ -51,9 +51,7 @@ suite("commands: logDiagnostics", () => {
 
 		const buffer = getDiagnosticsBuffer();
 		assert.ok(buffer.some((line: string) => line.includes("42")));
-		assert.ok(
-			buffer.some((line: string) => line.includes('"foo"') || line.includes('foo')),
-		);
+		assert.ok(buffer.some((line: string) => line.includes('"foo"') || line.includes("foo")));
 	});
 
 	test("logs confirmation message when enabled", () => {
@@ -61,11 +59,7 @@ suite("commands: logDiagnostics", () => {
 		setDiagnosticsEnabled(true);
 
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 });
 
@@ -83,11 +77,7 @@ suite("commands: setDiagnosticsEnabled", () => {
 	test("enabling logs a confirmation", () => {
 		setDiagnosticsEnabled(true);
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 
 	test("disabling does not add confirmation message", () => {
@@ -95,11 +85,7 @@ suite("commands: setDiagnosticsEnabled", () => {
 		resetDiagnosticsStateForTests();
 		setDiagnosticsEnabled(false);
 		const buffer = getDiagnosticsBuffer();
-		assert.ok(
-			!buffer.some((line: string) =>
-				line.includes("Diagnostics logging enabled"),
-			),
-		);
+		assert.ok(!buffer.some((line: string) => line.includes("Diagnostics logging enabled")));
 	});
 });
 
@@ -287,13 +273,11 @@ suite("commands: light mode toggle & status bar", () => {
 				configStore.set(key, value);
 				configEmitter.fire({
 					affectsConfiguration: (section: string) =>
-						section === "pi-agent" ||
-						section.startsWith(`pi-agent.${key}`),
+						section === "pi-agent" || section.startsWith(`pi-agent.${key}`),
 				});
 			},
 		});
-		(vscode.workspace as any).onDidChangeConfiguration =
-			configEmitter.event;
+		(vscode.workspace as any).onDidChangeConfiguration = configEmitter.event;
 	});
 
 	teardown(() => {
@@ -366,9 +350,7 @@ suite("commands: light mode toggle & status bar", () => {
 
 		// Flip the config directly (VS Code settings UI path): the config
 		// store fires the change event, which must re-sync the status item.
-		await (vscode.workspace as any)
-			.getConfiguration()
-			.update("lightMode", true);
+		await (vscode.workspace as any).getConfiguration().update("lightMode", true);
 
 		assert.strictEqual(item.shown, true);
 		assert.ok(item.text.includes("Light"));

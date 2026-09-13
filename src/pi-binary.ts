@@ -60,8 +60,7 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 	}
 
 	const hasPathSep =
-		trimmed.includes("/") ||
-		(process.platform === "win32" && trimmed.includes("\\"));
+		trimmed.includes("/") || (process.platform === "win32" && trimmed.includes("\\"));
 	if (hasPathSep) {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		const basePath = workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -275,19 +274,10 @@ export function readPackageSourcesFromSettingsFile(
 		}
 
 		return parsed.packages
-			.map((entry) =>
-				typeof entry === "string" ? entry.trim() : entry.source?.trim(),
-			)
-			.filter(
-				(entry): entry is string =>
-					typeof entry === "string" && entry.length > 0,
-			);
+			.map((entry) => (typeof entry === "string" ? entry.trim() : entry.source?.trim()))
+			.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 	} catch (error) {
-		logDebug?.(
-			"[PI] Failed to read package sources from settings file:",
-			filePath,
-			error,
-		);
+		logDebug?.("[PI] Failed to read package sources from settings file:", filePath, error);
 		return [];
 	}
 }

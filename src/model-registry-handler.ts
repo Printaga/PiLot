@@ -50,9 +50,10 @@ export interface ModelItem {
  * A model with `reasoning: false` only supports "off"; otherwise any level not
  * explicitly mapped to `null` is considered supported.
  */
-export function deriveAvailableThinkingLevels(
-	model: { reasoning?: boolean; thinkingLevelMap?: ThinkingLevelMap },
-): ThinkingLevel[] {
+export function deriveAvailableThinkingLevels(model: {
+	reasoning?: boolean;
+	thinkingLevelMap?: ThinkingLevelMap;
+}): ThinkingLevel[] {
 	if (model.reasoning === false) return ["off"];
 	const map = model.thinkingLevelMap;
 	if (!map) return [...THINKING_LEVELS];
@@ -135,10 +136,7 @@ export class ModelRegistryHandler {
 				name: m.name || m.id,
 				availableThinkingLevels: deriveAvailableThinkingLevels(m),
 			}))
-			.sort(
-				(a, b) =>
-					a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),
-			);
+			.sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
 	}
 
 	async refreshAvailableModels(): Promise<void> {
@@ -185,9 +183,7 @@ export class ModelRegistryHandler {
 				// Treat a failing command as "no models" so shell error text on
 				// stderr is never parsed as a model table.
 				if (code !== 0) {
-					throw new Error(
-						`pi --list-models exited with code ${code}: ${stderr}`,
-					);
+					throw new Error(`pi --list-models exited with code ${code}: ${stderr}`);
 				}
 				const output = (stderr || "") + "\n" + (stdout || "");
 				const models = new Set<string>();
@@ -195,11 +191,7 @@ export class ModelRegistryHandler {
 				for (const line of output.split("\n")) {
 					// Match: "provider  modelId  context  max-out  thinking  images"
 					const match = line.match(/^(\S+)\s+(\S+)\s+\S/);
-					if (
-						match &&
-						match[1] !== "provider" &&
-						!match[0].startsWith("Warning")
-					) {
+					if (match && match[1] !== "provider" && !match[0].startsWith("Warning")) {
 						models.add(`${match[1]}/${match[2]}`);
 					}
 				}
@@ -229,9 +221,7 @@ export class ModelRegistryHandler {
 		if (cliModels.size === 0) return;
 
 		// Only write patterns that the CLI actually knows about
-		const validPatterns = this.deps.favoriteModels.filter((pattern) =>
-			cliModels.has(pattern),
-		);
+		const validPatterns = this.deps.favoriteModels.filter((pattern) => cliModels.has(pattern));
 
 		settingsManager.setEnabledModels(validPatterns);
 		await settingsManager.flush();
@@ -259,10 +249,7 @@ export class ModelRegistryHandler {
 
 		if (newModels.length > 0) {
 			this.deps.favoriteModels = [...this.deps.favoriteModels, ...newModels];
-			await this.deps.globalState.update(
-				"favoriteModels",
-				this.deps.favoriteModels,
-			);
+			await this.deps.globalState.update("favoriteModels", this.deps.favoriteModels);
 			this.deps.notifyWebview({
 				type: "favorites-updated",
 				data: { favorites: this.deps.favoriteModels },
@@ -270,10 +257,7 @@ export class ModelRegistryHandler {
 		}
 	}
 
-	async toggleFavorite(
-		modelId: string,
-		isFavorite: boolean,
-	): Promise<string[]> {
+	async toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]> {
 		if (isFavorite && !this.deps.favoriteModels.includes(modelId)) {
 			// Guard: only add models that exist in the current registry
 			if (!this.deps.availableModels.some((m) => m.id === modelId)) {
@@ -281,14 +265,9 @@ export class ModelRegistryHandler {
 			}
 			this.deps.favoriteModels = [...this.deps.favoriteModels, modelId];
 		} else if (!isFavorite) {
-			this.deps.favoriteModels = this.deps.favoriteModels.filter(
-				(m) => m !== modelId,
-			);
+			this.deps.favoriteModels = this.deps.favoriteModels.filter((m) => m !== modelId);
 		}
-		await this.deps.globalState.update(
-			"favoriteModels",
-			this.deps.favoriteModels,
-		);
+		await this.deps.globalState.update("favoriteModels", this.deps.favoriteModels);
 
 		// Sync to PI CLI settings.json (validates against CLI model list)
 		await this.syncFavoritesToSettings();
@@ -300,9 +279,7 @@ export class ModelRegistryHandler {
 		const models = this.deps.availableModels;
 		if (models.length === 0) return;
 
-		const currentIndex = models.findIndex(
-			(m) => m.id === this.deps.currentModelId,
-		);
+		const currentIndex = models.findIndex((m) => m.id === this.deps.currentModelId);
 		const nextModel = models[(currentIndex + 1) % models.length];
 		if (nextModel) {
 			this.deps.currentModelId = nextModel.id;

@@ -35,17 +35,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(startUpdateChecker(context, provider));
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			"pi-agent.openPanel",
-			async (sessionId?: string) => {
-				await vscode.commands.executeCommand("piAgentChat.focus");
-				if (sessionId) {
-					await provider.switchSession(sessionId);
-				} else if (!provider.hasSession) {
-					await provider.newSession();
-				}
-			},
-		),
+		vscode.commands.registerCommand("pi-agent.openPanel", async (sessionId?: string) => {
+			await vscode.commands.executeCommand("piAgentChat.focus");
+			if (sessionId) {
+				await provider.switchSession(sessionId);
+			} else if (!provider.hasSession) {
+				await provider.newSession();
+			}
+		}),
 	);
 
 	context.subscriptions.push(
@@ -86,20 +83,14 @@ const resourceConfigKeys = [
 export function installConfigListener(
 	provider: Pick<
 		PiAgentProvider,
-		| "updateConfig"
-		| "reloadSessionResources"
-		| "restartSessionPreservingHistory"
-		| "logDebug"
+		"updateConfig" | "reloadSessionResources" | "restartSessionPreservingHistory" | "logDebug"
 	>,
 ): vscode.Disposable {
 	return vscode.workspace.onDidChangeConfiguration((e) => {
 		if (e.affectsConfiguration("pi-agent")) {
 			const newConfig = vscode.workspace.getConfiguration("pi-agent");
 			provider.updateConfig({
-				defaultModel: newConfig.get(
-					"defaultModel",
-					"anthropic/claude-sonnet-4-5",
-				),
+				defaultModel: newConfig.get("defaultModel", "anthropic/claude-sonnet-4-5"),
 				defaultProvider: newConfig.get("defaultProvider", "anthropic"),
 				autoContext: newConfig.get("context.autoAttach", true),
 				maxTokens: newConfig.get("maxTokens", 8192),
@@ -112,16 +103,9 @@ export function installConfigListener(
 				// construction, so the session must be rebuilt (history is
 				// preserved) for the change to take effect.
 				provider.restartSessionPreservingHistory().catch((err) => {
-					provider.logDebug(
-						"[PI] Failed to restart session for light mode change:",
-						err,
-					);
+					provider.logDebug("[PI] Failed to restart session for light mode change:", err);
 				});
-			} else if (
-				resourceConfigKeys.some((k) =>
-					e.affectsConfiguration(`pi-agent.${k}`),
-				)
-			) {
+			} else if (resourceConfigKeys.some((k) => e.affectsConfiguration(`pi-agent.${k}`))) {
 				provider.reloadSessionResources().catch((err) => {
 					provider.logDebug("[PI] Failed to reload session resources:", err);
 				});

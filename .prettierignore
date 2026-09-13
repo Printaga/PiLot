@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-tsc/
+out/
+.vscode-test/
+media/
+patches/
+.kilo/
+pnpm-lock.yaml
+pnpm-workspace.yaml

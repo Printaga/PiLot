@@ -1,0 +1,50 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  # Full history so the Fallow audit can diff against the default branch.
+                  fetch-depth: 0
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Check (tsc + svelte-check)
+              run: pnpm run check
+
+            - name: Lint
+              run: pnpm run lint
+
+            - name: Format check
+              run: pnpm run format:check
+
+            - name: Unit tests (plain Node, no VS Code host)
+              run: pnpm test:unit
+
+            - name: Webview component tests (plain Node + jsdom)
+              run: pnpm run test:webview
+
+            - name: Fallow audit
+              run: pnpm run fallow:audit
+
+            - name: Build
+              run: pnpm run build
+
+            - name: E2E tests (VS Code integration suite)
+              run: pnpm test:e2e

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   interface SessionItem {
     id: string;
@@ -14,13 +15,11 @@
   let selectedNodeId = $state<string | null>(null);
   let searchQuery = $state("");
   let selectionMode = $state(false);
-  let selectedSessionIds = $state<Set<string>>(new Set());
+  let selectedSessionIds = new SvelteSet<string>();
 
   const filteredSessions = $derived(
     searchQuery
-      ? sessions.filter((s) =>
-          s.label?.toLowerCase().includes(searchQuery.toLowerCase()),
-        )
+      ? sessions.filter((s) => s.label?.toLowerCase().includes(searchQuery.toLowerCase()))
       : sessions,
   );
 
@@ -102,25 +101,24 @@
 
   function toggleSelectionMode() {
     selectionMode = !selectionMode;
-    selectedSessionIds = new Set();
+    clearSelection();
   }
 
   function toggleSessionSelection(id: string) {
-    const next = new Set(selectedSessionIds);
-    if (next.has(id)) {
-      next.delete(id);
+    if (selectedSessionIds.has(id)) {
+      selectedSessionIds.delete(id);
     } else {
-      next.add(id);
+      selectedSessionIds.add(id);
     }
-    selectedSessionIds = next;
   }
 
   function selectAllSessions(ids: string[]) {
-    selectedSessionIds = new Set(ids);
+    selectedSessionIds.clear();
+    for (const id of ids) selectedSessionIds.add(id);
   }
 
   function clearSelection() {
-    selectedSessionIds = new Set();
+    selectedSessionIds.clear();
   }
 
   function deleteSession(id: string) {
@@ -142,7 +140,7 @@
   $effect(() => {
     if (!loading && sessions.length > 0) {
       if (!selectionMode) {
-        selectedSessionIds = new Set();
+        clearSelection();
       }
     }
   });
@@ -153,20 +151,14 @@
   onkeydown={handleKeydown}
   role="listbox"
   aria-label="Sessions"
-  aria-activedescendant={selectedNodeId
-    ? `session-${selectedNodeId}`
-    : undefined}
+  aria-activedescendant={selectedNodeId ? `session-${selectedNodeId}` : undefined}
   tabindex="0"
 >
   <div class="session-header">
     <div class="header-top">
       <span class="title">Sessions</span>
       <div class="header-actions">
-        <button
-          class="add-btn"
-          onclick={newSession}
-          title="New Session (Ctrl+N)"
-        >
+        <button class="add-btn" onclick={newSession} title="New Session (Ctrl+N)">
           <svg
             width="14"
             height="14"
@@ -175,23 +167,14 @@
             stroke="currentColor"
             stroke-width="3"
           >
-            <line x1="12" y1="5" x2="12" y2="19" /><line
-              x1="5"
-              y1="12"
-              x2="19"
-              y2="12"
-            />
+            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
       </div>
     </div>
 
     <div class="selection-bar">
-      <button
-        class="selection-toggle"
-        class:active={selectionMode}
-        onclick={toggleSelectionMode}
-      >
+      <button class="selection-toggle" class:active={selectionMode} onclick={toggleSelectionMode}>
         <svg
           width="14"
           height="14"
@@ -208,10 +191,7 @@
         <span>Select</span>
       </button>
       {#if !selectionMode && selectedNodeId}
-        <button
-          class="selection-action danger"
-          onclick={() => deleteSession(selectedNodeId!)}
-        >
+        <button class="selection-action danger" onclick={() => deleteSession(selectedNodeId!)}>
           Delete
         </button>
       {/if}
@@ -219,20 +199,14 @@
         <span class="selection-count">{selectedSessionIds.size} selected</span>
         <button
           class="selection-action"
-          onclick={() =>
-            selectAllSessions(sessions.map((session) => session.id))}
+          onclick={() => selectAllSessions(sessions.map((session) => session.id))}
         >
           Select all
         </button>
-        <button
-          class="selection-action danger"
-          onclick={deleteSelectedSessions}
-        >
+        <button class="selection-action danger" onclick={deleteSelectedSessions}>
           Delete selected
         </button>
-        <button class="selection-action" onclick={clearSelection}>
-          Clear
-        </button>
+        <button class="selection-action" onclick={clearSelection}> Clear </button>
       {/if}
     </div>
 
@@ -246,12 +220,7 @@
         stroke-width="2.5"
         class="search-icon"
       >
-        <circle cx="11" cy="11" r="8" /><line
-          x1="21"
-          y1="21"
-          x2="16.65"
-          y2="16.65"
-        />
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
       <input
         type="text"
@@ -285,7 +254,7 @@
         <button class="start-btn" onclick={newSession}>Start a session</button>
       </div>
     {:else}
-      {#each filteredSessions as session}
+      {#each filteredSessions as session (session.id)}
         <div
           id="session-{session.id}"
           class="session-row"
@@ -330,14 +299,7 @@
                 stroke="currentColor"
                 stroke-width="2.5"
               >
-                <rect
-                  x="3"
-                  y="3"
-                  width="18"
-                  height="18"
-                  rx="2"
-                  stroke="currentColor"
-                />
+                <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" />
                 {#if selectedSessionIds.has(session.id)}
                   <path d="M8 12l3 3 5-6" stroke="currentColor" />
                 {/if}
@@ -353,17 +315,13 @@
               stroke="currentColor"
               stroke-width="2"
             >
-              <path
-                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-              />
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
           <div class="info">
             <span class="label">{session.label || "Untitled Session"}</span>
             <span class="meta"
-              >{session.messageCount} messages · {formatTime(
-                session.timestamp,
-              )}</span
+              >{session.messageCount} messages · {formatTime(session.timestamp)}</span
             >
           </div>
         </div>
@@ -373,9 +331,7 @@
 
   <div class="list-footer">
     {#if sessions.length > 0}
-      <span class="footer-info"
-        >{sessions.length} session{sessions.length !== 1 ? "s" : ""}</span
-      >
+      <span class="footer-info">{sessions.length} session{sessions.length !== 1 ? "s" : ""}</span>
       <span class="footer-hint">Use the chat transcript to fork</span>
     {/if}
   </div>

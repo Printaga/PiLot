@@ -17,10 +17,7 @@ import { ModelRegistryHandler } from "../../../model-registry-handler.js";
 import { PackageManager } from "../../../package-manager.js";
 import { SessionListManager } from "../../../session-manager.js";
 import { SessionResources } from "../../../session-resources.js";
-import {
-	createSessionMock,
-	createResourceLoaderMock,
-} from "../../mocks/session-mock.js";
+import { createSessionMock, createResourceLoaderMock } from "../../mocks/session-mock.js";
 import {
 	createMockMemento,
 	createMockBinaryService,
@@ -29,7 +26,6 @@ import {
 	createMockSettingsManager,
 	createMockSessionManager,
 } from "../../mocks/pi-sdk-mocks.js";
-import { resetVscodeMocks } from "../../mocks/pi-sdk-mocks.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,22 +52,12 @@ function createMockWebviewView(): vscode.WebviewView {
 	} as unknown as vscode.WebviewView;
 }
 
-let savedCreateAgentSession:
-	| typeof piAgentProviderInternals.createAgentSession
-	| undefined;
+let savedCreateAgentSession: typeof piAgentProviderInternals.createAgentSession | undefined;
 let savedGetAgentDir: typeof piAgentProviderInternals.getAgentDir | undefined;
-let savedCreateModelRuntime:
-	| typeof piAgentProviderInternals.createModelRuntime
-	| undefined;
-let savedCreateModelRegistry:
-	| typeof piAgentProviderInternals.createModelRegistry
-	| undefined;
-let savedCreateSettingsManager:
-	| typeof piAgentProviderInternals.createSettingsManager
-	| undefined;
-let savedCreateSessionManager:
-	| typeof piAgentProviderInternals.createSessionManager
-	| undefined;
+let savedCreateModelRuntime: typeof piAgentProviderInternals.createModelRuntime | undefined;
+let savedCreateModelRegistry: typeof piAgentProviderInternals.createModelRegistry | undefined;
+let savedCreateSettingsManager: typeof piAgentProviderInternals.createSettingsManager | undefined;
+let savedCreateSessionManager: typeof piAgentProviderInternals.createSessionManager | undefined;
 
 function setupPiSdkMocks() {
 	savedCreateAgentSession = piAgentProviderInternals.createAgentSession;
@@ -86,16 +72,13 @@ function setupPiSdkMocks() {
 	savedGetAgentDir = piAgentProviderInternals.getAgentDir;
 	piAgentProviderInternals.getAgentDir = () => "/fake/agent-dir";
 	savedCreateModelRuntime = piAgentProviderInternals.createModelRuntime;
-	piAgentProviderInternals.createModelRuntime = (async () =>
-		createMockModelRuntime()) as any;
+	piAgentProviderInternals.createModelRuntime = (async () => createMockModelRuntime()) as any;
 	savedCreateModelRegistry = piAgentProviderInternals.createModelRegistry;
 	piAgentProviderInternals.createModelRegistry = () => createMockModelRegistry();
 	savedCreateSettingsManager = piAgentProviderInternals.createSettingsManager;
-	piAgentProviderInternals.createSettingsManager = () =>
-		createMockSettingsManager();
+	piAgentProviderInternals.createSettingsManager = () => createMockSettingsManager();
 	savedCreateSessionManager = piAgentProviderInternals.createSessionManager;
-	piAgentProviderInternals.createSessionManager = () =>
-		({}) as SessionManagerType;
+	piAgentProviderInternals.createSessionManager = () => ({}) as SessionManagerType;
 }
 
 function restorePiSdkMocks() {
@@ -119,9 +102,7 @@ function restorePiSdkMocks() {
 	}
 }
 
-function createTestConfig(
-	overrides: Partial<PiAgentConfig> = {},
-): PiAgentConfig {
+function createTestConfig(overrides: Partial<PiAgentConfig> = {}): PiAgentConfig {
 	return {
 		defaultModel: "openai/gpt-4o-mini",
 		defaultProvider: "openai",
@@ -132,12 +113,6 @@ function createTestConfig(
 		...overrides,
 	};
 }
-
-// Providers built by buildProvider(); disposed after the suite so leaked
-// fs watchers / refresh timers from initialize() tests cannot crash the
-// extension host during shutdown.
-const createdProviders: any[] = [];
-
 function buildProvider(
 	overrides: Partial<PiAgentConfig> = {},
 	options: {
@@ -160,8 +135,11 @@ function buildProvider(
 	};
 
 	const provider = new PiAgentProvider(mockCtx as any, config);
-	provider.resolveWebviewView(view);
 
+	// Install the binary seam before resolveWebviewView() starts its
+	// constructor-triggered background initialize(). The helper's tests do not
+	// exercise real binary discovery; allowing it to run here leaks child
+	// processes and native filesystem work across the suite.
 	const mockBinary = createMockBinaryService({
 		getCliVersion: async () => "0.1.0",
 	});
@@ -171,12 +149,12 @@ function buildProvider(
 		prependToPath: () => {},
 		isBinaryAvailable: () => true,
 	} as any;
-
+	// Tests install the provider's view and dependencies below; do not call
+	// resolveWebviewView(), whose fire-and-forget initialize() would start real
+	// SDK work before the fixture has finished installing its mocks.
 	(provider as any).modelRuntime = createMockModelRuntime();
 	(provider as any).modelRegistry = createMockModelRegistry();
-	(provider as any).sessionManager = createMockSessionManager(
-		options.cwd || "/fake/workspace",
-	);
+	(provider as any).sessionManager = createMockSessionManager(options.cwd || "/fake/workspace");
 	(provider as any).settingsManager = createMockSettingsManager();
 	(provider as any).modelRegistryHandler = new ModelRegistryHandler({
 		getModelRegistry: () => (provider as any).modelRegistry,
@@ -247,7 +225,6 @@ function buildProvider(
 	(provider as any)._webview = view.webview;
 	(provider as any).isInitialized = true;
 
-	createdProviders.push(provider);
 	return provider;
 }
 // Tests
@@ -311,19 +288,6 @@ suite("PiAgentProvider", () => {
 		restorePiSdkMocks();
 	});
 
-	suiteTeardown(() => {
-		// Dispose providers created by buildProvider() so fs watchers and
-		// refresh timers from initialize() tests do not outlive the suite and
-		// crash the extension host during shutdown.
-		for (const p of createdProviders.splice(0)) {
-			try {
-				p.dispose?.();
-			} catch {
-				/* best effort */
-			}
-		}
-	});
-
 	suite("constructor", () => {
 		test("creates instance with defaults", () => {
 			const ctx = {
@@ -376,22 +340,10 @@ suite("PiAgentProvider", () => {
 			try {
 				await provider["initialize"]();
 				assert.strictEqual((provider as any).isInitialized, true);
-				assert.ok(
-					(provider as any).modelRuntime,
-					"modelRuntime should be set",
-				);
-				assert.ok(
-					(provider as any).modelRegistry,
-					"modelRegistry should be set",
-				);
-				assert.ok(
-					(provider as any).settingsManager,
-					"settingsManager should be set",
-				);
-				assert.ok(
-					(provider as any).sessionManager,
-					"sessionManager should be set",
-				);
+				assert.ok((provider as any).modelRuntime, "modelRuntime should be set");
+				assert.ok((provider as any).modelRegistry, "modelRegistry should be set");
+				assert.ok((provider as any).settingsManager, "settingsManager should be set");
+				assert.ok((provider as any).sessionManager, "sessionManager should be set");
 				assert.strictEqual(
 					modelRuntimeFactoryCalls,
 					1,
@@ -419,9 +371,7 @@ suite("PiAgentProvider", () => {
 			const savedFactory = (piAgentProviderInternals as any).createAuthStorage;
 			(piAgentProviderInternals as any).createAuthStorage = () => {
 				authStorageFactoryCalls++;
-				throw new TypeError(
-					"Cannot read properties of undefined (reading 'create')",
-				);
+				throw new TypeError("Cannot read properties of undefined (reading 'create')");
 			};
 
 			try {
@@ -459,10 +409,7 @@ suite("PiAgentProvider", () => {
 			piAgentProviderInternals.createSettingsManager = () => mockSettings as any;
 			try {
 				await provider["initialize"]();
-				assert.strictEqual(
-					(provider as any).currentModelId,
-					"openai/gpt-4o",
-				);
+				assert.strictEqual((provider as any).currentModelId, "openai/gpt-4o");
 			} finally {
 				piAgentProviderInternals.createSettingsManager = savedCreateSm;
 			}
@@ -502,9 +449,7 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions(
-				"/fake/workspace",
-			);
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			assert.strictEqual(opts.noTools, "all");
 			assert.strictEqual(opts.tools, undefined);
 		});
@@ -519,9 +464,7 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions(
-				"/fake/workspace",
-			);
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			assert.strictEqual(opts.noTools, undefined);
 			assert.strictEqual(opts.tools, undefined);
 		});
@@ -537,9 +480,7 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions(
-				"/fake/workspace",
-			);
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			const rlOptions = opts.resourceLoader as any;
 			assert.strictEqual(rlOptions.noExtensions, true);
 			assert.strictEqual(rlOptions.noSkills, true);
@@ -561,9 +502,7 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions(
-				"/fake/workspace",
-			);
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			assert.deepStrictEqual(opts.tools, ["read", "grep", "find", "ls"]);
 			assert.strictEqual(opts.noTools, undefined);
 		});
@@ -579,9 +518,7 @@ suite("PiAgentProvider", () => {
 				update: async () => {},
 			});
 
-			const opts = await (provider as any).buildSessionOptions(
-				"/fake/workspace",
-			);
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			const rlOptions = opts.resourceLoader as any;
 			assert.strictEqual(rlOptions.noExtensions, false);
 			assert.strictEqual(rlOptions.noSkills, false);
@@ -633,8 +570,7 @@ suite("PiAgentProvider", () => {
 				};
 			}) as any;
 
-			const configEmitter =
-				new vscode.EventEmitter<vscode.ConfigurationChangeEvent>();
+			const configEmitter = new vscode.EventEmitter<vscode.ConfigurationChangeEvent>();
 			(vscode.workspace as any).onDidChangeConfiguration = configEmitter.event;
 			const disposable = installConfigListener(provider);
 
@@ -660,18 +596,13 @@ suite("PiAgentProvider", () => {
 			const fireConfigChange = (key: string) => {
 				configEmitter.fire({
 					affectsConfiguration: (section: string) =>
-						section === "pi-agent" ||
-						section.startsWith(`pi-agent.${key}`),
+						section === "pi-agent" || section.startsWith(`pi-agent.${key}`),
 				} as vscode.ConfigurationChangeEvent);
 			};
 
 			/** Wait until the listener's async rebuild has created a new session. */
 			const waitForRebuild = async (min = 2) => {
-				for (
-					let i = 0;
-					i < 500 && createCalls.length < min;
-					i++
-				) {
+				for (let i = 0; i < 500 && createCalls.length < min; i++) {
 					await new Promise((resolve) => setTimeout(resolve, 20));
 				}
 			};
@@ -781,19 +712,10 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rl2.noPromptTemplates, true);
 			assert.strictEqual(rl2.noContextFiles, true);
 			assert.strictEqual(rl2.noThemes, true);
-			assert.strictEqual(
-				rl2.reloadCalls,
-				1,
-				"rebuilt loader should have reload()ed once",
-			);
+			assert.strictEqual(rl2.reloadCalls, 1, "rebuilt loader should have reload()ed once");
 
 			// …tools restricted to read,bash,edit,write under the default preset…
-			assert.deepStrictEqual(secondOpts.tools, [
-				"read",
-				"bash",
-				"edit",
-				"write",
-			]);
+			assert.deepStrictEqual(secondOpts.tools, ["read", "bash", "edit", "write"]);
 
 			// …the transcript survived via the SAME session file (the rebuilt
 			// session reuses the provider's sessionManager)…
@@ -809,9 +731,7 @@ suite("PiAgentProvider", () => {
 			assert.ok(history, "expected session-history re-sync after rebuild");
 			assert.strictEqual(history.data.messages.length, 2);
 			assert.ok(
-				history.data.messages.some(
-					(m: any) => m.content === "before the toggle",
-				),
+				history.data.messages.some((m: any) => m.content === "before the toggle"),
 				"pre-toggle user message must survive the rebuild",
 			);
 			const lm = posted.find((m) => m.type === "light-mode-changed");
@@ -858,7 +778,11 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rl2.noPromptTemplates, false);
 			assert.strictEqual(rl2.noContextFiles, false);
 			assert.strictEqual(rl2.noThemes, false);
-			assert.strictEqual(secondOpts.tools, undefined, "default preset should not restrict tools");
+			assert.strictEqual(
+				secondOpts.tools,
+				undefined,
+				"default preset should not restrict tools",
+			);
 			assert.strictEqual(secondOpts.noTools, undefined);
 
 			const history = posted.find((m) => m.type === "session-history");
@@ -898,12 +822,7 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rl2.noPromptTemplates, true);
 			assert.strictEqual(rl2.noContextFiles, true);
 			assert.strictEqual(rl2.noThemes, true);
-			assert.deepStrictEqual(harness.createCalls[1].tools, [
-				"read",
-				"bash",
-				"edit",
-				"write",
-			]);
+			assert.deepStrictEqual(harness.createCalls[1].tools, ["read", "bash", "edit", "write"]);
 			harness.dispose();
 		});
 
@@ -941,10 +860,7 @@ suite("PiAgentProvider", () => {
 				"the user's auto-context preference must be preserved",
 			);
 			const acOn = posted.find((m) => m.type === "auto-context-changed");
-			assert.ok(
-				acOn,
-				"expected auto-context-changed after enabling light mode",
-			);
+			assert.ok(acOn, "expected auto-context-changed after enabling light mode");
 			assert.strictEqual(
 				acOn.data.enabled,
 				false,
@@ -969,7 +885,8 @@ suite("PiAgentProvider", () => {
 				last.data.enabled,
 				true,
 				"auto context preference must be restored on toggle-off",
-			);			assert.strictEqual(provider.getAutoContext(), true);
+			);
+			assert.strictEqual(provider.getAutoContext(), true);
 
 			harness.dispose();
 		});
@@ -1062,10 +979,7 @@ suite("PiAgentProvider", () => {
 
 			await provider["newSession"]();
 
-			assert.ok(
-				footerStopCalls.includes("stop"),
-				"footerManager.stop should be called",
-			);
+			assert.ok(footerStopCalls.includes("stop"), "footerManager.stop should be called");
 			assert.ok(
 				messages.some((m: any) => m.type === "extension-statuses-clear"),
 				"extension-statuses-clear should be sent",
@@ -1234,9 +1148,7 @@ suite("PiAgentProvider", () => {
 
 			await provider["editMessage"](0, "updated text");
 
-			const historyMsg = messages.find(
-				(m: any) => m.type === "session-history",
-			);
+			const historyMsg = messages.find((m: any) => m.type === "session-history");
 			assert.ok(historyMsg, "session-history should be broadcast");
 		});
 	});
@@ -1274,10 +1186,7 @@ suite("PiAgentProvider", () => {
 				setCalls.some((c) => c.provider === "openai" && c.apiKey === "sk-123"),
 				"ModelRuntime.setRuntimeApiKey should be called with openai/sk-123",
 			);
-			assert.ok(
-				refreshCalls.includes("refresh"),
-				"refreshAvailableModels should be called",
-			);
+			assert.ok(refreshCalls.includes("refresh"), "refreshAvailableModels should be called");
 		});
 
 		test("removeAuth calls ModelRuntime.removeRuntimeApiKey and refreshes models", async () => {
@@ -1407,7 +1316,9 @@ suite("PiAgentProvider", () => {
 						ok: true,
 						status: 200,
 						statusText: "OK",
-						json: async () => ({ data: [{ id: "m1" }, { id: "m2", name: "M2" }, "m3"] }),
+						json: async () => ({
+							data: [{ id: "m1" }, { id: "m2", name: "M2" }, "m3"],
+						}),
 					};
 				}) as any;
 
@@ -1492,7 +1403,10 @@ suite("PiAgentProvider", () => {
 			assert.ok(written.providers.kilocode, "provider entry written");
 			assert.strictEqual(written.providers.kilocode.name, "Kilo Code");
 			assert.strictEqual(written.providers.kilocode.baseUrl, "https://api.kilocode.ai");
-			assert.ok(regCalls.some((c) => c.id === "kilocode"), "registerProvider called");
+			assert.ok(
+				regCalls.some((c) => c.id === "kilocode"),
+				"registerProvider called",
+			);
 			assert.strictEqual(reloadCalls.length, 1, "reloadConfig called");
 		});
 
@@ -1721,7 +1635,7 @@ suite("PiAgentProvider", () => {
 			(provider as any).readModelsJsonConfig = async () => ({ providers: {} });
 			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
 			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
-					written = cfg;
+				written = cfg;
 			};
 
 			await provider["addProvider"]({
@@ -1838,10 +1752,10 @@ suite("PiAgentProvider", () => {
 				refresh: async () => ({}),
 				registerProvider: () => {},
 				unregisterProvider: () => {},
-			reloadConfig: async () => {},
-			getProviders: () => [],
-			getRegisteredProviderIds: () => [],
-		} as any;
+				reloadConfig: async () => {},
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+			} as any;
 			(provider as any).modelRegistryHandler = {
 				refreshAvailableModels: async () => {},
 			} as any;
@@ -1935,10 +1849,7 @@ suite("PiAgentProvider", () => {
 				refreshCalls.length === 1,
 				"ModelRuntime.refresh should be called exactly once",
 			);
-			assert.ok(
-				invalidateCalls.length === 1,
-				"CLI model ids cache should be invalidated",
-			);
+			assert.ok(invalidateCalls.length === 1, "CLI model ids cache should be invalidated");
 			assert.ok(
 				modelRefreshCalls.length === 1,
 				"refreshAvailableModels should be called exactly once",
@@ -1978,10 +1889,7 @@ suite("PiAgentProvider", () => {
 				refreshCalls.length === 0,
 				"ModelRuntime.refresh should NOT be called for models.json changes",
 			);
-			assert.ok(
-				modelRefreshCalls.length === 1,
-				"refreshAvailableModels should still run",
-			);
+			assert.ok(modelRefreshCalls.length === 1, "refreshAvailableModels should still run");
 		});
 
 		test("rapid auth.json changes coalesce into a single refresh+refreshAvailable", async () => {
@@ -2052,11 +1960,7 @@ suite("PiAgentProvider", () => {
 			};
 			piAgentProviderInternals.existsFile = () => opts.exists ?? false;
 			piAgentProviderInternals.mkdir = async () => undefined;
-			piAgentProviderInternals.writeFile = async (
-				p: string,
-				content: string,
-				o: any,
-			) => {
+			piAgentProviderInternals.writeFile = async (p: string, content: string, o: any) => {
 				assert.strictEqual(o.flag, "wx");
 				calls.writes.push({ p, content });
 			};
@@ -2178,9 +2082,7 @@ suite("PiAgentProvider", () => {
 		test("handles invalid session id gracefully", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).sessionManager = createMockSessionManager(
-				"/fake",
-			) as any;
+			(provider as any).sessionManager = createMockSessionManager("/fake") as any;
 
 			const mockListManager = {
 				invalidateSessionListCache: () => {},
@@ -2206,9 +2108,7 @@ suite("PiAgentProvider", () => {
 		test("returns early when no session IDs provided", async () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
-			(provider as any).sessionManager = createMockSessionManager(
-				"/fake",
-			) as any;
+			(provider as any).sessionManager = createMockSessionManager("/fake") as any;
 
 			const mockListManager = {
 				invalidateSessionListCache: () => {},
@@ -2223,7 +2123,6 @@ suite("PiAgentProvider", () => {
 		});
 
 		test("surfaces delete failures instead of silently succeeding", async () => {
-			resetVscodeMocks();
 			const provider = buildProvider();
 			const originalListSessions = piAgentProviderInternals.listSessions;
 			const originalUnlinkFile = piAgentProviderInternals.unlinkFile;
@@ -2368,9 +2267,7 @@ suite("PiAgentProvider", () => {
 				args: { file_path: "/fake/file.ts" },
 			} as any);
 
-			const activityMsg = messages.find(
-				(m: any) => m.type === "activity-start",
-			);
+			const activityMsg = messages.find((m: any) => m.type === "activity-start");
 			assert.ok(activityMsg, "activity-start should be emitted");
 			assert.ok(
 				activityMsg.data.text.includes("read"),
@@ -2422,10 +2319,7 @@ suite("PiAgentProvider", () => {
 				message: { role: "user", content: "Fix bug" },
 			} as any);
 
-			assert.ok(
-				autoNamingTriggered,
-				"auto-naming should be triggered on first user message",
-			);
+			assert.ok(autoNamingTriggered, "auto-naming should be triggered on first user message");
 		});
 
 		test("compaction_end success/error/aborted sends correct message", async () => {
@@ -2442,8 +2336,7 @@ suite("PiAgentProvider", () => {
 			} as any);
 
 			const successStart = messages.find(
-				(m: any) =>
-					m.type === "activity-start" && m.data.text === "Context compacted ✓",
+				(m: any) => m.type === "activity-start" && m.data.text === "Context compacted ✓",
 			);
 			assert.ok(successStart, "success compaction should show success text");
 
@@ -2453,9 +2346,7 @@ suite("PiAgentProvider", () => {
 			} as any);
 
 			const errorStart = messages.find(
-				(m: any) =>
-					m.type === "activity-start" &&
-					m.data.text.includes("Compaction error"),
+				(m: any) => m.type === "activity-start" && m.data.text.includes("Compaction error"),
 			);
 			assert.ok(errorStart, "error compaction should show error text");
 
@@ -2465,8 +2356,7 @@ suite("PiAgentProvider", () => {
 			} as any);
 
 			const abortedStart = messages.find(
-				(m: any) =>
-					m.type === "activity-start" && m.data.text === "Compaction aborted",
+				(m: any) => m.type === "activity-start" && m.data.text === "Compaction aborted",
 			);
 			assert.ok(abortedStart, "aborted compaction should show aborted text");
 		});
@@ -2494,13 +2384,8 @@ suite("PiAgentProvider", () => {
 				willRetry: false,
 			} as any);
 
-			const historyMsg = messages.find(
-				(m: any) => m.type === "session-history",
-			);
-			assert.ok(
-				historyMsg,
-				"session-history should be sent on agent_end (non-retry)",
-			);
+			const historyMsg = messages.find((m: any) => m.type === "session-history");
+			assert.ok(historyMsg, "session-history should be sent on agent_end (non-retry)");
 			assert.strictEqual(historyMsg?.data?.sessionId, "session-1");
 			assert.strictEqual(
 				historyMsg?.data?.messages?.[0]?.entryId,
@@ -2514,9 +2399,7 @@ suite("PiAgentProvider", () => {
 				type: "agent_end",
 				willRetry: true,
 			} as any);
-			const retryHistory = messages.find(
-				(m: any) => m.type === "session-history",
-			);
+			const retryHistory = messages.find((m: any) => m.type === "session-history");
 			assert.ok(
 				!retryHistory,
 				"session-history should NOT be sent on agent_end with willRetry",
@@ -2529,13 +2412,8 @@ suite("PiAgentProvider", () => {
 				type: "agent_end",
 				willRetry: false,
 			} as any);
-			const noSessionHistory = messages.find(
-				(m: any) => m.type === "session-history",
-			);
-			assert.ok(
-				!noSessionHistory,
-				"session-history should NOT be sent when session is null",
-			);
+			const noSessionHistory = messages.find((m: any) => m.type === "session-history");
+			assert.ok(!noSessionHistory, "session-history should NOT be sent when session is null");
 		});
 
 		test("getSerializedSessionMessages uses sessionManager.getBranch for entryId", () => {
@@ -2604,10 +2482,7 @@ suite("PiAgentProvider", () => {
 			} as any;
 
 			provider.dispose();
-			assert.ok(
-				stopCalls.includes("stop"),
-				"footerManager.stop should be called",
-			);
+			assert.ok(stopCalls.includes("stop"), "footerManager.stop should be called");
 		});
 	});
 
@@ -2642,10 +2517,7 @@ suite("PiAgentProvider", () => {
 			};
 
 			await provider["cycleModel"]();
-			assert.ok(
-				setCalls.length === 0,
-				"setModel should not be called when no models",
-			);
+			assert.ok(setCalls.length === 0, "setModel should not be called when no models");
 		});
 	});
 
@@ -2672,10 +2544,7 @@ suite("PiAgentProvider", () => {
 			});
 			provider["updateConfig"](newConfig);
 
-			assert.strictEqual(
-				(provider as any).config.defaultModel,
-				"anthropic/claude-3",
-			);
+			assert.strictEqual((provider as any).config.defaultModel, "anthropic/claude-3");
 		});
 	});
 
@@ -2688,9 +2557,7 @@ suite("PiAgentProvider", () => {
 			};
 
 			provider["sendUpdatesToWebview"]("0.2.0", 3);
-			const updateMsg = messages.find(
-				(m: any) => m.type === "updates-available",
-			);
+			const updateMsg = messages.find((m: any) => m.type === "updates-available");
 			assert.ok(updateMsg);
 			assert.strictEqual(updateMsg.data.piVersion, "0.2.0");
 			assert.strictEqual(updateMsg.data.packageCount, 3);
@@ -2704,47 +2571,42 @@ suite("PiAgentProvider", () => {
 			};
 
 			provider["sendUpdatesToWebview"](null, 0);
-			const clearedMsg = messages.find(
-				(m: any) => m.type === "updates-cleared",
-			);
+			const clearedMsg = messages.find((m: any) => m.type === "updates-cleared");
 			assert.ok(clearedMsg, "updates-cleared should be sent");
 		});
 	});
 
-	suite(
-		"getSettings / setToolConfig / getExtensionVersion / getThinkingLevel",
-		() => {
-			test("returns settings from config", async () => {
-				(vscode.workspace as any).getConfiguration = (_section?: string) => ({
-					get: (key: string, def: any) => {
-						if (key === "toolPreset") return "custom";
-						if (key === "customTools") return ["bash", "edit"];
-						return def;
-					},
-					update: async () => {},
-				});
-
-				const provider = buildProvider();
-				const settings = await provider["getSettings"]();
-				assert.strictEqual(settings.toolPreset, "custom");
-				assert.deepStrictEqual(settings.customTools, ["bash", "edit"]);
+	suite("getSettings / setToolConfig / getExtensionVersion / getThinkingLevel", () => {
+		test("returns settings from config", async () => {
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "toolPreset") return "custom";
+					if (key === "customTools") return ["bash", "edit"];
+					return def;
+				},
+				update: async () => {},
 			});
 
-			test("gets thinking level from settings manager or config", () => {
-				const provider = buildProvider();
-				(provider as any).settingsManager = {
-					getDefaultThinkingLevel: () => "high",
-				} as any;
+			const provider = buildProvider();
+			const settings = await provider["getSettings"]();
+			assert.strictEqual(settings.toolPreset, "custom");
+			assert.deepStrictEqual(settings.customTools, ["bash", "edit"]);
+		});
 
-				assert.strictEqual(provider["getThinkingLevel"](), "high");
+		test("gets thinking level from settings manager or config", () => {
+			const provider = buildProvider();
+			(provider as any).settingsManager = {
+				getDefaultThinkingLevel: () => "high",
+			} as any;
 
-				(provider as any).settingsManager = {
-					getDefaultThinkingLevel: () => null,
-				} as any;
-				assert.strictEqual(provider["getThinkingLevel"](), "medium");
-			});
-		},
-	);
+			assert.strictEqual(provider["getThinkingLevel"](), "high");
+
+			(provider as any).settingsManager = {
+				getDefaultThinkingLevel: () => null,
+			} as any;
+			assert.strictEqual(provider["getThinkingLevel"](), "medium");
+		});
+	});
 
 	suite("forkSession", () => {
 		test("forks before the selected user entry, restarts footer updates, and restores its prompt", async () => {
@@ -2832,10 +2694,7 @@ suite("PiAgentProvider", () => {
 				sessionName: string | null;
 			}> = [];
 			(provider as any).footerManager = {
-				start: (config: {
-					getCwd: () => string;
-					sessionName: string | null;
-				}) => {
+				start: (config: { getCwd: () => string; sessionName: string | null }) => {
 					footerStartCalls.push({
 						cwd: config.getCwd(),
 						sessionName: config.sessionName,
@@ -2858,10 +2717,7 @@ suite("PiAgentProvider", () => {
 
 			assert.strictEqual(openCalls.length, 2);
 			assert.ok(openCalls[1].includes("forked.jsonl"));
-			assert.strictEqual(
-				(provider as any).session!.sessionId,
-				"forked-session",
-			);
+			assert.strictEqual((provider as any).session!.sessionId, "forked-session");
 			assert.ok(
 				webviewMessages.some(
 					(msg: any) =>
@@ -2951,10 +2807,7 @@ suite("PiAgentProvider", () => {
 		test("returns settingsManager", () => {
 			const provider = buildProvider();
 			(provider as any).settingsManager = { foo: "bar" } as any;
-			assert.strictEqual(
-				(provider as any).settingsManager,
-				provider["getSettingsManager"](),
-			);
+			assert.strictEqual((provider as any).settingsManager, provider["getSettingsManager"]());
 		});
 
 		test("returns undefined when not set", () => {
@@ -3012,8 +2865,7 @@ suite("PiAgentProvider", () => {
 			assert.ok(
 				webviewMessages.some(
 					(m: any) =>
-						m.type === "pi-settings-changed" &&
-						m.data.showCacheMissNotices === true,
+						m.type === "pi-settings-changed" && m.data.showCacheMissNotices === true,
 				),
 			);
 		});
@@ -3085,10 +2937,7 @@ suite("PiAgentProvider", () => {
 			await settleInitialize(provider);
 			provider.isInitialized = true;
 			provider.modelRuntime = undefined;
-			await assert.rejects(
-				provider["checkProviderAuth"]("openai"),
-				/not initialized/,
-			);
+			await assert.rejects(provider["checkProviderAuth"]("openai"), /not initialized/);
 		});
 	});
 
@@ -3135,11 +2984,7 @@ suite("PiAgentProvider", () => {
 
 		test("loginProvider streams events, opens the browser, and resolves prompts", async () => {
 			const { provider, webviewMessages, openedUrls } = await buildLoginProvider({
-				login: async (
-					_id: string,
-					_type: string,
-					interaction: any,
-				) => {
+				login: async (_id: string, _type: string, interaction: any) => {
 					interaction.notify({
 						type: "auth_url",
 						url: "https://auth.example/start",
@@ -3158,53 +3003,43 @@ suite("PiAgentProvider", () => {
 			// Let the flow run until it blocks on the pending prompt.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
-			const promptMsg = webviewMessages.find(
-					(m: any) => m.type === "provider-login-prompt",
-				);
+			const promptMsg = webviewMessages.find((m: any) => m.type === "provider-login-prompt");
 			assert.ok(promptMsg, "prompt message should be sent to the webview");
 			assert.strictEqual(promptMsg.data.prompt.type, "text");
 			assert.strictEqual(promptMsg.data.prompt.message, "Enter the code");
 
 			const eventMsg = webviewMessages.find(
-					(m: any) =>
-						m.type === "provider-login-event" &&
-						m.data.event.type === "auth_url",
-				);
+				(m: any) => m.type === "provider-login-event" && m.data.event.type === "auth_url",
+			);
 			assert.ok(eventMsg, "auth_url event should be forwarded");
 			assert.strictEqual(eventMsg.data.event.url, "https://auth.example/start");
-			assert.ok(
-					openedUrls.includes("https://auth.example/start"),
-					"browser should open the auth URL",
+			assert.deepStrictEqual(
+				openedUrls,
+				["https://auth.example/start"],
+				"browser should open the auth URL",
 			);
 
-			provider["resolveLoginPrompt"](
-					"anthropic",
-				promptMsg.data.promptId,
-				"123-456",
-				false,
-			);
+			provider["resolveLoginPrompt"]("anthropic", promptMsg.data.promptId, "123-456", false);
 			await done;
 
-			const resultMsg = webviewMessages.find(
-					(m: any) => m.type === "provider-login-result",
-				);
+			const resultMsg = webviewMessages.find((m: any) => m.type === "provider-login-result");
 			assert.ok(resultMsg, "result message should be sent");
 			assert.strictEqual(resultMsg.data.success, true);
 			assert.strictEqual(
-					(provider as any).activeLogins.size,
-					0,
-					"login state should be cleaned up",
-				);
+				(provider as any).activeLogins.size,
+				0,
+				"login state should be cleaned up",
+			);
 			assert.strictEqual(
-					(provider as any).pendingLoginPrompts.size,
-					0,
-					"prompt state should be cleaned up",
-				);
+				(provider as any).pendingLoginPrompts.size,
+				0,
+				"prompt state should be cleaned up",
+			);
 			// Success refreshes the provider list so the new auth state shows.
 			assert.ok(
-					webviewMessages.some((m: any) => m.type === "provider-auth"),
-					"provider-auth refresh should follow a successful login",
-				);
+				webviewMessages.some((m: any) => m.type === "provider-auth"),
+				"provider-auth refresh should follow a successful login",
+			);
 		});
 
 		test("loginProvider forwards device_code events with the verification URL", async () => {
@@ -3212,8 +3047,8 @@ suite("PiAgentProvider", () => {
 				login: async (_id: string, _type: string, interaction: any) => {
 					interaction.notify({
 						type: "device_code",
-					userCode: "ABCD-1234",
-					verificationUri: "https://example.com/device",
+						userCode: "ABCD-1234",
+						verificationUri: "https://example.com/device",
 					});
 				},
 			});
@@ -3221,16 +3056,16 @@ suite("PiAgentProvider", () => {
 			await provider["loginProvider"]("anthropic");
 
 			const eventMsg = webviewMessages.find(
-					(m: any) =>
-						m.type === "provider-login-event" &&
-						m.data.event.type === "device_code",
-				);
+				(m: any) =>
+					m.type === "provider-login-event" && m.data.event.type === "device_code",
+			);
 			assert.ok(eventMsg, "device_code event should be forwarded");
 			assert.strictEqual(eventMsg.data.event.userCode, "ABCD-1234");
-			assert.ok(
-					openedUrls.includes("https://example.com/device"),
-					"verification URL should be opened in the browser",
-				);
+			assert.deepStrictEqual(
+				openedUrls,
+				["https://example.com/device"],
+				"verification URL should be opened in the browser",
+			);
 		});
 
 		test("loginProvider reports flow failures as result messages without rejecting", async () => {
@@ -3242,25 +3077,20 @@ suite("PiAgentProvider", () => {
 
 			await provider["loginProvider"]("anthropic");
 
-			const resultMsg = webviewMessages.find(
-					(m: any) => m.type === "provider-login-result",
-				);
+			const resultMsg = webviewMessages.find((m: any) => m.type === "provider-login-result");
 			assert.ok(resultMsg, "result message should be sent");
 			assert.strictEqual(resultMsg.data.success, false);
 			assert.strictEqual(resultMsg.data.error, "invalid_grant");
 			assert.strictEqual(
-					(provider as any).activeLogins.size,
-					0,
-					"failed login should be cleaned up",
-				);
+				(provider as any).activeLogins.size,
+				0,
+				"failed login should be cleaned up",
+			);
 		});
 
 		test("loginProvider throws for providers without OAuth support", async () => {
 			const { provider } = await buildLoginProvider({});
-			await assert.rejects(
-				provider["loginProvider"]("openai"),
-				/does not offer OAuth login/,
-			);
+			await assert.rejects(provider["loginProvider"]("openai"), /does not offer OAuth login/);
 		});
 
 		test("loginProvider rejects duplicate concurrent logins", async () => {
@@ -3276,17 +3106,12 @@ suite("PiAgentProvider", () => {
 			const first = provider["loginProvider"]("anthropic");
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
-			await assert.rejects(
-				provider["loginProvider"]("anthropic"),
-				/already in progress/,
-			);
+			await assert.rejects(provider["loginProvider"]("anthropic"), /already in progress/);
 
 			provider["cancelProviderLogin"]("anthropic");
 			await first;
 
-			const resultMsg = webviewMessages.find(
-					(m: any) => m.type === "provider-login-result",
-				);
+			const resultMsg = webviewMessages.find((m: any) => m.type === "provider-login-result");
 			assert.ok(resultMsg, "cancelled login should report a result");
 			assert.strictEqual(resultMsg.data.success, false);
 			assert.strictEqual(resultMsg.data.cancelled, true);
@@ -3309,9 +3134,7 @@ suite("PiAgentProvider", () => {
 			provider["cancelProviderLogin"]("anthropic");
 			await done;
 
-			const resultMsg = webviewMessages.find(
-					(m: any) => m.type === "provider-login-result",
-				);
+			const resultMsg = webviewMessages.find((m: any) => m.type === "provider-login-result");
 			assert.ok(resultMsg);
 			assert.strictEqual(resultMsg.data.success, false);
 			assert.strictEqual(resultMsg.data.cancelled, true);
@@ -3362,9 +3185,7 @@ suite("PiAgentProvider", () => {
 		test("getProviderAuthData flags providers that offer OAuth login", async () => {
 			const { provider } = await buildLoginProvider({});
 			(provider as any).modelRegistry = {
-				getAll: () => [
-					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
-				],
+				getAll: () => [{ id: "gpt-4", provider: "openai", name: "GPT-4" }],
 				getProviderAuthStatus: () => ({ configured: false }),
 				getProviderDisplayName: (id: string) => id,
 			} as any;
@@ -3384,9 +3205,7 @@ suite("PiAgentProvider", () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 			(provider as any).modelRegistry = {
-				getAll: () => [
-					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
-				],
+				getAll: () => [{ id: "gpt-4", provider: "openai", name: "GPT-4" }],
 				getProviderAuthStatus: () => ({
 					configured: true,
 					source: "configured",
@@ -3406,9 +3225,7 @@ suite("PiAgentProvider", () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 			(provider as any).modelRegistry = {
-				getAll: () => [
-					{ id: "gpt-4", provider: "openai", name: "GPT-4" },
-				],
+				getAll: () => [{ id: "gpt-4", provider: "openai", name: "GPT-4" }],
 				getProviderAuthStatus: () => ({
 					configured: false,
 					source: undefined,
@@ -3509,9 +3326,7 @@ suite("PiAgentProvider", () => {
 					text.replace("@file:", "/resolved/path"),
 			} as any;
 
-			const result = await (provider as any).resolveFileMentions(
-				"@file:/fake/file.ts hello",
-			);
+			const result = await (provider as any).resolveFileMentions("@file:/fake/file.ts hello");
 			assert.ok(result.includes("/resolved/path"));
 		});
 	});
@@ -3558,27 +3373,33 @@ suite("PiAgentProvider", () => {
 					availableThinkingLevels: ["off", "low", "high"],
 				},
 			];
-			assert.deepStrictEqual(
-				(provider as any).getAvailableThinkingLevels("openai/gpt-4"),
-				["off", "low", "high"],
-			);
+			assert.deepStrictEqual((provider as any).getAvailableThinkingLevels("openai/gpt-4"), [
+				"off",
+				"low",
+				"high",
+			]);
 		});
 
 		test("getAvailableThinkingLevels falls back to full set for unknown model", () => {
 			const provider = buildProvider();
-			assert.deepStrictEqual(
-				(provider as any).getAvailableThinkingLevels("unknown/model"),
-				["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-			);
+			assert.deepStrictEqual((provider as any).getAvailableThinkingLevels("unknown/model"), [
+				"off",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			]);
 		});
 
 		test("setThinkingLevel clamps an unsupported level to the nearest supported", async () => {
 			const provider = buildProvider();
-			const ctx = setupProviderWithModel(
-				provider as any,
-				"openai/gpt-4",
-				["off", "low", "high"],
-			);
+			const ctx = setupProviderWithModel(provider as any, "openai/gpt-4", [
+				"off",
+				"low",
+				"high",
+			]);
 			const webviewMessages: any[] = [];
 			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
 
@@ -3586,20 +3407,18 @@ suite("PiAgentProvider", () => {
 
 			assert.deepStrictEqual(ctx.setThinkingCalls, ["high"]);
 			assert.strictEqual(ctx.getPersisted(), "high");
-			const changed = webviewMessages.find(
-				(m) => m.type === "thinking-level-changed",
-			);
+			const changed = webviewMessages.find((m) => m.type === "thinking-level-changed");
 			assert.ok(changed, "should notify thinking-level-changed");
 			assert.strictEqual(changed.data.level, "high");
 		});
 
 		test("setThinkingLevel accepts a supported level unchanged", async () => {
 			const provider = buildProvider();
-			const ctx = setupProviderWithModel(
-				provider as any,
-				"openai/gpt-4",
-				["off", "low", "high"],
-			);
+			const ctx = setupProviderWithModel(provider as any, "openai/gpt-4", [
+				"off",
+				"low",
+				"high",
+			]);
 			const webviewMessages: any[] = [];
 			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
 
@@ -3633,11 +3452,8 @@ suite("PiAgentProvider", () => {
 			};
 			(provider as any).modelRegistry.find = () => ({});
 			let persistedLevel: string | undefined;
-			(provider as any).settingsManager.getDefaultThinkingLevel = () =>
-				"medium";
-			(provider as any).settingsManager.setDefaultThinkingLevel = async (
-				l: string,
-			) => {
+			(provider as any).settingsManager.getDefaultThinkingLevel = () => "medium";
+			(provider as any).settingsManager.setDefaultThinkingLevel = async (l: string) => {
 				persistedLevel = l;
 			};
 			const webviewMessages: any[] = [];
@@ -3646,14 +3462,10 @@ suite("PiAgentProvider", () => {
 			await (provider as any).setModel("anthropic/claude-x");
 
 			assert.strictEqual(persistedLevel, "low");
-			const changed = webviewMessages.find(
-				(m) => m.type === "thinking-level-changed",
-			);
+			const changed = webviewMessages.find((m) => m.type === "thinking-level-changed");
 			assert.ok(changed, "should notify thinking-level-changed on model switch");
 			assert.strictEqual(changed.data.level, "low");
-			const modelChanged = webviewMessages.find(
-				(m) => m.type === "model-changed",
-			);
+			const modelChanged = webviewMessages.find((m) => m.type === "model-changed");
 			assert.ok(modelChanged, "should notify model-changed");
 			assert.strictEqual(modelChanged.data.modelId, "anthropic/claude-x");
 		});

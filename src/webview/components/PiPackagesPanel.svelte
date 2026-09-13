@@ -56,9 +56,7 @@
       .filter((pkg) => {
         const q = availableQuery.toLowerCase();
         const matchesSearch =
-          !q ||
-          pkg.name.toLowerCase().includes(q) ||
-          pkg.description.toLowerCase().includes(q);
+          !q || pkg.name.toLowerCase().includes(q) || pkg.description.toLowerCase().includes(q);
 
         if (typeFilter === "all") return matchesSearch;
 
@@ -94,16 +92,9 @@
     if (pkg.source.toLowerCase().includes(query)) return true;
     if (displayPackageName(pkg).toLowerCase().includes(query)) return true;
     if (pkg.path?.toLowerCase().includes(query)) return true;
-    if (pkg.skills?.some((s) => s.name.toLowerCase().includes(query)))
-      return true;
-    if (pkg.prompts?.some((p) => p.name.toLowerCase().includes(query)))
-      return true;
-    if (
-      pkg.extensions?.some((e) =>
-        e.path.toLowerCase().includes(query),
-      )
-    )
-      return true;
+    if (pkg.skills?.some((s) => s.name.toLowerCase().includes(query))) return true;
+    if (pkg.prompts?.some((p) => p.name.toLowerCase().includes(query))) return true;
+    if (pkg.extensions?.some((e) => e.path.toLowerCase().includes(query))) return true;
     return false;
   }
 
@@ -133,13 +124,12 @@
   function formatPackageMeta(pkg: MarketplacePackage): string {
     const parts: string[] = [];
     if (pkg.publisher) parts.push(`by ${pkg.publisher}`);
-    if (pkg.monthlyDownloads > 0)
-      parts.push(`${pkg.monthlyDownloads.toLocaleString()}/mo`);
+    if (pkg.monthlyDownloads > 0) parts.push(`${pkg.monthlyDownloads.toLocaleString()}/mo`);
     if (pkg.version) parts.push(`v${pkg.version}`);
     return parts.join(" · ");
   }
 
-// Extract types from a package's full manifest (pi field)
+  // Extract types from a package's full manifest (pi field)
   function extractPiTypes(manifest: any): string[] {
     const types: string[] = [];
     if (manifest.pi?.extensions?.length) types.push("extensions");
@@ -164,8 +154,7 @@
         name: o.package.name,
         description: o.package.description || "",
         version: o.package.version || "",
-        publisher:
-          o.package.publisher?.username || o.package.author?.name || "",
+        publisher: o.package.publisher?.username || o.package.author?.name || "",
         monthlyDownloads: o.downloads?.monthly || 0,
         flagged: false,
         types: ["unknown"],
@@ -184,7 +173,7 @@
           batch.map((pkg) =>
             fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`)
               .then((r) => r.json())
-              .catch(() => ({}))
+              .catch(() => ({})),
           ),
         );
         for (let j = 0; j < batch.length; j++) {
@@ -274,7 +263,8 @@
 <div class="packages-panel">
   {#if lightMode}
     <div class="light-mode-banner">
-      <strong>Light Mode is on.</strong> Package management is disabled — installed packages' skills, extensions and prompts don't load while Light Mode is active. Turn it off in Settings.
+      <strong>Light Mode is on.</strong> Package management is disabled — installed packages' skills,
+      extensions and prompts don't load while Light Mode is active. Turn it off in Settings.
     </div>
   {/if}
 
@@ -307,19 +297,15 @@
             bind:value={installedQuery}
             class="search-input"
           />
-          <button class="refresh-btn" onclick={refreshInstalled} title="Refresh"
-            >↻</button
-          >
+          <button class="refresh-btn" onclick={refreshInstalled} title="Refresh">↻</button>
         </div>
-        {#each installedPackages.filter((p) => matchesInstalledQuery(p, installedQuery)) as pkg}
+        {#each installedPackages.filter( (p) => matchesInstalledQuery(p, installedQuery) ) as pkg (pkg.source)}
           <div class="package-card installed">
             <div class="package-header">
-              <span class="package-name" title={pkg.source}
-                >{displayPackageName(pkg)}</span
-              >
+              <span class="package-name" title={pkg.source}>{displayPackageName(pkg)}</span>
               {#if pkg.types?.length > 0}
                 <div class="package-badges">
-                  {#each pkg.types as type}
+                  {#each pkg.types as type (type)}
                     <span class="badge badge-{type}">{type}</span>
                   {/each}
                 </div>
@@ -338,11 +324,9 @@
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2"
-                    ><path
-                      d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
-                    /><path d="M15 22v-4h-7" /><path d="M11 18h7" /><path
-                      d="M12 18v-6"
-                    /></svg
+                    ><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><path
+                      d="M15 22v-4h-7"
+                    /><path d="M11 18h7" /><path d="M12 18v-6" /></svg
                   >
                 </a>
               {/if}
@@ -357,7 +341,7 @@
             {#if pkg.skills?.length > 0}
               <div class="package-resources">
                 <span class="resources-label">Skills:</span>
-                {#each pkg.skills as skill}
+                {#each pkg.skills as skill (skill.name)}
                   <span class="resource-item" title={skill.description}>{skill.name}</span>
                 {/each}
               </div>
@@ -365,26 +349,29 @@
             {#if pkg.extensions?.length > 0}
               <div class="package-resources">
                 <span class="resources-label">Extensions:</span>
-                {#each pkg.extensions as ext}
-                  <span class="resource-item" title={ext.path}>{ext.path.split('/').pop() || ext.sourceName || 'extension'}</span>
+                {#each pkg.extensions as ext (ext.path)}
+                  <span class="resource-item" title={ext.path}
+                    >{ext.path.split("/").pop() || ext.sourceName || "extension"}</span
+                  >
                 {/each}
               </div>
             {/if}
             {#if pkg.prompts?.length > 0}
               <div class="package-resources">
                 <span class="resources-label">Prompts:</span>
-                {#each pkg.prompts as prompt}
+                {#each pkg.prompts as prompt (prompt.name)}
                   <span class="resource-item" title={prompt.description}>{prompt.name}</span>
                 {/each}
               </div>
             {/if}
             <div class="package-actions">
               {#if pkg.local || pkg.source.toLowerCase().startsWith("local:")}
-                <span class="meta-item">Managed manually — edit files in {pkg.path || "agent extensions dir"}</span>
+                <span class="meta-item"
+                  >Managed manually — edit files in {pkg.path || "agent extensions dir"}</span
+                >
               {:else}
-                <button
-                  class="uninstall-btn"
-                  onclick={() => removePackage(pkg.source)}>Remove</button
+                <button class="uninstall-btn" onclick={() => removePackage(pkg.source)}
+                  >Remove</button
                 >
               {/if}
             </div>
@@ -394,7 +381,7 @@
     </div>
   {:else}
     <div class="packages-content">
-        <div class="available-filter">
+      <div class="available-filter">
         <div class="search-row">
           <input
             type="text"
@@ -404,11 +391,7 @@
           />
         </div>
         <div class="filter-row">
-          <button
-            class="refresh-btn"
-            onclick={fetchMarketplacePackages}
-            title="Refresh">↻</button
-          >
+          <button class="refresh-btn" onclick={fetchMarketplacePackages} title="Refresh">↻</button>
           <select bind:value={typeFilter} class="filter-select">
             <option value="all">All Types</option>
             <option value="extensions">Extensions</option>
@@ -421,10 +404,8 @@
             <option value="newest">Newest</option>
             <option value="name">A-Z</option>
           </select>
-          <button
-            class="update-btn"
-            onclick={updatePackages}
-            title="Update all packages">Update</button
+          <button class="update-btn" onclick={updatePackages} title="Update all packages"
+            >Update</button
           >
         </div>
       </div>
@@ -436,7 +417,7 @@
       {:else if filteredPackages.length === 0}
         <div class="status">No available packages match your search.</div>
       {:else}
-        {#each filteredPackages as pkg}
+        {#each filteredPackages as pkg (pkg.name)}
           <div class="package-card">
             <div class="package-header">
               <a
@@ -450,10 +431,10 @@
               >
                 {pkg.name}
               </a>
-              {#if pkg.types.some(t => t !== 'unknown')}
+              {#if pkg.types.some((t) => t !== "unknown")}
                 <div class="package-badges">
-                  {#each pkg.types as type}
-                    {#if type !== 'unknown'}
+                  {#each pkg.types as type (type)}
+                    {#if type !== "unknown"}
                       <span class="badge badge-{type}">{type}</span>
                     {/if}
                   {/each}
@@ -471,9 +452,7 @@
               {#if isInstalled(pkg.name)}
                 <button class="installed-badge" disabled>Installed</button>
               {:else}
-                <button
-                  class="install-btn"
-                  onclick={() => installPackage(pkg.name)}>Install</button
+                <button class="install-btn" onclick={() => installPackage(pkg.name)}>Install</button
                 >
               {/if}
             </div>
@@ -484,11 +463,7 @@
   {/if}
 
   <div class="footer">
-    <a
-      href="https://pi.dev/packages"
-      target="_blank"
-      class="browse-link">Browse all packages ↗</a
-    >
+    <a href="https://pi.dev/packages" target="_blank" class="browse-link">Browse all packages ↗</a>
   </div>
 </div>
 

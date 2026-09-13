@@ -29,8 +29,6 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - GitHub reported 7 pre-existing Dependabot vulnerabilities on main (6 high, 1 moderate)
 - Search the current session chat (ctrl+F)
 
-
-
 ## [2.4.1] - 2026-09-08
 
 ### Fixed

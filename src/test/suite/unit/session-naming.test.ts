@@ -53,24 +53,15 @@ suite("Session naming helpers", () => {
 			"When starting a new chat, name the session properly";
 		const name = generateSessionName(polluted, "");
 
-		assert.strictEqual(
-			name,
-			"When starting a new chat, name the session properly",
-		);
+		assert.strictEqual(name, "When starting a new chat, name the session properly");
 	});
 
 	test("stripAutoContextPreamble leaves plain messages untouched", () => {
-		assert.strictEqual(
-			stripAutoContextPreamble("fix the login bug"),
-			"fix the login bug",
-		);
+		assert.strictEqual(stripAutoContextPreamble("fix the login bug"), "fix the login bug");
 	});
 
 	test("isAutoContextDerivedName detects preamble junk", () => {
-		assert.strictEqual(
-			isAutoContextDerivedName("Project Root: /home/lenovo"),
-			true,
-		);
+		assert.strictEqual(isAutoContextDerivedName("Project Root: /home/lenovo"), true);
 		assert.strictEqual(isAutoContextDerivedName("Fix the login bug"), false);
 		assert.strictEqual(isAutoContextDerivedName(undefined), false);
 	});
@@ -83,9 +74,6 @@ suite("Session naming helpers", () => {
 			),
 			"fix login",
 		);
-		assert.strictEqual(
-			displaySessionLabel("Real name", "whatever"),
-			"Real name",
-		);
+		assert.strictEqual(displaySessionLabel("Real name", "whatever"), "Real name");
 	});
 });

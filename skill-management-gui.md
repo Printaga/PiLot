@@ -22,12 +22,12 @@ Skills are discovered from multiple locations in order of priority:
 
 - Skills are stored as `SKILL.md` files in directories
 - Each skill directory must contain a `SKILL.md` file with YAML frontmatter:
-  ```yaml
-  ---
-  name: skill-name
-  description: "Brief description of skill functionality and when to invoke"
-  ---
-  ```
+    ```yaml
+    ---
+    name: skill-name
+    description: "Brief description of skill functionality and when to invoke"
+    ---
+    ```
 - Skills can also be bundled in npm packages with `pi.skills` array in package.json
 
 #### 3. Skill Settings in VS Code Configuration
@@ -54,14 +54,14 @@ Currently configured in `package.json` (lines 447-456):
 ```typescript
 // Skill object structure
 interface Skill {
-  name: string;
-  description: string;
-  path: string; // Full path to SKILL.md file
-  sourceInfo?: {
-    source: string; // Package source (npm:, github:, etc.)
-    name: string; // Package name
-    label: string; // Human-readable label
-  };
+	name: string;
+	description: string;
+	path: string; // Full path to SKILL.md file
+	sourceInfo?: {
+		source: string; // Package source (npm:, github:, etc.)
+		name: string; // Package name
+		label: string; // Human-readable label
+	};
 }
 ```
 
@@ -114,13 +114,13 @@ Create a new `SkillsPanel.svelte` component following the pattern of `PiPackages
 
 ```typescript
 interface SkillInfo {
-  name: string;
-  description: string;
-  sourceName: string | null; // Package name or 'local'
-  source: string; // Full source path
-  installed: boolean;
-  isEnabled: boolean; // Based on discovery settings
-  path?: string; // Local path if installed
+	name: string;
+	description: string;
+	sourceName: string | null; // Package name or 'local'
+	source: string; // Full source path
+	installed: boolean;
+	isEnabled: boolean; // Based on discovery settings
+	path?: string; // Local path if installed
 }
 ```
 
@@ -189,8 +189,8 @@ if (o.package.pi?.skills?.length) types.push("skills");
 
 // Each skill in package:
 {
-  name: string;
-  description: string;
+	name: string;
+	description: string;
 }
 ```
 
@@ -227,13 +227,13 @@ Add Skills tab to the sidebar in `App.svelte`:
 ```svelte
 <!-- Add after Packages button (line 1164) -->
 <button
-  onclick={() => (activeTab = "skills")}
-  class:active={activeTab === "skills"}
-  title="Skills (8)"
+	onclick={() => (activeTab = "skills")}
+	class:active={activeTab === "skills"}
+	title="Skills (8)"
 >
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-  </svg>
+	<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+		<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+	</svg>
 </button>
 ```
 
@@ -241,14 +241,14 @@ Update `activeTab` type (line 20-28):
 
 ```typescript
 let activeTab = $state<
-  | "chat"
-  | "sessions"
-  | "models"
-  | "providers"
-  | "tools"
-  | "packages"
-  | "skills" // NEW
-  | "settings"
+	| "chat"
+	| "sessions"
+	| "models"
+	| "providers"
+	| "tools"
+	| "packages"
+	| "skills" // NEW
+	| "settings"
 >("chat");
 ```
 

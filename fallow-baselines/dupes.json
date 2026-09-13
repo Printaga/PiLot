@@ -1,0 +1,29 @@
+{
+  "clone_groups": [
+    "src/webview/components/ProviderSettings.svelte:1006-1035|src/webview/components/ProviderSettings.svelte:723-752|src/webview/components/ProviderSettings.svelte:848-877",
+    "src/webview/components/ChatPanel.svelte:1184-1193|src/webview/components/ExportDialog.svelte:87-97|src/webview/components/PromptTemplates.svelte:310-320|src/webview/components/ToolsPanel.svelte:233-242",
+    "src/webview/components/ChatPanel.svelte:980-991|src/webview/components/SkillsPanel.svelte:356-368|src/webview/components/ToolsPanel.svelte:229-241",
+    "src/webview/components/ExportDialog.svelte:83-95|src/webview/components/OnboardingTour.svelte:91-104|src/webview/components/PromptTemplates.svelte:306-318",
+    "src/webview/components/ChatPanel.svelte:1258-1269|src/webview/components/ModelSelector.svelte:128-139|src/webview/components/Toast.svelte:67-78",
+    "src/pi-binary.ts:13-20|src/protocol/types.ts:134-140|src/webview/components/PiPackagesPanel.svelte:18-24",
+    "src/pi-agent-provider.ts:1892-1901|src/protocol/types.ts:62-75|src/webview/components/ProviderSettings.svelte:5-16"
+  ],
+  "clone_fingerprints": [
+    "dup:cd7a9046:3",
+    "dup:5a2709d3:4",
+    "dup:ee34dae8:3",
+    "dup:942399cf:3",
+    "dup:d5ba57d0:3",
+    "dup:c4bb17e9:3",
+    "dup:0a182724:3"
+  ],
+  "normalized_clone_fingerprints": [
+    "dup:c77b3abb6f87acd9-r3:3",
+    "dup:c77b3abb6f87acd9-r2:4",
+    "dup:c77b3abb6f87acd9-r1:3",
+    "dup:c77b3abb6f87acd9-r7:3",
+    "dup:c77b3abb6f87acd9-r5:3",
+    "dup:c77b3abb6f87acd9-r6:3",
+    "dup:c77b3abb6f87acd9-r4:3"
+  ]
+}

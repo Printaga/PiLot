@@ -41,7 +41,10 @@ suite("REALHOST openConfigFile", () => {
 			maxTokens: 8192,
 			thinkingLevel: "medium",
 		};
-		provider = new PiAgentProvider({ globalState: { get: () => undefined, update: async () => {} } } as any, config);
+		provider = new PiAgentProvider(
+			{ globalState: { get: () => undefined, update: async () => {} } } as any,
+			config,
+		);
 		(provider as any).isInitialized = true; // skip real session bootstrap
 		handler = new MessageHandler(provider);
 
@@ -76,7 +79,10 @@ suite("REALHOST openConfigFile", () => {
 	});
 
 	test("append-system-prompt creates empty file and opens a real editor tab", async () => {
-		await handler.handle({ type: "openConfigFile", data: { file: "append-system-prompt" } } as any);
+		await handler.handle({
+			type: "openConfigFile",
+			data: { file: "append-system-prompt" },
+		} as any);
 		const file = path.join(tempAgentDir, "APPEND_SYSTEM.md");
 		assert.ok(fs.existsSync(file), "APPEND_SYSTEM.md created on disk");
 		assert.strictEqual(fs.readFileSync(file, "utf8"), "", "created empty");
@@ -88,7 +94,10 @@ suite("REALHOST openConfigFile", () => {
 	test("second click does not clobber user content", async () => {
 		const file = path.join(tempAgentDir, "APPEND_SYSTEM.md");
 		fs.writeFileSync(file, "user rules", "utf8");
-		await handler.handle({ type: "openConfigFile", data: { file: "append-system-prompt" } } as any);
+		await handler.handle({
+			type: "openConfigFile",
+			data: { file: "append-system-prompt" },
+		} as any);
 		assert.strictEqual(fs.readFileSync(file, "utf8"), "user rules", "content preserved");
 		assert.strictEqual(recorded.infoMessages.length, 0, "no dialog for existing file");
 	});
@@ -113,7 +122,10 @@ suite("REALHOST openConfigFile", () => {
 
 	test("careless garbage key is rejected with no file and no editor", async () => {
 		const shownBefore = recorded.shownDocs.length;
-		const result = await handler.handle({ type: "openConfigFile", data: { file: "../escape" } } as any);
+		const result = await handler.handle({
+			type: "openConfigFile",
+			data: { file: "../escape" },
+		} as any);
 		assert.ok((result as any).error, "garbage key rejected");
 		assert.ok(!fs.existsSync(path.join(tempAgentDir, "escape")), "nothing created");
 		assert.strictEqual(recorded.shownDocs.length, shownBefore, "no editor opened");

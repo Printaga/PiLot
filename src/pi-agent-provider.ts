@@ -20,10 +20,7 @@ import {
 import { MessageHandler } from "./message-handler.js";
 import { type ConfigFileKey } from "./protocol/types.js";
 import { VoiceManager } from "./voice-manager.js";
-import {
-	type ImageContent,
-	type ThinkingLevel,
-} from "./webview/types/index.js";
+import { type ImageContent, type ThinkingLevel } from "./webview/types/index.js";
 
 import {
 	checkBetterSqlite3,
@@ -34,11 +31,7 @@ import {
 import { BinaryService } from "./binary-service.js";
 import { FooterManager } from "./footer-manager.js";
 import { ExtensionUIContext } from "./extension-ui-context.js";
-import {
-	ModelRegistryHandler,
-	type ModelItem,
-	THINKING_LEVELS,
-} from "./model-registry-handler.js";
+import { ModelRegistryHandler, type ModelItem, THINKING_LEVELS } from "./model-registry-handler.js";
 import { PackageManager } from "./package-manager.js";
 import {
 	SessionListManager,
@@ -70,11 +63,7 @@ const CONFIG_FILES: Record<
 // Structural mirrors of @earendil-works/pi-ai's AuthPrompt/AuthEvent (the SDK
 // entry point does not re-export them). Keep in sync with pi-ai 0.84.
 
-export type LoginPromptKind =
-	| "text"
-	| "secret"
-	| "select"
-	| "manual_code";
+export type LoginPromptKind = "text" | "secret" | "select" | "manual_code";
 
 export interface LoginPrompt {
 	type: LoginPromptKind;
@@ -111,15 +100,10 @@ export const piAgentProviderInternals = {
 	unlinkFile: (path: string) => fs.unlink(path),
 	// Tests stub filesystem access through this seam; ESM namespaces are frozen.
 	existsFile: (path: string) => existsSync(path),
-	mkdir: (dir: string, options?: { recursive?: boolean }) =>
-		fs.mkdir(dir, options),
-	writeFile: (
-		path: string,
-		data: string,
-		options?: { flag?: string } | string,
-	) => fs.writeFile(path, data, options as any),
-	listSessions: (cwd: string, sessionDir?: string) =>
-		SessionManager.list(cwd, sessionDir),
+	mkdir: (dir: string, options?: { recursive?: boolean }) => fs.mkdir(dir, options),
+	writeFile: (path: string, data: string, options?: { flag?: string } | string) =>
+		fs.writeFile(path, data, options as any),
+	listSessions: (cwd: string, sessionDir?: string) => SessionManager.list(cwd, sessionDir),
 	// Construct the canonical model/auth runtime from SDK 0.80.x. Replaces the
 	// previous AuthStorage.create() + ModelRegistry.create(authStorage) split,
 	// which was removed when AuthStorage was un-exported from the package entry.
@@ -147,9 +131,7 @@ export interface PiAgentConfig {
 
 // RegistryModel type moved to model-registry-handler.ts
 
-export class PiAgentProvider
-	implements vscode.WebviewViewProvider, vscode.Disposable
-{
+export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Disposable {
 	private _webview?: vscode.Webview;
 	private view?: vscode.WebviewView;
 	/** Editor-panel chat webviews (piChatEditor). Retained so commands can
@@ -243,8 +225,7 @@ export class PiAgentProvider
 		});
 		this.packageManager = new PackageManager({
 			getResourceLoader: () => this.session?.resourceLoader,
-			getConfiguredPackages: () =>
-				this.sessionResources.getConfiguredPackages(),
+			getConfiguredPackages: () => this.sessionResources.getConfiguredPackages(),
 			binaryService: this.binaryService,
 			notifyWebview: (msg) => this.notifyWebview(msg),
 			logDebug: this.logDebug.bind(this),
@@ -341,9 +322,7 @@ export class PiAgentProvider
 
 		try {
 			this.modelRuntime = await piAgentProviderInternals.createModelRuntime();
-			this.modelRegistry = piAgentProviderInternals.createModelRegistry(
-				this.modelRuntime,
-			);
+			this.modelRegistry = piAgentProviderInternals.createModelRegistry(this.modelRuntime);
 			this.settingsManager = piAgentProviderInternals.createSettingsManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
@@ -359,10 +338,7 @@ export class PiAgentProvider
 			await this.modelRegistryHandler.refreshAvailableModels();
 			this.availableModels = this.modelRegistryHandler.getAvailableModels();
 
-			const savedFavorites = this.context.globalState.get<string[]>(
-				"favoriteModels",
-				[],
-			);
+			const savedFavorites = this.context.globalState.get<string[]>("favoriteModels", []);
 			// Keep every saved favorite verbatim. Previously favorites were
 			// filtered against the (possibly still-incomplete) registry at
 			// startup, dropping valid favorites and losing them on next open.
@@ -428,25 +404,17 @@ export class PiAgentProvider
 			this.checkNativeAddons();
 		} catch (error) {
 			// Restore PATH on failure
-			if (
-				originalPath !== undefined &&
-				this.binaryService.isBinaryAvailable()
-			) {
+			if (originalPath !== undefined && this.binaryService.isBinaryAvailable()) {
 				process.env.PATH = originalPath;
 			}
 			this.logError("Failed to initialize PiLot Studio:", error);
-			vscode.window.showErrorMessage(
-				`Failed to initialize PiLot Studio: ${error}`,
-			);
+			vscode.window.showErrorMessage(`Failed to initialize PiLot Studio: ${error}`);
 		}
 	}
 
 	// Model methods delegated to modelRegistryHandler
 
-	async toggleFavorite(
-		modelId: string,
-		isFavorite: boolean,
-	): Promise<string[]> {
+	async toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]> {
 		return this.modelRegistryHandler.toggleFavorite(modelId, isFavorite);
 	}
 
@@ -490,9 +458,7 @@ export class PiAgentProvider
 
 		this.initialize()
 			.then(async () => {
-				this.logDebug(
-					"[PiLot Studio] Initialization complete, loading webview content",
-				);
+				this.logDebug("[PiLot Studio] Initialization complete, loading webview content");
 				view.webview.html = await this.getWebviewContent(view.webview);
 				if (!this.session) {
 					this.logDebug("[PiLot Studio] Creating new session");
@@ -506,9 +472,7 @@ export class PiAgentProvider
 				this.logError("[PiLot Studio] Initialization error:", error);
 			});
 
-		view.webview.onDidReceiveMessage(
-			this.messageHandler.handle.bind(this.messageHandler),
-		);
+		view.webview.onDidReceiveMessage(this.messageHandler.handle.bind(this.messageHandler));
 
 		view.onDidChangeVisibility(() => {
 			if (!view.visible) return;
@@ -543,9 +507,7 @@ export class PiAgentProvider
 			} else {
 				const status = checkBetterSqlite3();
 				const abiInfo = describeABIStatus(status.runtimeABI, status.moduleABI);
-				const runtime = status.electronVersion
-					? `Electron ${status.electronVersion} `
-					: "";
+				const runtime = status.electronVersion ? `Electron ${status.electronVersion} ` : "";
 				this.log(
 					`[PI] Native addon ABI mismatch: ${runtime}${abiInfo}. Auto-rebuild failed: ${result.output}`,
 				);
@@ -555,9 +517,7 @@ export class PiAgentProvider
 				// Log all mismatched copies
 				for (const copy of status.copies) {
 					if (!copy.compatible) {
-						this.log(
-							`[PI]   Mismatched copy: ${copy.dir} (ABI ${copy.moduleABI})`,
-						);
+						this.log(`[PI]   Mismatched copy: ${copy.dir} (ABI ${copy.moduleABI})`);
 					}
 				}
 			}
@@ -575,9 +535,7 @@ export class PiAgentProvider
 		try {
 			const agentDir = piAgentProviderInternals.getAgentDir();
 			if (!existsSync(agentDir)) {
-				this.logDebug(
-					"[PI] Agent dir not found, skipping config file watcher setup",
-				);
+				this.logDebug("[PI] Agent dir not found, skipping config file watcher setup");
 				return;
 			}
 			this.configFileWatcher = watch(
@@ -589,19 +547,13 @@ export class PiAgentProvider
 						return;
 					}
 					this.handleExternalConfigChange(filename).catch((e) =>
-						this.logError(
-							`[PI] Failed to refresh models after ${filename} change:`,
-							e,
-						),
+						this.logError(`[PI] Failed to refresh models after ${filename} change:`, e),
 					);
 				},
 			);
 			this.logDebug("[PI] Config file watcher set up on agent dir");
 		} catch (e) {
-			this.logDebug(
-				"[PI] Failed to set up config file watcher:",
-				e,
-			);
+			this.logDebug("[PI] Failed to set up config file watcher:", e);
 		}
 	}
 
@@ -628,9 +580,7 @@ export class PiAgentProvider
 			const resolve = this.configRefreshResolve;
 			this.configRefreshPromise = undefined;
 			this.configRefreshResolve = undefined;
-			this.logDebug(
-				`[PI] ${filename} changed on disk, reloading and refreshing models`,
-			);
+			this.logDebug(`[PI] ${filename} changed on disk, reloading and refreshing models`);
 			// ModelRuntime keeps models and credentials fresh in memory;
 			// refresh() is the SDK 0.80+ equivalent of the legacy
 			// AuthStorage.reload() + ModelRegistry.refresh() pair.
@@ -694,24 +644,15 @@ export class PiAgentProvider
 		this.logDebug("[PiLot Studio] Reading HTML from:", builtHtmlUri.fsPath);
 		const builtHtmlBytes = await vscode.workspace.fs.readFile(builtHtmlUri);
 		const builtHtml = builtHtmlBytes.toString();
-		this.logDebug(
-			"[PiLot Studio] HTML content loaded, length:",
-			builtHtml.length,
-		);
+		this.logDebug("[PiLot Studio] HTML content loaded, length:", builtHtml.length);
 
 		// Replace relative asset paths (e.g. ./assets/index-xxx.js) with webview URIs
 		// NOTE: Vite's base: './' produces paths like src="./assets/index-xxx.js"
-		const webviewRoot = vscode.Uri.joinPath(
-			this.context.extensionUri,
-			"dist",
-			"webview",
-		);
+		const webviewRoot = vscode.Uri.joinPath(this.context.extensionUri, "dist", "webview");
 		let html = builtHtml.replace(
 			/(src|href)="(?:\.\/)?(assets\/[^"\s]+)"/g,
 			(_, attr, assetPath) => {
-				const uri = webview.asWebviewUri(
-					vscode.Uri.joinPath(webviewRoot, assetPath),
-				);
+				const uri = webview.asWebviewUri(vscode.Uri.joinPath(webviewRoot, assetPath));
 				return `${attr}="${uri}"`;
 			},
 		);
@@ -759,8 +700,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			);
 		}
 
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 
 		// Build createAgentSession options from VS Code settings to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
@@ -785,8 +725,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	// Auto-naming methods delegated to sessionListManager
 
 	async deleteSessions(sessionIds: string[]) {
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
 			const allSessions = await piAgentProviderInternals.listSessions(
 				cwd,
@@ -806,9 +745,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 			if (failedSessionIds.length > 0) {
 				await this.sessionListManager.refreshSessionList(true);
-				throw new Error(
-					`Failed to delete sessions: ${failedSessionIds.join(", ")}`,
-				);
+				throw new Error(`Failed to delete sessions: ${failedSessionIds.join(", ")}`);
 			}
 
 			if (this.session && sessionIds.includes(this.session.sessionId)) {
@@ -830,9 +767,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await this.sessionListManager.refreshSessionList(true);
 		} catch (error) {
 			this.logError("[PI] Failed to delete sessions:", error);
-			vscode.window.showErrorMessage(
-				`Failed to delete sessions: ${String(error)}`,
-			);
+			vscode.window.showErrorMessage(`Failed to delete sessions: ${String(error)}`);
 			throw error;
 		}
 	}
@@ -850,25 +785,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Read extra resource paths
 		const extraExtensions = config.get<string[]>("extraExtensions", []);
 		const extraSkills = config.get<string[]>("extraSkills", []);
-		const extraPromptTemplates = config.get<string[]>(
-			"extraPromptTemplates",
-			[],
-		);
+		const extraPromptTemplates = config.get<string[]>("extraPromptTemplates", []);
 
 		// Read discovery flags
-		const disableExtensions = config.get<boolean>(
-			"disableExtensionDiscovery",
-			false,
-		);
+		const disableExtensions = config.get<boolean>("disableExtensionDiscovery", false);
 		const disableSkills = config.get<boolean>("disableSkillDiscovery", false);
-		const disablePromptTemplates = config.get<boolean>(
-			"disablePromptTemplateDiscovery",
-			false,
-		);
-		const disableContextFiles = config.get<boolean>(
-			"disableContextFiles",
-			false,
-		);
+		const disablePromptTemplates = config.get<boolean>("disablePromptTemplateDiscovery", false);
+		const disableContextFiles = config.get<boolean>("disableContextFiles", false);
 
 		// Light mode: run pi with all discovery disabled and only core tools,
 		// matching `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`.
@@ -910,8 +833,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			cwd,
 			agentDir: piAgentProviderInternals.getAgentDir(),
 			settingsManager: this.settingsManager,
-			additionalExtensionPaths:
-				extraExtensions.length > 0 ? extraExtensions : undefined,
+			additionalExtensionPaths: extraExtensions.length > 0 ? extraExtensions : undefined,
 			additionalSkillPaths: extraSkills.length > 0 ? extraSkills : undefined,
 			additionalPromptTemplatePaths:
 				extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
@@ -921,8 +843,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			noContextFiles: disableContextFiles || lightMode,
 			noThemes: lightMode,
 			systemPrompt: systemPrompt || undefined,
-			appendSystemPrompt:
-				appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
+			appendSystemPrompt: appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
 		});
 
 		// Load skills, extensions, prompts, and context files from settings
@@ -991,21 +912,23 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.extensionStatuses.clear();
 		this.notifyWebview({ type: "extension-statuses-clear" });
 		if (this.session) {
-			await this.session.extensionRunner
-				.emit({ type: "session_shutdown", reason })
-				.catch((e) => {
-					this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
-				});
-			this.session.dispose();
+			// Detach before tearing down: teardown is single-shot, so a
+			// concurrent restart (restart → createSession also tears down)
+			// sees no session instead of re-disposing the same one across
+			// the emit() await.
+			const session = this.session;
 			this.session = undefined as any;
+			await session.extensionRunner.emit({ type: "session_shutdown", reason }).catch((e) => {
+				this.logDebug("[PI] session_shutdown emit failed (non-fatal):", e);
+			});
+			session.dispose();
 		}
 	}
 
 	async sendSessionResources() {
 		if (!this.session) return;
 		try {
-			const cwd =
-				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+			const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 			const agentDir = piAgentProviderInternals.getAgentDir();
 
 			// Use the session resource loader so the webview matches the TUI exactly.
@@ -1059,22 +982,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			try {
 				installedPkgs = await Promise.race([
 					this.packageManager.listPackages(),
-					new Promise<any[]>((resolve) =>
-						setTimeout(() => resolve([]), 15_000),
-					),
+					new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 15_000)),
 				]);
 			} catch {
-				this.logError(
-					"[PI] sendSessionResources listPackages failed, using empty list",
-				);
+				this.logError("[PI] sendSessionResources listPackages failed, using empty list");
 			}
 
-			this.logDebug(
-				"[PI] sendSessionResources cwd:",
-				cwd,
-				"agentDir:",
-				agentDir,
-			);
+			this.logDebug("[PI] sendSessionResources cwd:", cwd, "agentDir:", agentDir);
 			this.logDebug(
 				"[PI] contextFiles:",
 				JSON.stringify(contextFiles.map((f: any) => f.path)),
@@ -1140,12 +1054,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Invalidate cache to get fresh session list
 		this.sessionListManager.invalidateSessionListCache();
 		// Find the session info from the list (use full cache for path)
-		const cwd =
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		await this.sessionListManager.listSessions(true); // force refresh (populates _sessionListFullCache)
-		const info = this.sessionListManager.sessionListFullCache.find(
-			(s) => s.id === sessionId,
-		);
+		const info = this.sessionListManager.sessionListFullCache.find((s) => s.id === sessionId);
 		if (!info) {
 			this.logError(`[PI] Session not found: ${sessionId}`);
 			this.notifyWebview({
@@ -1162,11 +1073,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		await this.tearDownCurrentSession("new");
 
 		// Open the session file and create a new agent session from it
-		const sessionManager = SessionManager.open(
-			info.path,
-			this.config.sessionDir,
-			cwd,
-		);
+		const sessionManager = SessionManager.open(info.path, this.config.sessionDir, cwd);
 
 		// Build session options from VS Code configuration to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
@@ -1236,14 +1143,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					images: this.extractUserMessageImages(targetEntry.message),
 				};
 				if (targetEntry.parentId) {
-					const tempManager = SessionManager.open(
-						currentSessionFile,
-						sessionDir,
-						cwd,
-					);
-					const newSessionFile = tempManager.createBranchedSession(
-						targetEntry.parentId,
-					);
+					const tempManager = SessionManager.open(currentSessionFile, sessionDir, cwd);
+					const newSessionFile = tempManager.createBranchedSession(targetEntry.parentId);
 					if (!newSessionFile) {
 						this.logError("[PI] Fork failed: session not persisted");
 						return;
@@ -1257,11 +1158,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					});
 				}
 			} else {
-				const tempManager = SessionManager.open(
-					currentSessionFile,
-					sessionDir,
-					cwd,
-				);
+				const tempManager = SessionManager.open(currentSessionFile, sessionDir, cwd);
 				const leafId = tempManager.getLeafId();
 				if (!leafId) {
 					this.logError("[PI] Fork failed: source session has no entries");
@@ -1338,10 +1235,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		};
 	}
 
-	async setToolConfig(config: {
-		toolPreset: string;
-		customTools?: string[];
-	}): Promise<void> {
+	async setToolConfig(config: { toolPreset: string; customTools?: string[] }): Promise<void> {
 		const targetConfig = vscode.workspace.getConfiguration("pi-agent");
 		await targetConfig.update(
 			"toolPreset",
@@ -1376,10 +1270,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	 * Persist a PI setting from the GUI through the SDK SettingsManager, keeping
 	 * the value synchronized with the PI CLI/TUI.
 	 */
-	async setPiUISetting(
-		key: "showCacheMissNotices",
-		value: boolean,
-	): Promise<void> {
+	async setPiUISetting(key: "showCacheMissNotices", value: boolean): Promise<void> {
 		if (!this.isInitialized || !this.settingsManager) {
 			await this.initialize();
 		}
@@ -1477,12 +1368,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Light mode forces auto-context off: every attached token eats
 		// RAM/VRAM a local LLM needs for weights and KV cache.
 		const context =
-			this.config.autoContext && !this.getLightMode()
-				? await this.getProjectContext()
-				: "";
-		const fullPrompt = context
-			? `${context}\n\n${textWithFiles}`
-			: textWithFiles;
+			this.config.autoContext && !this.getLightMode() ? await this.getProjectContext() : "";
+		const fullPrompt = context ? `${context}\n\n${textWithFiles}` : textWithFiles;
 
 		try {
 			await this.session.prompt(fullPrompt, promptOpts);
@@ -1524,9 +1411,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 					const format = args || ".html";
 					const folders = vscode.workspace.workspaceFolders;
 					const cwd =
-						folders && folders.length > 0
-							? folders[0].uri.fsPath
-							: process.cwd();
+						folders && folders.length > 0 ? folders[0].uri.fsPath : process.cwd();
 					const sessionId = this.session.sessionId?.slice(0, 8) ?? "session";
 					let outputPath: string;
 					if (format.startsWith(".") || format === "") {
@@ -1604,7 +1489,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			case "providers": {
 				this.notifyWebview({
 					type: "switchTab",
-					data: { tab: command === "skills" ? "skills" : command === "packages" ? "packages" : "providers" },
+					data: {
+						tab:
+							command === "skills"
+								? "skills"
+								: command === "packages"
+									? "packages"
+									: "providers",
+					},
 				});
 				return true;
 			}
@@ -1751,9 +1643,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		this.notifyWebview({ type: "model-changed", data: { modelId } });
 	}
 
-	async setThinkingLevel(
-		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
-	) {
+	async setThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") {
 		// Clamp to a level the currently selected model actually supports so we
 		// never send an unsupported level to the session or persist it.
 		const available = this.getAvailableThinkingLevels(this.currentModelId);
@@ -1974,10 +1864,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	}
 
 	/** Clamp a requested level to the nearest level the model supports. */
-	private clampThinkingLevel(
-		level: ThinkingLevel,
-		available: ThinkingLevel[],
-	): ThinkingLevel {
+	private clampThinkingLevel(level: ThinkingLevel, available: ThinkingLevel[]): ThinkingLevel {
 		if (available.includes(level)) return level;
 		const idx = THINKING_LEVELS.indexOf(level);
 		if (idx === -1 || available.length === 0) return available[0] ?? "off";
@@ -2028,7 +1915,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		let configProviders: Record<string, Record<string, unknown>> = {};
 		try {
 			const cfg = await this.readModelsJsonConfig();
-			if (cfg.providers) configProviders = cfg.providers as Record<string, Record<string, unknown>>;
+			if (cfg.providers)
+				configProviders = cfg.providers as Record<string, Record<string, unknown>>;
 		} catch {
 			// Ignore unreadable models.json; fall back to runtime-derived data only.
 		}
@@ -2072,18 +1960,13 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		const customIds = this.getCustomProviderIds();
 
 		for (const providerId of seen) {
-			const authStatus = modelRegistry.getProviderAuthStatus(
-				providerId,
-			);
-			const displayName = modelRegistry.getProviderDisplayName(
-				providerId,
-			);
+			const authStatus = modelRegistry.getProviderAuthStatus(providerId);
+			const displayName = modelRegistry.getProviderDisplayName(providerId);
 			const isOAuth =
 				typeof modelRuntime?.isUsingOAuth === "function"
 					? modelRuntime.isUsingOAuth(providerId)
 					: false;
-			const cfg =
-				customIds.has(providerId) ? configProviders[providerId] : undefined;
+			const cfg = customIds.has(providerId) ? configProviders[providerId] : undefined;
 			const entry: {
 				provider: string;
 				name: string;
@@ -2100,14 +1983,9 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				name: displayName || providerId,
 				configured: authStatus.configured,
 				status:
-					authStatus.source ||
-					(authStatus.configured ? "configured" : "not_configured"),
+					authStatus.source || (authStatus.configured ? "configured" : "not_configured"),
 				custom: customIds.has(providerId),
-				credentialType: isOAuth
-					? "oauth"
-					: authStatus.configured
-						? "api_key"
-						: null,
+				credentialType: isOAuth ? "oauth" : authStatus.configured ? "api_key" : null,
 				oauthLogin: oauthProviders.has(providerId),
 			};
 			if (cfg) {
@@ -2198,7 +2076,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (refreshCredentials && this.modelRuntime) {
 			await this.modelRuntime.refresh();
 		}
-this.modelRegistryHandler.invalidateCliModelIdsCache();
+		this.modelRegistryHandler.invalidateCliModelIdsCache();
 		await this.modelRegistryHandler.refreshAvailableModels();
 		// Keep the provider's local copy in sync so internal callers
 		// (getAvailableThinkingLevels, cycleModel) see the refreshed list.
@@ -2251,9 +2129,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	}
 
 	/** Write models.json, preserving all other top-level keys. */
-	private async writeModelsJsonConfig(
-		config: Record<string, unknown>,
-	): Promise<void> {
+	private async writeModelsJsonConfig(config: Record<string, unknown>): Promise<void> {
 		const filePath = this.getModelsJsonPath();
 		await piAgentProviderInternals.mkdir(path.dirname(filePath), { recursive: true });
 		await piAgentProviderInternals.writeFile(
@@ -2272,9 +2148,11 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	 * 0.80.x and 0.84.x runtimes resolved by the loader.
 	 */
 	private async reloadRuntimeConfig(): Promise<void> {
-		const runtime = this.modelRuntime as (ModelRuntime & {
-			reloadConfig?: () => Promise<void>;
-		}) | undefined;
+		const runtime = this.modelRuntime as
+			| (ModelRuntime & {
+					reloadConfig?: () => Promise<void>;
+			  })
+			| undefined;
 		if (!runtime) return;
 		if (typeof runtime.reloadConfig === "function") {
 			await runtime.reloadConfig();
@@ -2415,10 +2293,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			);
 		}
 
-		const json = (await res.json().catch(() => null)) as
-			| { data?: unknown }
-			| unknown[]
-			| null;
+		const json = (await res.json().catch(() => null)) as { data?: unknown } | unknown[] | null;
 		const rawItems = Array.isArray(json)
 			? json
 			: json && typeof json === "object" && Array.isArray((json as { data?: unknown }).data)
@@ -2434,7 +2309,9 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		const seen = new Set<string>();
 		for (const item of rawItems) {
 			const id =
-				item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+				item &&
+				typeof item === "object" &&
+				typeof (item as { id?: unknown }).id === "string"
 					? (item as { id: string }).id
 					: typeof item === "string"
 						? item
@@ -2442,7 +2319,9 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			if (!id || seen.has(id)) continue;
 			seen.add(id);
 			const name =
-				item && typeof item === "object" && typeof (item as { name?: unknown }).name === "string"
+				item &&
+				typeof item === "object" &&
+				typeof (item as { name?: unknown }).name === "string"
 					? (item as { name: string }).name
 					: undefined;
 			models.push(name ? { id, name } : { id });
@@ -2528,10 +2407,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		try {
 			const uri = vscode.Uri.parse(url);
 			if (uri.scheme !== "http" && uri.scheme !== "https") {
-				this.logDebug(
-					"[PI] Refusing to open non-http(s) external URL:",
-					url,
-				);
+				this.logDebug("[PI] Refusing to open non-http(s) external URL:", url);
 				return;
 			}
 			await vscode.env.openExternal(uri);
@@ -2569,11 +2445,8 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			);
 		}
 
-		const providerInfo = runtime
-			.getProviders()
-			.find((p) => p.id === id) as
-			| { id: string; auth?: { oauth?: unknown } }
-			| undefined;
+		const providerInfo = runtime.getProviders().find((p) => p.id === id) as
+			{ id: string; auth?: { oauth?: unknown } } | undefined;
 		if (!providerInfo?.auth?.oauth) {
 			throw new Error(`"${id}" does not offer OAuth login.`);
 		}
@@ -2624,13 +2497,10 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			cleanup();
-			if (
-					error instanceof Error &&
-					error.name === "CredentialSynchronizationError"
-			) {
+			if (error instanceof Error && error.name === "CredentialSynchronizationError") {
 				// Login itself succeeded; only local model state failed to sync —
 				// the CLI reports this the same way after /login.
-					sendResult({
+				sendResult({
 					provider: id,
 					success: true,
 					message: `Logged in, but local model state could not be synchronized: ${message}`,
@@ -2742,11 +2612,9 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			}
 			// Write only if the file does not already exist.
 			try {
-				await piAgentProviderInternals.writeFile(
-					filePath,
-					spec.initialContent,
-					{ flag: "wx" },
-				);
+				await piAgentProviderInternals.writeFile(filePath, spec.initialContent, {
+					flag: "wx",
+				});
 			} catch (error: unknown) {
 				if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
 					throw error;
@@ -2754,9 +2622,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			}
 		}
 
-		const doc = await vscode.workspace.openTextDocument(
-			vscode.Uri.file(filePath),
-		);
+		const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
 		await vscode.window.showTextDocument(doc);
 	}
 
@@ -2799,9 +2665,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		if (event.type === "session_info_changed") {
 			this.sessionListManager
 				.refreshSessionList(true)
-				.catch((e) =>
-					this.logError("[PI] refreshSessionList in event handler failed:", e),
-				);
+				.catch((e) => this.logError("[PI] refreshSessionList in event handler failed:", e));
 			this.notifyWebview({
 				type: "session-name-changed",
 				data: { name: event.name },
@@ -2830,16 +2694,13 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			event.message?.role === "user" &&
 			!this.sessionListManager.autoNamingTriggered &&
 			this.session &&
-			(!this.session.sessionName ||
-				isAutoContextDerivedName(this.session.sessionName))
+			(!this.session.sessionName || isAutoContextDerivedName(this.session.sessionName))
 		) {
 			this.logDebug(
 				"[PI] Auto-naming: first user message received, attempting to name session",
 			);
 			this.sessionListManager.autoNamingTriggered =
-				this.sessionListManager.tryAutoSessionNameFromUserMessage(
-					event.message,
-				);
+				this.sessionListManager.tryAutoSessionNameFromUserMessage(event.message);
 			if (this.sessionListManager.autoNamingTriggered) {
 				this.logDebug("[PI] Auto-naming: session named from user message");
 				this.sessionListManager.invalidateSessionListCache(); // Force session list refresh
@@ -2854,8 +2715,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			event.type === "agent_end" &&
 			!event.willRetry &&
 			this.session &&
-			(!this.session.sessionName ||
-				isAutoContextDerivedName(this.session.sessionName)) &&
+			(!this.session.sessionName || isAutoContextDerivedName(this.session.sessionName)) &&
 			(!this.sessionListManager.autoNamingTriggered ||
 				(this.session.sessionName !== undefined &&
 					isAutoContextDerivedName(this.session.sessionName)))
@@ -2866,9 +2726,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			this.sessionListManager.autoNamingTriggered =
 				this.sessionListManager.tryAutoSessionName();
 			if (this.sessionListManager.autoNamingTriggered) {
-				this.logDebug(
-					"[PI] Auto-naming: session name improved from assistant response",
-				);
+				this.logDebug("[PI] Auto-naming: session name improved from assistant response");
 				this.sessionListManager.invalidateSessionListCache(); // Force session list refresh
 				this.sessionListManager.refreshSessionList(true);
 			}
@@ -2885,10 +2743,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 					data: { sessionId: this.session.sessionId, messages: serialized },
 				});
 			} catch (e) {
-				this.logError(
-					"[PI] Failed to re-send session history after agent end:",
-					e,
-				);
+				this.logError("[PI] Failed to re-send session history after agent end:", e);
 			}
 		}
 
@@ -3008,10 +2863,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		return this.serializeMessages(session.messages);
 	}
 
-	private getSessionEntry(
-		sessionManager: any,
-		entryId: string,
-	): any | undefined {
+	private getSessionEntry(sessionManager: any, entryId: string): any | undefined {
 		if (typeof sessionManager?.getEntry === "function") {
 			return sessionManager.getEntry(entryId);
 		}
@@ -3123,8 +2975,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 			description: s.description || "",
 			sourceName:
 				s.sourceInfo?.origin === "package"
-					? s.sourceInfo?.source?.replace(/^npm:/, "")?.replace(/^git:/, "") ||
-						null
+					? s.sourceInfo?.source?.replace(/^npm:/, "")?.replace(/^git:/, "") || null
 					: null,
 			path: s.path || "",
 			sourceType:
@@ -3178,10 +3029,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	getSystemPromptOverrides(): { systemPrompt: boolean; appendSystemPrompts: boolean } {
 		const config = vscode.workspace.getConfiguration("pi-agent");
 		const systemPrompt = config.get<string | null>("systemPrompt", null);
-		const appendSystemPrompts = config.get<string[]>(
-			"appendSystemPrompts",
-			[],
-		);
+		const appendSystemPrompts = config.get<string[]>("appendSystemPrompts", []);
 		return {
 			systemPrompt: !!systemPrompt,
 			appendSystemPrompts: appendSystemPrompts.length > 0,
@@ -3191,11 +3039,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	setSkillDiscovery(enabled: boolean): void {
 		const config = vscode.workspace.getConfiguration("pi-agent");
 		config
-			.update(
-				"disableSkillDiscovery",
-				!enabled,
-				vscode.ConfigurationTarget.Global,
-			)
+			.update("disableSkillDiscovery", !enabled, vscode.ConfigurationTarget.Global)
 			.then(() => {
 				this.reloadSessionResources();
 			});
@@ -3213,11 +3057,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	 */
 	async setLightMode(enabled: boolean): Promise<void> {
 		const config = vscode.workspace.getConfiguration("pi-agent");
-		await config.update(
-			"lightMode",
-			enabled,
-			vscode.ConfigurationTarget.Global,
-		);
+		await config.update("lightMode", enabled, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
@@ -3234,9 +3074,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 
 			// Re-send the transcript and resources so the webview stays in sync
 			// after the session object was replaced.
-			const messages = this.session
-				? this.getSerializedSessionMessages(this.session)
-				: [];
+			const messages = this.session ? this.getSerializedSessionMessages(this.session) : [];
 			this.notifyWebview({
 				type: "session-history",
 				data: {
@@ -3266,11 +3104,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 
 	async setExtraSkillPaths(paths: string[]): Promise<void> {
 		const config = vscode.workspace.getConfiguration("pi-agent");
-		await config.update(
-			"extraSkills",
-			paths,
-			vscode.ConfigurationTarget.Global,
-		);
+		await config.update("extraSkills", paths, vscode.ConfigurationTarget.Global);
 		await this.reloadSessionResources();
 	}
 
@@ -3302,8 +3136,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 		const available = this.getAvailableThinkingLevels(this.currentModelId);
 		const current = this.getThinkingLevel();
 		const currentIndex = available.indexOf(current);
-		const nextLevel =
-			available[(currentIndex + 1) % available.length] || available[0] || "off";
+		const nextLevel = available[(currentIndex + 1) % available.length] || available[0] || "off";
 
 		await this.setThinkingLevel(nextLevel);
 		this.notifyWebview({
@@ -3313,9 +3146,7 @@ this.modelRegistryHandler.invalidateCliModelIdsCache();
 	}
 
 	private setupEditorWebview(panel: vscode.WebviewPanel) {
-		panel.webview.onDidReceiveMessage(
-			this.messageHandler.handle.bind(this.messageHandler),
-		);
+		panel.webview.onDidReceiveMessage(this.messageHandler.handle.bind(this.messageHandler));
 		this.editorChatPanels.add(panel);
 		panel.onDidDispose(() => {
 			this.editorChatPanels.delete(panel);
