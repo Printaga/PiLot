@@ -8,6 +8,8 @@ Bring the power of PI directly into your editor with a modern, intuitive interfa
 
 [![Release](https://img.shields.io/github/v/release/Printaga/PiLot?label=Release)](https://github.com/Printaga/PiLot/releases/latest) [![GitHub Repo stars](https://img.shields.io/github/stars/Printaga/PiLot)](https://github.com/Printaga/PiLot)
 
+Official website: **[pivscode.com](https://pivscode.com/)**
+
 Works on Windows, Linux, and macOS.
 
 ![PiLot Studio in action](media/screenshot.png)
@@ -207,6 +209,15 @@ Got an idea or found a bug?
 - Submit a pull request with improvements
 
 We welcome all contributions!
+
+---
+
+## Links
+
+- Website: [pivscode.com](https://pivscode.com/)
+- Source: [github.com/Printaga/PiLot](https://github.com/Printaga/PiLot)
+- VS Code Marketplace: [PiLot Studio](https://marketplace.visualstudio.com/items?itemName=PrintagaPublishingLLC.pilots-studio)
+- Open VSX: [PrintagaPublishingLLC.pilots-studio](https://open-vsx.org/extension/PrintagaPublishingLLC/pilots-studio)
 
 ---
 
