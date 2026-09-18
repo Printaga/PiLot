@@ -29,6 +29,9 @@
   let autoContext = $state(true);
   let showCacheMissNotices = $state(false);
   let lightMode = $state(false);
+  // Commit-message drafting model (`provider/id`); empty means the standard PI model.
+  let commitMessageModel = $state("");
+  let commitMessageModels = $state<Model[]>([]);
 
   // Thinking levels supported by the currently selected model (falls back to the
   // full set when the model carries no capability metadata).
@@ -140,6 +143,15 @@
     if (typeof (window as any).vscode?.postMessage === "function") {
       (window as any).vscode.postMessage({ type: "getModels" });
       (window as any).vscode.postMessage({ type: "getProviderAuth" });
+    }
+  });
+
+  // The Settings tab owns the commit-message model chooser; refresh its state
+  // whenever the tab is opened so the persisted value is always reflected.
+  $effect(() => {
+    if (activeTab !== "settings") return;
+    if (typeof (window as any).vscode?.postMessage === "function") {
+      (window as any).vscode.postMessage({ type: "getCommitMessageModelState" });
     }
   });
 
@@ -297,6 +309,13 @@
         break;
       case "models-updated":
         models = data.models;
+        break;
+
+      // State and list arrive together, so the chooser is correct even if
+      // `models-updated` has not been broadcast yet.
+      case "commit-message-model-state":
+        if (typeof data?.model === "string") commitMessageModel = data.model;
+        if (Array.isArray(data?.models)) commitMessageModels = data.models;
         break;
 
       case "model-changed":
@@ -1128,6 +1147,11 @@
     sendMessage({ type: "setThinkingLevel", data: { level } });
   }
 
+  function handleCommitMessageModelChange(modelId: string) {
+    commitMessageModel = modelId;
+    sendMessage({ type: "setCommitMessageModel", data: { model: modelId } });
+  }
+
   async function handleAbort() {
     sendMessage({ type: "abort" });
     isStreaming = false;
@@ -1406,6 +1430,9 @@
           {appVersion}
           {thinkingLevel}
           {availableThinkingLevels}
+          {commitMessageModel}
+          {commitMessageModels}
+          onCommitMessageModelChange={handleCommitMessageModelChange}
           onAutoContextChange={(value) => {
             autoContext = value;
             sendMessage({ type: "setAutoContext", data: { enabled: value } });

@@ -29,11 +29,69 @@ export const piBinaryInternals = {
 
 // ── Binary resolution ───────────────────────────────────────────────────
 
+/**
+ * Shell characters that would be interpreted rather than resolved as part of a
+ * program name: command substitution, chaining, redirection, background, and the
+ * newline that separates commands. `"`, `%`, and `^` are interpreted by cmd.exe and
+ * are covered separately below, because they cannot be escaped by wrapping the
+ * value in quotes the way the POSIX characters are avoided by not being present.
+ *
+ * `pi-agent.binaryPath` is read from settings, and settings can come from the
+ * workspace — `.vscode/settings.json` is part of a clone. The resolved value is
+ * handed to a `shell: true` child as the program name, so a value carrying any of
+ * these would be executed as shell syntax instead of resolved as a program. A path
+ * may legitimately contain many other symbols (spaces and parentheses appear in
+ * real install locations), so this refuses the execution characters rather than
+ * allowlisting a path alphabet.
+ */
+const SHELL_EXECUTION_METACHARACTERS = /[;&|$`<>\n\r]/;
+
+/**
+ * Characters cmd.exe acts on. A `"` would close the wrapping quote and expose the
+ * `&` that followed it, `%` expands a variable, `^` escapes the next character,
+ * and `!` expands under delayed expansion. No Windows path may contain `"`, so
+ * refusing it costs nothing. These are the same characters `quoteShellArg()`
+ * refuses on Windows, so the two boundaries agree.
+ */
+const CMD_EXECUTION_METACHARACTERS = /["%^!]/;
+
+/** Upper bound on a configured binary path, so a pathological setting cannot be
+ * echoed back into a dialog or a child argument list. */
+const MAX_BINARY_PATH_LENGTH = 4096;
+
+/**
+ * Whether `value` may be used as the program name without being reinterpreted by
+ * the shell that starts the pi process.
+ */
+export function isSafeBinaryPath(value: string, platform: string = process.platform): boolean {
+	if (!value || value.length > MAX_BINARY_PATH_LENGTH) {
+		return false;
+	}
+	if (SHELL_EXECUTION_METACHARACTERS.test(value)) {
+		return false;
+	}
+	// `!` and `%` are only live for cmd.exe; on a POSIX shell they are inert, so a
+	// path legitimately containing one is still accepted there.
+	if (platform === "win32" && CMD_EXECUTION_METACHARACTERS.test(value)) {
+		return false;
+	}
+	// A leading `(` or `{` opens a subshell or a command group when it sits in the
+	// program position. The same characters later in a path are inert.
+	return !value.startsWith("(") && !value.startsWith("{");
+}
+
 /** Check if the user-configured pi binary path is valid. Returns null to fall through to default resolution. */
 export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 	const trimmed = rawPath.trim();
 	if (!trimmed || trimmed === "pi") {
 		return null; // Use default resolution
+	}
+
+	// A value carrying shell syntax is refused rather than resolved: accepting it
+	// would let a workspace-supplied setting execute as shell syntax. An unusable
+	// setting falls through to default resolution, as an unreadable path already did.
+	if (!isSafeBinaryPath(trimmed)) {
+		return null;
 	}
 
 	if (path.isAbsolute(trimmed)) {
@@ -70,7 +128,9 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 				resolvedPath,
 				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
 			);
-			return resolvedPath;
+			// The joined path inherits the workspace folder name, which a repository also
+			// controls, so the resolved value is checked rather than only the setting.
+			return isSafeBinaryPath(resolvedPath) ? resolvedPath : null;
 		} catch {
 			return null;
 		}

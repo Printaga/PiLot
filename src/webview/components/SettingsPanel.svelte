@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { OpenConfigFileKey } from "../types/index";
+  import type { OpenConfigFileKey, Model } from "../types/index";
   import HelpTooltip from "./HelpTooltip.svelte";
 
   interface Props {
@@ -9,10 +9,15 @@
     availableThinkingLevels?: string[];
     showCacheMissNotices?: boolean;
     lightMode?: boolean;
+    /** Pinned commit-message model (`provider/id`); empty uses the standard PI model. */
+    commitMessageModel?: string;
+    /** Candidate models, sourced from the CLI-reported list. */
+    commitMessageModels?: Model[];
     onAutoContextChange: (value: boolean) => void;
     onThinkingLevelChange: (level: string) => void;
     onShowCacheMissNoticesChange?: (value: boolean) => void;
     onLightModeChange?: (value: boolean) => void;
+    onCommitMessageModelChange?: (modelId: string) => void;
   }
 
   let {
@@ -22,11 +27,47 @@
     availableThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
     showCacheMissNotices = false,
     lightMode = false,
+    commitMessageModel = "",
+    commitMessageModels = [],
     onAutoContextChange,
     onThinkingLevelChange,
     onShowCacheMissNoticesChange,
     onLightModeChange,
+    onCommitMessageModelChange,
   }: Props = $props();
+
+  /** Sentinel value for the "standard PI model" option. */
+  const STANDARD_MODEL_VALUE = "";
+
+  interface ModelOption {
+    value: string;
+    label: string;
+  }
+
+  // Assembled here rather than in the template so the chooser stays a flat
+  // list, and so a pinned model absent from the reported list is still shown
+  // instead of silently appearing unset.
+  const hasUnlistedPinnedModel = $derived(
+    Boolean(commitMessageModel) && !commitMessageModels.some((m) => m.id === commitMessageModel),
+  );
+
+  const modelOptions = $derived.by<ModelOption[]>(() => {
+    const options: ModelOption[] = [
+      { value: STANDARD_MODEL_VALUE, label: "Use standard PI model" },
+    ];
+    for (const model of commitMessageModels) {
+      options.push({ value: model.id, label: model.name || model.id });
+    }
+    if (hasUnlistedPinnedModel) {
+      options.push({ value: commitMessageModel, label: commitMessageModel });
+    }
+    return options;
+  });
+
+  function handleCommitMessageModelChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    onCommitMessageModelChange?.(value);
+  }
 
   const allThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   const levels = $derived.by(() =>
@@ -251,6 +292,38 @@
     </section>
 
     <section class="settings-section">
+      <h4>Commit Messages</h4>
+      <div class="setting-header-row">
+        <p class="section-description">
+          Model used when drafting a commit message from the Source Control title bar.
+        </p>
+        <HelpTooltip
+          text="Leave this on 'Use standard PI model' to draft with the same model as the chat session. Pin a specific model to keep commit messages cheap and fast."
+          title="Commit Message Model"
+        />
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
+            <span class="setting-label">Drafting model</span>
+          </div>
+          <span class="setting-description">Writes pi-agent.git.commitMessageModel</span>
+        </div>
+        <select
+          class="model-select"
+          aria-label="Commit message model"
+          value={commitMessageModel}
+          onchange={handleCommitMessageModelChange}
+        >
+          {#each modelOptions as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </div>
+    </section>
+
+    <section class="settings-section">
       <h4>Keyboard Shortcuts</h4>
       <p class="section-description">Master these shortcuts to navigate faster</p>
 
@@ -465,6 +538,20 @@
     font-style: normal;
     font-size: var(--text-xs);
     color: var(--color-warning);
+  }
+
+  .model-select {
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    max-width: 60%;
+  }
+
+  .model-select:hover {
+    background: var(--color-surface-2);
   }
 
   .toggle {

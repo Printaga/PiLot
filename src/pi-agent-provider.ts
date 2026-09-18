@@ -3081,6 +3081,30 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		await config.update("lightMode", enabled, vscode.ConfigurationTarget.Global);
 	}
 
+	/** Whether a usable pi binary was resolved (not just the fallback 'pi' name). */
+	getPiBinaryPath(): string {
+		return this.binaryService.getResolvedPath() ?? this.binaryService.getBinaryPath();
+	}
+
+	/** Working directory of the live session, or null when no session exists. */
+	getSessionCwd(): string | null {
+		return this.session?.sessionManager.getCwd() ?? null;
+	}
+
+	/**
+	 * Model pinned for commit-message drafting (`provider/id`). An empty value
+	 * means the standard PI model is used.
+	 */
+	getCommitMessageModel(): string {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		return config.get<string>("git.commitMessageModel", "").trim();
+	}
+
+	async setCommitMessageModel(modelId: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		await config.update("git.commitMessageModel", modelId, vscode.ConfigurationTarget.Global);
+	}
+
 	/**
 	 * Rebuild the agent session so newly-set resource flags (e.g. light mode's
 	 * `no*` options, which are fixed at resource-loader construction) take

@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 
 import { PiAgentProvider } from "../pi-agent-provider.js";
 import { runUpdateCheck } from "../update-checker.js";
+import { draftCommitMessage, findRepositoryRoot } from "../git-commit-message.js";
+import { findGitRepository, writeCommitMessage } from "../git-extension.js";
 import {
 	diagnosticsChannel,
 	getDiagnosticsLogContent,
@@ -290,6 +292,96 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.toggleLightMode", async () => {
 			await provider.setLightMode(!provider.getLightMode());
+		}),
+	);
+
+	// Generate Commit Message: drafts a message with the PI CLI in print mode and
+	// places it in the SCM commit-message box. Read-only with respect to git -
+	// nothing is staged, committed, amended, or pushed, and no session record is
+	// created (`--no-session`).
+	context.subscriptions.push(
+		vscode.commands.registerCommand("pi-agent.generateCommitMessage", async () => {
+			const cwd =
+				provider.getSessionCwd() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+			if (!cwd) {
+				vscode.window.showWarningMessage(
+					"PiLot Studio: open a folder or start a session to draft a commit message.",
+				);
+				return;
+			}
+
+			const repoRoot = findRepositoryRoot(cwd);
+			if (!repoRoot) {
+				vscode.window.showWarningMessage(
+					"PiLot Studio: the current workspace is not inside a git repository.",
+				);
+				return;
+			}
+
+			// Resolve the SCM target before spending a model request, so a disabled
+			// or missing git extension is reported instead of failing mid-flight.
+			const lookup = await findGitRepository(repoRoot);
+			if (lookup.status === "unavailable") {
+				vscode.window.showWarningMessage(`PiLot Studio: ${lookup.message}`);
+				return;
+			}
+
+			if (!provider.isBinaryAvailable()) {
+				vscode.window.showErrorMessage(
+					"PiLot Studio: the pi binary could not be found. Set pi-agent.binaryPath or add pi to your PATH.",
+				);
+				return;
+			}
+
+			await vscode.window.withProgress(
+				{
+					location: vscode.ProgressLocation.SourceControl,
+					title: "Drafting commit message...",
+				},
+				async () => {
+					const outcome = await draftCommitMessage({
+						cwd,
+						binaryPath: provider.getPiBinaryPath(),
+						model: provider.getCommitMessageModel(),
+					});
+
+					switch (outcome.status) {
+						case "message": {
+							writeCommitMessage(lookup.repository, outcome.message);
+							const notes: string[] = [];
+							if (outcome.truncated) notes.push("the patch was truncated");
+							if (outcome.untrackedCount > 0) {
+								notes.push(
+									`${outcome.untrackedCount} untracked file(s) were not included`,
+								);
+							}
+							vscode.window.showInformationMessage(
+								notes.length > 0
+									? `Commit message drafted (${notes.join("; ")}).`
+									: "Commit message drafted.",
+							);
+							break;
+						}
+						case "nothing-to-commit":
+							vscode.window.showInformationMessage(
+								outcome.untrackedCount > 0
+									? `PiLot Studio: nothing to describe - ${outcome.untrackedCount} untracked file(s) are not part of the diff.`
+									: "PiLot Studio: there are no staged or modified changes to describe.",
+							);
+							break;
+						case "timeout":
+							vscode.window.showWarningMessage(
+								`PiLot Studio: drafting the commit message timed out. ${outcome.message}`,
+							);
+							break;
+						case "error":
+							vscode.window.showErrorMessage(
+								`PiLot Studio: could not draft a commit message. ${outcome.message}`,
+							);
+							break;
+					}
+				},
+			);
 		}),
 	);
 

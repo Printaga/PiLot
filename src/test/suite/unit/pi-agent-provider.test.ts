@@ -2719,6 +2719,65 @@ suite("PiAgentProvider", () => {
 		});
 	});
 
+	suite("commit-message model setting", () => {
+		test("reports the standard model when the setting is empty", () => {
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "git.commitMessageModel") return "";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			assert.strictEqual(buildProvider().getCommitMessageModel(), "");
+		});
+
+		test("returns the pinned model, ignoring surrounding whitespace", () => {
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "git.commitMessageModel") return "  anthropic/claude-haiku-4-5  ";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			assert.strictEqual(
+				buildProvider().getCommitMessageModel(),
+				"anthropic/claude-haiku-4-5",
+			);
+		});
+
+		test("persists the chosen model globally", async () => {
+			const writes: Array<{ key: string; value: unknown }> = [];
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (_key: string, def: any) => def,
+				update: async (key: string, value: unknown) => {
+					writes.push({ key, value });
+				},
+			});
+
+			await buildProvider().setCommitMessageModel("anthropic/claude-haiku-4-5");
+
+			assert.deepStrictEqual(writes, [
+				{ key: "git.commitMessageModel", value: "anthropic/claude-haiku-4-5" },
+			]);
+		});
+
+		test("persists the empty string back to the standard model", async () => {
+			const writes: Array<{ key: string; value: unknown }> = [];
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (_key: string, def: any) => def,
+				update: async (key: string, value: unknown) => {
+					writes.push({ key, value });
+				},
+			});
+
+			await buildProvider().setCommitMessageModel("");
+
+			assert.deepStrictEqual(writes, [{ key: "git.commitMessageModel", value: "" }]);
+		});
+	});
+
 	suite("forkSession", () => {
 		test("forks before the selected user entry, restarts footer updates, and restores its prompt", async () => {
 			const provider = buildProvider();

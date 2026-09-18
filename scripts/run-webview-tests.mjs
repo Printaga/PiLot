@@ -15,5 +15,6 @@ mocha.suite.emit("pre-require", globalThis, "webview-tests", mocha);
 
 await import("../src/test/webview/message-bubble.test.mjs");
 await import("../src/test/webview/chat-search.test.mjs");
+await import("../src/test/webview/settings-commit-model.test.mjs");
 
 mocha.run((failures) => process.exit(failures > 0 ? 1 : 0));

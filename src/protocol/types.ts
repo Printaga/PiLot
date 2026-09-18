@@ -168,6 +168,9 @@ export interface ProviderApi {
 	setExtraSkillPaths(paths: string[]): Promise<void>;
 	getExtraSkillPaths(): string[];
 	getLightMode(): boolean;
+	/** Model pinned for commit-message drafting (`provider/id`); empty uses the standard PI model. */
+	getCommitMessageModel(): string;
+	setCommitMessageModel(modelId: string): Promise<void>;
 	setLightMode(enabled: boolean): Promise<void>;
 	restartSessionPreservingHistory(): Promise<void>;
 }

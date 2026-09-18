@@ -8,6 +8,7 @@ import {
 	resolvePiBinaryFromSetting,
 	findPiBinary,
 	resolvePiBinary,
+	isSafeBinaryPath,
 	piBinaryInternals,
 	parseInstalledPackages,
 	readPackageManifest,
@@ -72,6 +73,106 @@ suite("pi-binary: resolvePiBinaryFromSetting", () => {
 		if (process.platform === "win32") return;
 		const result = resolvePiBinaryFromSetting("/root/definitely-not-readable-pi");
 		assert.strictEqual(result, null);
+	});
+
+	test("refuses a bare name carrying shell syntax instead of resolving it", () => {
+		// A workspace-supplied setting reaches a `shell: true` child as the program
+		// name, so accepting this would run the substitution rather than a binary.
+		for (const hostile of [
+			"pi; touch /tmp/pwned",
+			"pi && touch /tmp/pwned",
+			"pi || touch /tmp/pwned",
+			"pi | touch /tmp/pwned",
+			"$(touch /tmp/pwned)",
+			"`touch /tmp/pwned`",
+			"(touch /tmp/pwned)",
+			"{ touch /tmp/pwned; }",
+			"pi > /tmp/pwned",
+			"pi < /dev/null",
+			"pi\ntouch /tmp/pwned",
+		]) {
+			assert.strictEqual(resolvePiBinaryFromSetting(hostile), null, `accepted: ${hostile}`);
+		}
+	});
+
+	test("refuses a hostile value before it is checked against the filesystem", () => {
+		let accessCalls = 0;
+		const original = piBinaryInternals.accessSync;
+		piBinaryInternals.accessSync = () => {
+			accessCalls += 1;
+		};
+		try {
+			assert.strictEqual(resolvePiBinaryFromSetting("/usr/bin/pi; touch /tmp/pwned"), null);
+			assert.strictEqual(
+				accessCalls,
+				0,
+				"a refused value must not reach the filesystem check",
+			);
+		} finally {
+			piBinaryInternals.accessSync = original;
+		}
+	});
+
+	test("refuses a joined path that inherits shell syntax from the workspace folder", () => {
+		// The workspace folder name is repository-controlled too, so the resolved
+		// path is checked and not only the configured setting.
+		const originalAccess = piBinaryInternals.accessSync;
+		const originalFolders = Object.getOwnPropertyDescriptor(
+			vscodeModule.workspace,
+			"workspaceFolders",
+		);
+		piBinaryInternals.accessSync = () => {};
+		Object.defineProperty(vscodeModule.workspace, "workspaceFolders", {
+			configurable: true,
+			value: [{ uri: { fsPath: "/home/user/repo; touch /tmp/pwned" } }],
+		});
+		try {
+			assert.strictEqual(resolvePiBinaryFromSetting("./bin/pi"), null);
+		} finally {
+			piBinaryInternals.accessSync = originalAccess;
+			if (originalFolders) {
+				Object.defineProperty(vscodeModule.workspace, "workspaceFolders", originalFolders);
+			}
+		}
+	});
+
+	test("accepts a plain name and an absolute path", () => {
+		assert.strictEqual(isSafeBinaryPath("pi"), true);
+		assert.strictEqual(isSafeBinaryPath("pi-custom"), true);
+		assert.strictEqual(isSafeBinaryPath("/usr/local/bin/pi"), true);
+	});
+
+	test("keeps accepting paths that real install locations use", () => {
+		// Refusing these would break a setup that works today, which is why the check
+		// refuses execution characters rather than allowlisting a path alphabet.
+		assert.strictEqual(isSafeBinaryPath("/opt/My Programs/pi"), true);
+		assert.strictEqual(isSafeBinaryPath("C:\\Program Files (x86)\\Pi\\pi.exe"), true);
+		assert.strictEqual(isSafeBinaryPath("~/bin/pi"), true);
+	});
+
+	test("refuses cmd.exe-special characters on Windows only", () => {
+		// `%` expands a variable, `^` escapes the next character, `!` expands under
+		// delayed expansion, and `"` would close cmd's wrapping quote. None of these
+		// are live on a POSIX shell, where such a path is still accepted. Values are
+		// built from those characters alone, so the two branches are compared on the
+		// same input.
+		for (const value of ["C:\\pi%USERPROFILE%", "C:\\pi^caret", "C:\\pi!bang"]) {
+			assert.strictEqual(isSafeBinaryPath(value, "win32"), false, `windows: ${value}`);
+			assert.strictEqual(isSafeBinaryPath(value, "linux"), true, `posix: ${value}`);
+		}
+		// A `"` is refused on Windows, where it closes cmd's wrapping quote and
+		// exposes whatever followed it. On POSIX it cannot execute anything, because
+		// the substitution characters it would need are refused ahead of it — it can
+		// only break tokenization, which is a failure and not an execution.
+		assert.strictEqual(isSafeBinaryPath('C:\\pi"quote', "win32"), false);
+		assert.strictEqual(isSafeBinaryPath('C:\\pi"quote', "linux"), true);
+		// A normal Windows path, spaces and parentheses included, stays usable.
+		assert.strictEqual(isSafeBinaryPath("C:\\Program Files (x86)\\Pi\\pi.exe", "win32"), true);
+	});
+
+	test("refuses an empty or oversized value", () => {
+		assert.strictEqual(isSafeBinaryPath(""), false);
+		assert.strictEqual(isSafeBinaryPath("a".repeat(4097)), false);
 	});
 });
 

@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { type ProviderApi, type ConfigFileKey } from "./protocol/types.js";
+import { canPassModelArg } from "./git-commit-message.js";
 
 /** Keys openConfigFile accepts; must mirror ConfigFileKey. */
 const OPEN_CONFIG_FILES: readonly string[] = [
@@ -398,6 +399,41 @@ export class MessageHandler {
 					await this.provider.setLightMode(message.data.enabled);
 					result = { success: true };
 					break;
+
+				// State and model list travel in one reply, so the chooser never
+				// depends on the `models-updated` broadcast having landed first.
+				case "getCommitMessageModelState": {
+					const model = this.provider.getCommitMessageModel();
+					const available = await this.provider.getAvailableModels();
+					// Only models that can actually be handed to the drafting process are
+					// offered: an identifier that cannot be made a literal argument would be
+					// ignored at draft time, so offering it would make the chooser lie.
+					const models = available.filter((entry) => canPassModelArg(entry.id));
+					this.provider.webview?.postMessage({
+						type: "commit-message-model-state",
+						data: { model, models },
+					});
+					result = { model, models };
+					break;
+				}
+
+				case "setCommitMessageModel": {
+					const model = message.data?.model;
+					if (typeof model !== "string") {
+						result = { error: "Invalid commit-message model value." };
+						break;
+					}
+					// The value reaches a `shell: true` child as a `--model` argument. It is
+					// stored in the form the drafting call can make literal, so a value that
+					// cannot be quoted for this platform is refused rather than persisted.
+					if (!canPassModelArg(model.trim())) {
+						result = { error: "Invalid commit-message model value." };
+						break;
+					}
+					await this.provider.setCommitMessageModel(model.trim());
+					result = { success: true };
+					break;
+				}
 
 				case "setExtraSkillPaths":
 					await this.provider.setExtraSkillPaths(message.data.paths);

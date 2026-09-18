@@ -98,6 +98,8 @@ function createMockProvider(): {
 		sendSkillsList: () => undefined,
 		getLightMode: () => false,
 		setLightMode: () => Promise.resolve(),
+		getCommitMessageModel: () => "",
+		setCommitMessageModel: () => Promise.resolve(),
 		restartSessionPreservingHistory: () => Promise.resolve(),
 	};
 
@@ -1539,5 +1541,107 @@ suite("MessageHandler", () => {
 		});
 		assert.ok(warningMsg?.includes("this session"));
 		assert.ok(provider.calls.deleteSessions.length > 0);
+	});
+
+	// ── commit-message model chooser contract ────────────────────────────────
+
+	test("getCommitMessageModelState replies with the pin and the reported models in one message", async () => {
+		provider.getCommitMessageModel = () => "anthropic/claude-haiku-4-5";
+
+		await handler.handle({ type: "getCommitMessageModelState" });
+
+		const reply = webviewMessages.find((m) => m.type === "commit-message-model-state");
+		assert.ok(reply, "the settings tab needs a reply before it can render the chooser");
+		assert.strictEqual(reply.data.model, "anthropic/claude-haiku-4-5");
+		assert.deepStrictEqual(
+			reply.data.models,
+			[{ id: "model-a", provider: "prov", name: "Model A" }],
+			"the chooser options come from the same round trip",
+		);
+	});
+
+	test("the replied model list keeps only models that drafting can hand to the CLI", async () => {
+		// The chooser must not offer an identifier that would be ignored at draft
+		// time. On a POSIX host that means almost everything survives — including
+		// the spaced ids the CLI actually reports — and only over-long values are
+		// dropped. The Windows-unquotable characters are covered by the guard suite.
+		provider.getAvailableModels = async () => [
+			{ id: "model-a", provider: "prov", name: "Model A" },
+			{ id: "vendor/model+build", provider: "prov", name: "Plussed" },
+			{ id: "Bitfrost/Kilo Code/aion-2.0", provider: "prov", name: "Spaced" },
+			{ id: "a".repeat(220), provider: "prov", name: "Oversized" },
+		];
+
+		await handler.handle({ type: "getCommitMessageModelState" });
+
+		const reply = webviewMessages.find((m) => m.type === "commit-message-model-state");
+		assert.deepStrictEqual(
+			reply.data.models.map((m: { id: string }) => m.id),
+			["model-a", "vendor/model+build", "Bitfrost/Kilo Code/aion-2.0"],
+		);
+	});
+
+	test("setCommitMessageModel persists a plain provider/id", async () => {
+		const result = await handler.handle({
+			type: "setCommitMessageModel",
+			data: { model: "anthropic/claude-haiku-4-5" },
+		});
+
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.setCommitMessageModel, [
+			["anthropic/claude-haiku-4-5"],
+		]);
+	});
+
+	test("setCommitMessageModel clears the pin when given the empty string", async () => {
+		await handler.handle({ type: "setCommitMessageModel", data: { model: "" } });
+
+		assert.deepStrictEqual(provider.calls.setCommitMessageModel, [[""]]);
+	});
+
+	// The persisted value reaches a `shell: true` child as a `--model` argument,
+	// and the setting can be supplied by a repository. Values that cannot be made a
+	// literal argument on this platform are refused at the boundary rather than
+	// stored and validated later, if at all; the unconditionally unpresentable case
+	// is an over-long value.
+	test("setCommitMessageModel refuses an unquotable value and does not persist it", async () => {
+		const result = await handler.handle({
+			type: "setCommitMessageModel",
+			data: { model: "anthropic/" + "a".repeat(220) },
+		});
+
+		assert.ok(result.error);
+		assert.strictEqual(provider.calls.setCommitMessageModel, undefined);
+	});
+
+	// A value carrying shell syntax is no longer refused for that reason alone: it
+	// is quoted at the drafting call, which makes it literal text. Rejecting it here
+	// would also reject the spaced identifiers the CLI reports, which is what an
+	// earlier character allowlist did — and that emptied the chooser.
+	test("setCommitMessageModel accepts a value the drafting call can quote, including shell syntax", async () => {
+		for (const value of [
+			"anthropic/claude-haiku-4-5",
+			"Bitfrost/Kilo Code/aion-labs/aion-2.0",
+			"anthropic/x; touch /tmp/INJECTED",
+		]) {
+			provider.calls.setCommitMessageModel = undefined;
+			const result = await handler.handle({
+				type: "setCommitMessageModel",
+				data: { model: value },
+			});
+
+			assert.strictEqual(result.success, true, `must accept: ${value}`);
+			assert.deepStrictEqual(provider.calls.setCommitMessageModel, [[value]]);
+		}
+	});
+
+	test("setCommitMessageModel refuses non-string values", async () => {
+		const result = await handler.handle({
+			type: "setCommitMessageModel",
+			data: { model: { toString: () => "anthropic/x" } },
+		});
+
+		assert.ok(result.error);
+		assert.strictEqual(provider.calls.setCommitMessageModel, undefined);
 	});
 });
