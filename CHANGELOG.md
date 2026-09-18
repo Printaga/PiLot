@@ -8,7 +8,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 - **Generate Commit Message** (`pi-agent.generateCommitMessage`, also a sparkle button in the Source Control title bar of a git repo): drafts a commit message for the currently staged changes with a PI model and places it in the VS Code commit box.
 - **`pi-agent.git.commitMessageModel`** setting (Settings → Git in the VS Code Settings UI, or the "Commit Messages" section of the PiLot Settings tab) to pin the model used for commit-message drafting. Leave it empty to use the standard PI model.
-- **Disable packages and skills** Added support for disabeling and re-enabeling individual packages and skills.
+- **Disable packages and skills** Added support for disabling and re-enabling individual packages and skills.
 
 ## [2.5.0] - 2026-09-13
 
