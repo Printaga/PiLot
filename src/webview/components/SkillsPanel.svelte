@@ -5,6 +5,8 @@
     name: string;
     description: string;
     sourceName: string | null;
+    packageSource: string | null;
+    key: string;
     path: string;
     sourceType: "local" | "package" | "built-in";
   }
@@ -25,6 +27,8 @@
   let skillDiscoveryEnabled = $state(true);
   let extraSkillPaths = $state<string[]>([]);
   let newSkillPath = $state("");
+  let disabledSkills = $state(new Set<string>());
+  let disabledPackages = $state(new Set<string>());
 
   // Derived: filtered installed skills
   let filteredSkills = $derived(
@@ -69,6 +73,8 @@
       name: s.name,
       description: s.description || "",
       sourceName: s.sourceName || null,
+      packageSource: s.packageSource || null,
+      key: s.key || s.path || `${s.sourceName || ""}::${s.name}`,
       path: s.path || "",
       sourceType:
         s.sourceType ||
@@ -98,6 +104,18 @@
       showLoadingOverlay = true;
       outputText = `Removing ${skill.sourceName}...\n`;
     }
+  }
+
+  function toggleSkill(skill: SkillInfo) {
+    const enabled = disabledSkills.has(skill.key);
+    sendMessage({ type: "setSkillEnabled", data: { key: skill.key, enabled } });
+  }
+
+  function isSkillEnabled(skill: SkillInfo): boolean {
+    return (
+      !disabledSkills.has(skill.key) &&
+      !(skill.packageSource && disabledPackages.has(skill.packageSource))
+    );
   }
 
   function toggleSkillDiscovery() {
@@ -152,6 +170,11 @@
     expandedSkill = expandedSkill === skill.name ? null : skill.name;
   }
 
+  function applyResourceToggleMessage(data: any) {
+    disabledSkills = new Set(data?.disabledSkills || []);
+    disabledPackages = new Set(data?.disabledPackages || []);
+  }
+
   // Handle messages from extension (fallback for mid-session updates)
   $effect(() => {
     const vscode = getVsCodeApi();
@@ -175,6 +198,9 @@
       if (type === "extra-skill-paths") {
         extraSkillPaths = data?.paths || [];
       }
+      if (type === "resource-toggles-changed") {
+        applyResourceToggleMessage(data);
+      }
       if (type === "loading") {
         showLoadingOverlay = data?.loading;
         if (!data?.loading) {
@@ -196,6 +222,7 @@
     sendMessage({ type: "getSessionResources" });
     sendMessage({ type: "getSkillDiscovery" });
     sendMessage({ type: "getExtraSkillPaths" });
+    sendMessage({ type: "getResourceToggles" });
   });
 </script>
 
@@ -285,10 +312,15 @@
             onkeydown={(e) => e.key === "Enter" && expandSkill(skill)}
           >
             <div class="skill-name-row">
-              <span class="skill-name">{skill.name}</span>
+              <span class="skill-name" class:disabled-resource={!isSkillEnabled(skill)}
+                >{skill.name}</span
+              >
               <span class="badge badge-{sourceTypeBadge(skill.sourceType)}">
                 {skill.sourceType}
               </span>
+              {#if !isSkillEnabled(skill)}
+                <span class="disabled-badge">Disabled</span>
+              {/if}
             </div>
           </div>
           {#if skill.description}
@@ -321,17 +353,39 @@
               {/if}
             </div>
           {/if}
-          {#if skill.sourceType === "package" && skill.sourceName}
-            <div class="skill-actions">
+          <div class="skill-actions">
+            <button
+              class="toggle-resource-btn"
+              class:enable-btn={!isSkillEnabled(skill)}
+              onclick={(event) => {
+                event.stopPropagation();
+                toggleSkill(skill);
+              }}
+              disabled={lightMode ||
+                !!(skill.packageSource && disabledPackages.has(skill.packageSource))}
+              title={lightMode
+                ? "Disabled by Light Mode"
+                : skill.packageSource && disabledPackages.has(skill.packageSource)
+                  ? "Enable the package first"
+                  : isSkillEnabled(skill)
+                    ? "Disable skill"
+                    : "Enable skill"}
+            >
+              {isSkillEnabled(skill) ? "Disable" : "Enable"}
+            </button>
+            {#if skill.sourceType === "package" && skill.sourceName}
               <button
                 class="remove-btn"
-                onclick={() => removeSkillPackage(skill)}
+                onclick={(event) => {
+                  event.stopPropagation();
+                  removeSkillPackage(skill);
+                }}
                 title="Remove package"
               >
                 Remove
               </button>
-            </div>
-          {/if}
+            {/if}
+          </div>
         </div>
       {/each}
     {/if}
@@ -569,6 +623,20 @@
     color: var(--color-success);
   }
 
+  .skill-name.disabled-resource {
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+  }
+
+  .disabled-badge {
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-warning);
+    background: color-mix(in oklch, var(--color-warning) 15%, transparent);
+  }
+
   .skill-desc {
     font-size: var(--text-sm);
     color: var(--color-text-muted);
@@ -636,6 +704,7 @@
     margin-top: var(--space-1);
   }
 
+  .toggle-resource-btn,
   .remove-btn {
     padding: var(--space-1) var(--space-2);
     background: transparent;
@@ -645,6 +714,30 @@
     font-size: var(--text-xs);
     cursor: pointer;
     transition: all var(--transition-fast);
+  }
+
+  .toggle-resource-btn {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .toggle-resource-btn:hover:not(:disabled) {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+  }
+
+  .toggle-resource-btn.enable-btn {
+    border-color: var(--color-success);
+    color: var(--color-success);
+  }
+
+  .toggle-resource-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .remove-btn:hover {

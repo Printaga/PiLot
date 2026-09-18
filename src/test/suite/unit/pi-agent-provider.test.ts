@@ -527,6 +527,64 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rlOptions.noThemes, false);
 			assert.strictEqual(opts.tools, undefined);
 		});
+
+		test("resource toggles filter runtime resources but preserve raw skills for the UI", () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "disabledSkills") return ["/skills/disabled/SKILL.md"];
+					if (key === "disabledPackages") return ["npm:disabled", "local:user"];
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const loader = {
+				getSkills: () => ({
+					skills: [
+						{ name: "active", path: "/skills/active/SKILL.md", sourceInfo: {} },
+						{ name: "disabled", path: "/skills/disabled/SKILL.md", sourceInfo: {} },
+						{
+							name: "package",
+							path: "/pkg/SKILL.md",
+							sourceInfo: { source: "npm:disabled" },
+						},
+						{ name: "local", path: "/local/SKILL.md", sourceInfo: { scope: "user" } },
+					],
+				}),
+				getExtensions: () => ({
+					extensions: [
+						{ path: "active.ts", sourceInfo: {} },
+						{ path: "disabled.ts", sourceInfo: { source: "npm:disabled" } },
+					],
+				}),
+				getPrompts: () => ({
+					prompts: [
+						{ name: "active", sourceInfo: {} },
+						{ name: "disabled", sourceInfo: { source: "npm:disabled" } },
+					],
+				}),
+				getThemes: () => ({
+					themes: [
+						{ name: "active", sourceInfo: {} },
+						{ name: "disabled", sourceInfo: { source: "npm:disabled" } },
+					],
+				}),
+			} as any;
+
+			const filtered = (provider as any).applyResourceToggles(loader);
+			assert.deepStrictEqual(
+				filtered.getSkills().skills.map((skill: any) => skill.name),
+				["active"],
+			);
+			assert.deepStrictEqual(
+				filtered.getAllSkills().map((skill: any) => skill.name),
+				["active", "disabled", "package", "local"],
+			);
+			assert.strictEqual(filtered.getExtensions().extensions.length, 1);
+			assert.strictEqual(filtered.getPrompts().prompts.length, 1);
+			assert.strictEqual(filtered.getThemes().themes.length, 1);
+		});
 	});
 
 	// ── Light mode live-apply ─────────────────────────────────────────────

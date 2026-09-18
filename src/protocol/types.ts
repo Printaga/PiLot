@@ -172,5 +172,8 @@ export interface ProviderApi {
 	getCommitMessageModel(): string;
 	setCommitMessageModel(modelId: string): Promise<void>;
 	setLightMode(enabled: boolean): Promise<void>;
+	getResourceToggles(): { disabledSkills: string[]; disabledPackages: string[] };
+	setSkillEnabled(key: string, enabled: boolean): Promise<void>;
+	setPackageEnabled(source: string, enabled: boolean): Promise<void>;
 	restartSessionPreservingHistory(): Promise<void>;
 }

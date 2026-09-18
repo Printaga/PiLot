@@ -772,6 +772,95 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
+	private getDisabledResourceKeys(): { disabledSkills: string[]; disabledPackages: string[] } {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		const disabledSkills = config.get<unknown>("disabledSkills", []);
+		const disabledPackages = config.get<unknown>("disabledPackages", []);
+		return {
+			disabledSkills: Array.isArray(disabledSkills)
+				? disabledSkills.filter((key): key is string => typeof key === "string")
+				: [],
+			disabledPackages: Array.isArray(disabledPackages)
+				? disabledPackages.filter((key): key is string => typeof key === "string")
+				: [],
+		};
+	}
+
+	private skillToggleKey(skill: any): string {
+		const source = skill.sourceInfo?.source || "";
+		const path = skill.filePath || skill.path || "";
+		return path || `${source}::${skill.name || ""}`;
+	}
+
+	private isDisabledPackage(sourceInfo: any, disabledPackages: Set<string>): boolean {
+		const source = sourceInfo?.source;
+		if (source && disabledPackages.has(source)) return true;
+		const scope = sourceInfo?.scope;
+		return scope ? disabledPackages.has(`local:${scope}`) : false;
+	}
+
+	private filterPackageResources(resources: any[], disabledPackages: Set<string>): any[] {
+		return resources.filter(
+			(resource: any) => !this.isDisabledPackage(resource.sourceInfo, disabledPackages),
+		);
+	}
+
+	/**
+	 * Keep the SDK's loader behavior intact while filtering resource collections
+	 * before the session consumes them. This makes package/skill toggles apply
+	 * to extensions and prompts as well as to the lists shown in the UI.
+	 */
+	private applyResourceToggles(resourceLoader: ResourceLoader): ResourceLoader {
+		const { disabledSkills, disabledPackages } = this.getDisabledResourceKeys();
+		const disabledSkillSet = new Set(disabledSkills);
+		const disabledPackageSet = new Set(disabledPackages);
+		const loader = resourceLoader as ResourceLoader & Record<string, any>;
+		return new Proxy(loader, {
+			get: (target, property, receiver) => {
+				if (property === "getAllSkills") {
+					return () => target.getSkills().skills || [];
+				}
+				if (property === "getSkills") {
+					return () => {
+						const result = target.getSkills();
+						return {
+							...result,
+							skills: (result.skills || []).filter(
+								(skill: any) =>
+									!disabledSkillSet.has(this.skillToggleKey(skill)) &&
+									!this.isDisabledPackage(skill.sourceInfo, disabledPackageSet),
+							),
+						};
+					};
+				}
+				if (
+					property === "getExtensions" ||
+					property === "getPrompts" ||
+					property === "getThemes"
+				) {
+					return () => {
+						const result = target[property]();
+						const key =
+							property === "getExtensions"
+								? "extensions"
+								: property === "getPrompts"
+									? "prompts"
+									: "themes";
+						return {
+							...result,
+							[key]: this.filterPackageResources(
+								(result as any)?.[key] || [],
+								disabledPackageSet,
+							),
+						};
+					};
+				}
+				const value = Reflect.get(target, property, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	}
+
 	/** Build session options from VS Code configuration to match PI CLI behavior. */
 	private async buildSessionOptions(cwd: string): Promise<{
 		cwd: string;
@@ -848,6 +937,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// Load skills, extensions, prompts, and context files from settings
 		await resourceLoader.reload();
+		const filteredResourceLoader = this.applyResourceToggles(resourceLoader);
 
 		// DIAGNOSTIC: Log extension count after reload
 		const extResult = resourceLoader.getExtensions();
@@ -870,7 +960,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return {
 			cwd,
 			agentDir: piAgentProviderInternals.getAgentDir(),
-			resourceLoader,
+			resourceLoader: filteredResourceLoader,
 			tools,
 			noTools,
 		};
@@ -979,6 +1069,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				extensions = [];
 				prompts = [];
 			}
+			const webviewSkills = await this.getWebviewSkillList(lightMode);
 
 			// Collect VS Code active extensions
 			const vscodeExtensions = vscode.extensions.all
@@ -1032,7 +1123,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.notifyWebview({
 				type: "session-resources",
 				data: {
-					skills: skills.map((s: any) => this.toWebviewSkill(s)),
+					skills: webviewSkills,
 					skillCount: skills.length,
 					extensions: extensions.map((e: any) => ({
 						path: e.path,
@@ -2988,6 +3079,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		name: string;
 		description: string;
 		sourceName: string | null;
+		packageSource: string | null;
+		key: string;
 		path: string;
 		sourceType: string;
 	} {
@@ -2998,6 +3091,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				s.sourceInfo?.origin === "package"
 					? s.sourceInfo?.source?.replace(/^npm:/, "")?.replace(/^git:/, "") || null
 					: null,
+			packageSource: s.sourceInfo?.origin === "package" ? s.sourceInfo?.source || null : null,
+			key: this.skillToggleKey(s),
 			path: s.filePath || s.path || "",
 			sourceType:
 				s.sourceInfo?.origin === "package"
@@ -3013,20 +3108,27 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			name: string;
 			description: string;
 			sourceName: string | null;
+			packageSource: string | null;
+			key: string;
 			path: string;
 			sourceType: string;
 		}>
 	> {
 		if (!this.session) return [];
 		try {
-			const rl = this.session.resourceLoader;
+			const rl = this.session.resourceLoader as any;
 			if (!rl) return [];
-			const sr = rl.getSkills();
-			const skills = sr.skills || [];
+			const skills = rl.getAllSkills?.() || rl.getSkills().skills || [];
 			return skills.map((s: any) => this.toWebviewSkill(s));
 		} catch {
 			return [];
 		}
+	}
+
+	private getWebviewSkillList(
+		lightMode: boolean,
+	): Promise<Awaited<ReturnType<PiAgentProvider["getAllSkills"]>>> {
+		return lightMode ? Promise.resolve([]) : this.getAllSkills();
 	}
 
 	sendSkillsList(): Promise<void> {
@@ -3079,6 +3181,43 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	async setLightMode(enabled: boolean): Promise<void> {
 		const config = vscode.workspace.getConfiguration("pi-agent");
 		await config.update("lightMode", enabled, vscode.ConfigurationTarget.Global);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	getResourceToggles(): { disabledSkills: string[]; disabledPackages: string[] } {
+		return this.getDisabledResourceKeys();
+	}
+
+	private async updateDisabledResourceList(
+		setting: "disabledSkills" | "disabledPackages",
+		key: string,
+		enabled: boolean,
+	): Promise<void> {
+		const config = vscode.workspace.getConfiguration("pi-agent");
+		const configured = config.get<unknown>(setting, []);
+		const current = Array.isArray(configured)
+			? configured.filter((item): item is string => typeof item === "string")
+			: [];
+		const next = enabled
+			? current.filter((item) => item !== key)
+			: current.includes(key)
+				? current
+				: [...current, key];
+		await config.update(setting, next, vscode.ConfigurationTarget.Global);
+		this.notifyWebview({
+			type: "resource-toggles-changed",
+			data: this.getDisabledResourceKeys(),
+		});
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	setSkillEnabled(key: string, enabled: boolean): Promise<void> {
+		return this.updateDisabledResourceList("disabledSkills", key, enabled);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	setPackageEnabled(source: string, enabled: boolean): Promise<void> {
+		return this.updateDisabledResourceList("disabledPackages", source, enabled);
 	}
 
 	/** Whether a usable pi binary was resolved (not just the fallback 'pi' name). */

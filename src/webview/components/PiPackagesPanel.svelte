@@ -49,6 +49,7 @@
   let sortOption = $state<"downloads" | "newest" | "name">("downloads");
   let showLoadingOverlay = $state(false);
   let outputText = $state("");
+  let disabledPackages = $state(new Set<string>());
 
   // Computed: filtered and sorted marketplace packages
   let filteredPackages = $derived(
@@ -206,6 +207,15 @@
     outputText = `Removing ${source}...\n`;
   }
 
+  function isPackageEnabled(pkg: InstalledPackage): boolean {
+    return !disabledPackages.has(pkg.source);
+  }
+
+  function togglePackage(pkg: InstalledPackage) {
+    const enabled = disabledPackages.has(pkg.source);
+    sendMessage({ type: "setPackageEnabled", data: { source: pkg.source, enabled } });
+  }
+
   async function updatePackages() {
     sendMessage({ type: "updateResources" });
     showLoadingOverlay = true;
@@ -241,6 +251,9 @@
       if (type === "output") {
         outputText += data?.text || "";
       }
+      if (type === "resource-toggles-changed") {
+        disabledPackages = new Set(data?.disabledPackages || []);
+      }
       if (type === "packages-updated") {
         refreshInstalled();
         setTimeout(() => {
@@ -255,6 +268,7 @@
   onMount(() => {
     const vscode = getVsCodeApi();
     vscode?.postMessage({ type: "listPackages" });
+    vscode?.postMessage({ type: "getResourceToggles" });
 
     fetchMarketplacePackages();
   });
@@ -302,7 +316,14 @@
         {#each installedPackages.filter( (p) => matchesInstalledQuery(p, installedQuery) ) as pkg (pkg.source)}
           <div class="package-card installed">
             <div class="package-header">
-              <span class="package-name" title={pkg.source}>{displayPackageName(pkg)}</span>
+              <span
+                class="package-name"
+                class:disabled-resource={!isPackageEnabled(pkg)}
+                title={pkg.source}>{displayPackageName(pkg)}</span
+              >
+              {#if !isPackageEnabled(pkg)}
+                <span class="disabled-badge">Disabled</span>
+              {/if}
               {#if pkg.types?.length > 0}
                 <div class="package-badges">
                   {#each pkg.types as type (type)}
@@ -365,6 +386,19 @@
               </div>
             {/if}
             <div class="package-actions">
+              <button
+                class="toggle-resource-btn"
+                class:enable-btn={!isPackageEnabled(pkg)}
+                onclick={() => togglePackage(pkg)}
+                disabled={lightMode}
+                title={lightMode
+                  ? "Disabled by Light Mode"
+                  : isPackageEnabled(pkg)
+                    ? "Disable package"
+                    : "Enable package"}
+              >
+                {isPackageEnabled(pkg) ? "Disable" : "Enable"}
+              </button>
               {#if pkg.local || pkg.source.toLowerCase().startsWith("local:")}
                 <span class="meta-item"
                   >Managed manually — edit files in {pkg.path || "agent extensions dir"}</span
@@ -636,6 +670,20 @@
     color: var(--color-primary);
   }
 
+  .disabled-resource {
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+  }
+
+  .disabled-badge {
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-warning);
+    background: color-mix(in oklch, var(--color-warning) 15%, transparent);
+  }
+
   .package-link {
     flex-shrink: 0;
     color: var(--color-text-muted);
@@ -740,6 +788,7 @@
     margin-top: var(--space-2);
   }
 
+  .toggle-resource-btn,
   .install-btn,
   .uninstall-btn {
     padding: var(--space-2) var(--space-3);
@@ -748,6 +797,27 @@
     font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
+  }
+
+  .toggle-resource-btn {
+    background: transparent;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+  }
+
+  .toggle-resource-btn:hover:not(:disabled) {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+  }
+
+  .toggle-resource-btn.enable-btn {
+    border-color: var(--color-success);
+    color: var(--color-success);
+  }
+
+  .toggle-resource-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .install-btn {

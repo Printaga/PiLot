@@ -1,7 +1,8 @@
+- GUI support for custom package settings
 - Slash command support for packages
 - Improve default prompt templates
 - Prompt auto-enhancement button
-- Detect all custom tools
+- Send from terminal/editor
 - Session tabs
-- Pause packages and skills (temp disable)
-- OMP as backend support
+
+- OMP backend support ?

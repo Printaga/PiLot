@@ -93,20 +93,20 @@ Create a new `SkillsPanel.svelte` component following the pattern of `PiPackages
 ```svelte
 <!-- src/webview/components/SkillsPanel.svelte -->
 <script lang="ts">
-  // State
-  let skills = $state<SkillInfo[]>([]);
-  let isLoading = $state(false);
-  let error = $state<string | null>(null);
-  let searchQuery = $state('');
+	// State
+	let skills = $state<SkillInfo[]>([]);
+	let isLoading = $state(false);
+	let error = $state<string | null>(null);
+	let searchQuery = $state("");
 
-  // Derived
-  let filteredSkills = $derived(skills.filter(s => ...));
+	// Derived
+	let filteredSkills = $derived(skills.filter((skill) => skill.name.includes(searchQuery)));
 
-  // Handlers
-  function installSkill(source: string);
-  function removeSkill(skillPath: string);
-  function refreshSkills();
-  function viewSkillDetails(skill: SkillInfo);
+	// Handlers
+	function installSkill(source: string) {}
+	function removeSkill(skillPath: string) {}
+	function refreshSkills() {}
+	function viewSkillDetails(skill: SkillInfo) {}
 </script>
 ```
 

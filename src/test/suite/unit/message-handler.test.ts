@@ -798,6 +798,32 @@ suite("MessageHandler", () => {
 		assert.strictEqual(result.success, true);
 	});
 
+	test("getResourceToggles - sends persisted toggle state", async () => {
+		provider.getResourceToggles = () => ({
+			disabledSkills: ["/skills/one/SKILL.md"],
+			disabledPackages: ["npm:pkg-one"],
+		});
+		const result = await handler.handle({ type: "getResourceToggles", data: {} });
+		assert.deepStrictEqual(result.disabledSkills, ["/skills/one/SKILL.md"]);
+		const message = webviewMessages.find((m: any) => m.type === "resource-toggles-changed");
+		assert.deepStrictEqual(message.data.disabledPackages, ["npm:pkg-one"]);
+	});
+
+	test("setSkillEnabled and setPackageEnabled - forward independent toggles", async () => {
+		provider.setSkillEnabled = () => Promise.resolve();
+		provider.setPackageEnabled = () => Promise.resolve();
+		await handler.handle({
+			type: "setSkillEnabled",
+			data: { key: "skill-key", enabled: false },
+		});
+		await handler.handle({
+			type: "setPackageEnabled",
+			data: { source: "npm:pkg-one", enabled: true },
+		});
+		assert.deepStrictEqual(provider.calls.setSkillEnabled[0], ["skill-key", false]);
+		assert.deepStrictEqual(provider.calls.setPackageEnabled[0], ["npm:pkg-one", true]);
+	});
+
 	test("setExtraSkillPaths - returns success", async () => {
 		provider.setExtraSkillPaths = () => Promise.resolve();
 		const result = await handler.handle({

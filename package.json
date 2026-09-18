@@ -2,7 +2,7 @@
   "name": "pilots-studio",
   "displayName": "PiLot Studio",
   "description": "A visual VS Code interface for the Pi AI coding agent. Run and manage Pi CLI workflows directly inside your editor.",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "publisher": "PrintagaPublishingLLC",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -509,6 +509,24 @@
             "default": false,
             "order": 4,
             "markdownDescription": "Run `pi` in light mode, ideal for local LLMs (e.g. via llama.cpp). Equivalent to starting `pi` with `--no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write` — the tool restriction applies while `pi-agent.toolPreset` is `default` (explicit presets like `review` or `custom` keep their behavior). Overrides the individual discovery toggles, disables themes, and forces Auto Context off (the `pi-agent.context.autoAttach` preference is restored when light mode is switched off). Reflected across the UI (header badge, Skills and Packages panels). Changing this restarts the current session with its history preserved."
+          },
+          "pi-agent.disabledSkills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 5,
+            "markdownDescription": "Skill keys disabled from the PiLot Studio Skills panel. Disabled skills remain installed and can be re-enabled at any time."
+          },
+          "pi-agent.disabledPackages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 6,
+            "markdownDescription": "PI package sources disabled from the PiLot Studio Packages panel. Disabled packages remain installed but none of their resources load."
           }
         }
       },

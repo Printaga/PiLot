@@ -435,6 +435,29 @@ export class MessageHandler {
 					break;
 				}
 
+				case "getResourceToggles": {
+					const toggles = this.provider.getResourceToggles();
+					this.provider.webview?.postMessage({
+						type: "resource-toggles-changed",
+						data: toggles,
+					});
+					result = toggles;
+					break;
+				}
+
+				case "setSkillEnabled":
+					await this.provider.setSkillEnabled(message.data.key, message.data.enabled);
+					result = { success: true };
+					break;
+
+				case "setPackageEnabled":
+					await this.provider.setPackageEnabled(
+						message.data.source,
+						message.data.enabled,
+					);
+					result = { success: true };
+					break;
+
 				case "setExtraSkillPaths":
 					await this.provider.setExtraSkillPaths(message.data.paths);
 					result = { success: true };

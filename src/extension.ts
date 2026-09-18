@@ -70,6 +70,8 @@ const resourceConfigKeys = [
 	"extraPromptTemplates",
 	"systemPrompt",
 	"appendSystemPrompts",
+	"disabledSkills",
+	"disabledPackages",
 ];
 
 /**
@@ -98,12 +100,19 @@ export function installConfigListener(
 				sessionDir: newConfig.get("sessionDir", ""),
 			});
 
-			if (e.affectsConfiguration("pi-agent.lightMode")) {
-				// Light mode's `no*` flags are fixed at resource-loader
-				// construction, so the session must be rebuilt (history is
-				// preserved) for the change to take effect.
+			if (
+				e.affectsConfiguration("pi-agent.lightMode") ||
+				e.affectsConfiguration("pi-agent.disabledSkills") ||
+				e.affectsConfiguration("pi-agent.disabledPackages")
+			) {
+				// Resource-loader construction and extension startup happen at
+				// session creation, so toggle changes rebuild the session while
+				// preserving its transcript.
 				provider.restartSessionPreservingHistory().catch((err) => {
-					provider.logDebug("[PI] Failed to restart session for light mode change:", err);
+					provider.logDebug(
+						"[PI] Failed to restart session for resource toggle change:",
+						err,
+					);
 				});
 			} else if (resourceConfigKeys.some((k) => e.affectsConfiguration(`pi-agent.${k}`))) {
 				provider.reloadSessionResources().catch((err) => {

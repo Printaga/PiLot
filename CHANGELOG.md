@@ -2,12 +2,13 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [2.6.0] - 2026-09-18
 
 ### Added
 
-- **Generate Commit Message** (`pi-agent.generateCommitMessage`, also a sparkle button in the Source Control title bar of a git repo): drafts a commit message for the currently staged changes with a PI model and places it in the VS Code commit box. The draft is built from `git diff --staged` (falling back to `git diff HEAD` when nothing is staged, and reporting when every change is untracked), truncated to 40,000 characters, and sent to the model on stdin — so staged content is passed through verbatim and never interpreted as a shell command. Nothing is staged, committed, amended, or pushed. The drafting run uses `--no-session`, so it never appears in your session history.
-- **`pi-agent.git.commitMessageModel`** setting (Settings → Git in the VS Code Settings UI, or the "Commit Messages" section of the PiLot Settings tab) to pin the model used for commit-message drafting. Leave it empty to use the standard PI model. Identifiers containing spaces, as the CLI reports for some providers, are supported.
+- **Generate Commit Message** (`pi-agent.generateCommitMessage`, also a sparkle button in the Source Control title bar of a git repo): drafts a commit message for the currently staged changes with a PI model and places it in the VS Code commit box.
+- **`pi-agent.git.commitMessageModel`** setting (Settings → Git in the VS Code Settings UI, or the "Commit Messages" section of the PiLot Settings tab) to pin the model used for commit-message drafting. Leave it empty to use the standard PI model.
+- **Disable packages and skills** Added support for disabeling and re-enabeling individual packages and skills.
 
 ## [2.5.0] - 2026-09-13
 
