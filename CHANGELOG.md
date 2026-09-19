@@ -33,6 +33,15 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Test mocks: `pi-sdk-mocks` Proxy is overrideable and `disposeCalls` tracks; `session-mock` no longer double-registers handlers or force-casts; `vscode-facade` fires listeners exactly once.
 - Deduplicated `PiAgentConfig`/`ThinkingLevel`/`SessionNode` definitions and the cross-component `sendMessage` helper (shared in `webview/messages.ts`); native-addon ABI scan logic consolidated.
 - `pnpm-workspace.yaml`: removed invalid `allowBuilds`/`minimumReleaseAgeExclude` keys; `.vscodeignore` no longer ships nested `.env`/secret files and keeps shared `.vscode` config; removed redundant tsconfig globs/excludes; removed dead `wrapperEl` in `HelpTooltip`.
+## [2.6.1] - 2026-09-19
+
+### Fixed
+
+- Restricted the CI workflow's `GITHUB_TOKEN` to read-only, resolving a CodeQL `missing-workflow-permissions` alert.
+
+### Changed
+
+- Updated README and package.json with official homepage URLs.
 
 ## [2.6.0] - 2026-09-18
 

@@ -5,6 +5,11 @@ on:
         branches: [main]
     pull_request:
 
+# Least privilege: the verify job only reads the repository to check out,
+# install, test, and build. No write scopes are required.
+permissions:
+    contents: read
+
 jobs:
     verify:
         runs-on: ubuntu-latest
