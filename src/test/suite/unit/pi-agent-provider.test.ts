@@ -2635,6 +2635,77 @@ suite("PiAgentProvider", () => {
 		});
 	});
 
+	suite("system prompt panel", () => {
+		test("sendSystemPrompt pushes the live session prompt", () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const session = createSessionMock({}) as any;
+			session.systemPrompt = "You are a test agent.";
+			(provider as any).session = session;
+
+			const messages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => messages.push(m);
+
+			provider["sendSystemPrompt"]();
+
+			const msg = messages.find((m: any) => m.type === "system-prompt");
+			assert.ok(msg, "system-prompt message should be sent");
+			assert.strictEqual(msg.data.prompt, "You are a test agent.");
+		});
+
+		test("sendSystemPrompt is a no-op without a session", () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+
+			const messages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => messages.push(m);
+
+			provider["sendSystemPrompt"]();
+
+			assert.strictEqual(
+				messages.find((m: any) => m.type === "system-prompt"),
+				undefined,
+				"no system-prompt message should be sent without a session",
+			);
+		});
+
+		test("sendSystemPrompt survives a throwing prompt getter", () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const session = createSessionMock({}) as any;
+			Object.defineProperty(session, "systemPrompt", {
+				get() {
+					throw new Error("boom");
+				},
+			});
+			(provider as any).session = session;
+
+			const errors: unknown[] = [];
+			(provider as any).logError = (...args: unknown[]) => errors.push(args);
+
+			provider["sendSystemPrompt"]();
+
+			assert.strictEqual(errors.length, 1, "the failure should be logged, not thrown");
+		});
+
+		test("agent_start re-pushes the system prompt", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const session = createSessionMock({}) as any;
+			session.systemPrompt = "live prompt";
+			(provider as any).session = session;
+
+			const messages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => messages.push(m);
+
+			await (provider as any).handleSessionEvent({ type: "agent_start" } as any);
+
+			const pushes = messages.filter((m: any) => m.type === "system-prompt");
+			assert.strictEqual(pushes.length, 1, "agent_start should trigger exactly one re-push");
+			assert.strictEqual(pushes[0].data.prompt, "live prompt");
+		});
+	});
+
 	suite("dispose", () => {
 		test("stops footer manager without session", () => {
 			const provider = buildProvider();

@@ -168,6 +168,8 @@ export interface ProviderApi {
 		}>
 	>;
 	sendSkillsList(): Promise<void>;
+	/** Push the active session's live system prompt to the webview. */
+	sendSystemPrompt(): void;
 	getSkillDiscovery(): boolean;
 	setSkillDiscovery(enabled: boolean): void;
 	/** Whether pi-agent.* settings currently override SYSTEM.md / APPEND_SYSTEM.md. */

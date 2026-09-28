@@ -2,7 +2,11 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [Unreleased]
+## [2.7.0] - Unreleased
+
+### Added
+
+- **System Prompt tab** (new sidebar button, keyboard shortcut 8): shows the full, live system prompt the model receives for the active session — including SYSTEM.md, settings overrides, and per-run extension modifications — with copy-to-clipboard, word wrap, and size metadata. Updates automatically when a new run starts; shows a friendly empty state before a session exists.
 
 ### Security
 
@@ -33,6 +37,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Test mocks: `pi-sdk-mocks` Proxy is overrideable and `disposeCalls` tracks; `session-mock` no longer double-registers handlers or force-casts; `vscode-facade` fires listeners exactly once.
 - Deduplicated `PiAgentConfig`/`ThinkingLevel`/`SessionNode` definitions and the cross-component `sendMessage` helper (shared in `webview/messages.ts`); native-addon ABI scan logic consolidated.
 - `pnpm-workspace.yaml`: removed invalid `allowBuilds`/`minimumReleaseAgeExclude` keys; `.vscodeignore` no longer ships nested `.env`/secret files and keeps shared `.vscode` config; removed redundant tsconfig globs/excludes; removed dead `wrapperEl` in `HelpTooltip`.
+
 ## [2.6.1] - 2026-09-19
 
 ### Fixed

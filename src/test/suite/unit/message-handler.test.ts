@@ -759,6 +759,13 @@ suite("MessageHandler", () => {
 		});
 	});
 
+	test("getSystemPrompt - calls provider.sendSystemPrompt", async () => {
+		provider.sendSystemPrompt = () => undefined;
+		const result = await handler.handle({ type: "getSystemPrompt", data: {} });
+		assert.ok(provider.calls.sendSystemPrompt.length > 0);
+		assert.strictEqual(result, undefined);
+	});
+
 	test("setSkillDiscovery - returns success", async () => {
 		let lastEnabled: boolean | undefined;
 		provider.setSkillDiscovery = (enabled: boolean) => {

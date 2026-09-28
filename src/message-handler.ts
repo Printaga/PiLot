@@ -360,6 +360,11 @@ export class MessageHandler {
 					await this.provider.sendSkillsList();
 					break;
 
+				case "getSystemPrompt":
+					this.provider.sendSystemPrompt();
+					result = undefined;
+					break;
+
 				case "getSystemPromptOverrides": {
 					const overrides = this.provider.getSystemPromptOverrides();
 					this.provider.webview?.postMessage({

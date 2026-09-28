@@ -329,7 +329,7 @@
 
       <div class="shortcut-list">
         <div class="shortcut-item">
-          <span class="shortcut-key">1 – 7</span>
+          <span class="shortcut-key">1 – 9</span>
           <span class="shortcut-desc">Switch between sidebar tabs</span>
         </div>
         <div class="shortcut-item">

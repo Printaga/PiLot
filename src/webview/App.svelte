@@ -6,6 +6,7 @@
   import ToolsPanel from "./components/ToolsPanel.svelte";
   import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
   import SkillsPanel from "./components/SkillsPanel.svelte";
+  import SystemPromptPanel from "./components/SystemPromptPanel.svelte";
   import ProviderSettings from "./components/ProviderSettings.svelte";
   import Header from "./components/Header.svelte";
   import Toast from "./components/Toast.svelte";
@@ -15,7 +16,15 @@
   import type { ImageContent, Message, Model } from "./types/index";
 
   let activeTab = $state<
-    "chat" | "sessions" | "models" | "providers" | "tools" | "settings" | "packages" | "skills"
+    | "chat"
+    | "sessions"
+    | "models"
+    | "providers"
+    | "tools"
+    | "settings"
+    | "packages"
+    | "skills"
+    | "prompt"
   >("chat");
   let messages = $state<Message[]>([]);
   let isStreaming = $state(false);
@@ -205,6 +214,10 @@
           e.preventDefault();
           break;
         case "8":
+          activeTab = "prompt";
+          e.preventDefault();
+          break;
+        case "9":
           activeTab = "settings";
           e.preventDefault();
           break;
@@ -1367,6 +1380,23 @@
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
           </svg>
         </button>
+
+        <button
+          onclick={() => (activeTab = "prompt")}
+          class:active={activeTab === "prompt"}
+          title="System Prompt"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M8 9l-3 3 3 3m8-6l3 3-3 3m-5-8l-2 10" />
+          </svg>
+        </button>
       </div>
 
       <div class="nav-footer">
@@ -1448,6 +1478,8 @@
         <PiPackagesPanel {lightMode} />
       {:else if activeTab === "skills"}
         <SkillsPanel {sessionResources} {lightMode} />
+      {:else if activeTab === "prompt"}
+        <SystemPromptPanel {sessionResources} />
       {:else}
         <SettingsPanel
           {autoContext}

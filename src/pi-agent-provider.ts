@@ -2751,6 +2751,12 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	private handleSessionEvent(event: AgentSessionEvent) {
 		this.notifyWebview({ type: "pi-event", data: event });
 
+		// The system prompt can change per run (extensions mutate it); re-push it
+		// when a run starts so the prompt panel stays live.
+		if (event.type === "agent_start") {
+			this.sendSystemPrompt();
+		}
+
 		// Refresh the session list when messages change (use cache to avoid disk I/O)
 		if (event.type === "message_end" || event.type === "agent_end") {
 			this.sessionListManager.refreshSessionList(false);
@@ -3138,6 +3144,24 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				data: { skills },
 			});
 		});
+	}
+
+	/**
+	 * Push the session's live system prompt to the webview. The prompt is read
+	 * from the active AgentSession (the SDK resolves SYSTEM.md, settings
+	 * overrides, and extension modifications), so the panel always shows what
+	 * the model actually receives. Unavailable before a session exists.
+	 */
+	sendSystemPrompt(): void {
+		if (!this.session) return;
+		try {
+			this.notifyWebview({
+				type: "system-prompt",
+				data: { prompt: this.session.systemPrompt },
+			});
+		} catch (e) {
+			this.logError("[PI] Failed to read the system prompt:", e);
+		}
 	}
 
 	getSkillDiscovery(): boolean {
