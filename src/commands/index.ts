@@ -15,6 +15,19 @@ async function focusSidebar() {
 	await vscode.commands.executeCommand("piAgentChat.focus");
 }
 
+/** Run a command body and surface failures to the user: an unhandled promise
+ *  rejection from a command callback shows no feedback at all. */
+async function withCommandErrors(body: () => Promise<void>): Promise<void> {
+	try {
+		await body();
+	} catch (err) {
+		logDiagnostics(`[Command] failed: ${err instanceof Error ? err.stack : String(err)}`);
+		vscode.window.showErrorMessage(
+			`PiLot Studio: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
 export function registerCommands(context: vscode.ExtensionContext, provider: PiAgentProvider) {
 	// Explain Code command
 	context.subscriptions.push(
@@ -33,11 +46,13 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				return;
 			}
 
-			await focusSidebar();
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			await withCommandErrors(async () => {
+				await focusSidebar();
+				await new Promise((resolve) => setTimeout(resolve, 500));
 
-			const prompt = `Explain this code in detail:\n\n\`\`\`${editor.document.languageId}\n${selectedText}\n\`\`\``;
-			await provider.prompt(prompt);
+				const prompt = `Explain this code in detail:\n\n\`\`\`${editor.document.languageId}\n${selectedText}\n\`\`\``;
+				await provider.prompt(prompt);
+			});
 		}),
 	);
 
@@ -58,46 +73,56 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				return;
 			}
 
-			await focusSidebar();
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			await withCommandErrors(async () => {
+				await focusSidebar();
+				await new Promise((resolve) => setTimeout(resolve, 500));
 
-			const prompt = `Refactor this code for better readability, performance, and maintainability:\n\n\`\`\`${editor.document.languageId}\n${selectedText}\n\`\`\``;
-			await provider.prompt(prompt);
+				const prompt = `Refactor this code for better readability, performance, and maintainability:\n\n\`\`\`${editor.document.languageId}\n${selectedText}\n\`\`\``;
+				await provider.prompt(prompt);
+			});
 		}),
 	);
 
 	// Analyze Project command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.analyzeProject", async (uri: vscode.Uri) => {
-			await focusSidebar();
-			await new Promise((resolve) => setTimeout(resolve, 500));
-
 			const folderPath =
 				uri?.fsPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-			const prompt = `Analyze the project at \`${folderPath}\`. Provide an overview of:\n1. Project structure\n2. Key files and their purposes\n3. Technologies and frameworks used\n4. Potential improvements`;
+			if (!folderPath) {
+				vscode.window.showWarningMessage(
+					"PiLot Studio: open a folder to analyze a project.",
+				);
+				return;
+			}
+			await withCommandErrors(async () => {
+				await focusSidebar();
+				await new Promise((resolve) => setTimeout(resolve, 500));
 
-			await provider.prompt(prompt);
+				const prompt = `Analyze the project at \`${folderPath}\`. Provide an overview of:\n1. Project structure\n2. Key files and their purposes\n3. Technologies and frameworks used\n4. Potential improvements`;
+
+				await provider.prompt(prompt);
+			});
 		}),
 	);
 
 	// Navigate To Session command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.navigateToSession", async (nodeId: string) => {
-			await provider.navigateTree(nodeId);
+			await withCommandErrors(() => provider.navigateTree(nodeId));
 		}),
 	);
 
 	// Cycle Model command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.cycleModel", async () => {
-			await provider.cycleModel();
+			await withCommandErrors(() => provider.cycleModel());
 		}),
 	);
 
 	// Cycle Thinking Level command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.cycleThinkingLevel", async () => {
-			await provider.cycleThinkingLevel();
+			await withCommandErrors(() => provider.cycleThinkingLevel());
 		}),
 	);
 
@@ -141,14 +166,14 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 	// Open Current Session in Editor command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.openCurrentSessionInEditor", async () => {
-			await provider.openCurrentSessionInEditor();
+			await withCommandErrors(() => provider.openCurrentSessionInEditor());
 		}),
 	);
 
 	// New Chat in Editor command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.newChatInEditor", async () => {
-			await provider.newChatInEditor();
+			await withCommandErrors(() => provider.newChatInEditor());
 		}),
 	);
 
@@ -188,7 +213,7 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				placeHolder: "npm:@pi-agent/skill-analyze",
 			});
 			if (input) {
-				await provider.installPackage(input);
+				await withCommandErrors(() => provider.installPackage(input));
 			}
 		}),
 	);
@@ -200,14 +225,14 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				placeHolder: "npm:@pi-agent/skill-analyze",
 			});
 			if (input) {
-				await provider.uninstallPackage(input);
+				await withCommandErrors(() => provider.uninstallPackage(input));
 			}
 		}),
 	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.updateResources", async () => {
-			await provider.updatePackages();
+			await withCommandErrors(() => provider.updatePackages());
 		}),
 	);
 
@@ -237,10 +262,13 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 				);
 				const confirmed = selection === "Delete";
 				if (!confirmed) return;
-				await provider.deleteSessions(sessionIds);
-				vscode.window.showInformationMessage(
-					`Deleted ${sessionIds.length} session${sessionIds.length === 1 ? "" : "s"}.`,
-				);
+				await withCommandErrors(async () => {
+					await provider.deleteSessions(sessionIds);
+					// Success is reported only when deletion actually completed.
+					vscode.window.showInformationMessage(
+						`Deleted ${sessionIds.length} session${sessionIds.length === 1 ? "" : "s"}.`,
+					);
+				});
 			},
 		),
 	);
@@ -291,7 +319,7 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.toggleLightMode", async () => {
-			await provider.setLightMode(!provider.getLightMode());
+			await withCommandErrors(() => provider.setLightMode(!provider.getLightMode()));
 		}),
 	);
 
@@ -467,7 +495,7 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 	// Rebuild Native Addons command
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.rebuildNativeAddons", async () => {
-			await provider.rebuildNativeAddons();
+			await withCommandErrors(() => provider.rebuildNativeAddons());
 		}),
 	);
 }

@@ -1,1 +1,5 @@
+#!/bin/sh
+# Fail loudly when the toolchain is missing: a silent no-op pre-commit hook
+# lets unformatted/unlinted code through without anyone noticing.
+set -e
 pnpm exec lint-staged

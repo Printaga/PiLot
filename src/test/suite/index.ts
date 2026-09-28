@@ -162,15 +162,19 @@ export async function run(): Promise<void> {
 		}
 	};
 
-	// Surface uncaught errors so a crash still leaves a trail in the report.
-	process.on("uncaughtException", (err) =>
-		appendReport(`UNCAUGHT: ${err && err.stack ? err.stack : String(err)}`),
-	);
-	process.on("unhandledRejection", (reason) =>
+	// Surface uncaught errors so a crash still leaves a trail in the report AND
+	// marks the run failed: without process.exitCode the report could otherwise
+	// read green after a crash (isGreenReport() is the pass/fail authority).
+	process.on("uncaughtException", (err) => {
+		appendReport(`UNCAUGHT: ${err && err.stack ? err.stack : String(err)}`);
+		process.exitCode = 1;
+	});
+	process.on("unhandledRejection", (reason) => {
 		appendReport(
 			`UNHANDLED: ${reason && (reason as any).stack ? (reason as any).stack : String(reason)}`,
-		),
-	);
+		);
+		process.exitCode = 1;
+	});
 
 	const mocha = new Mocha({
 		ui: "tdd",
@@ -213,7 +217,12 @@ export async function run(): Promise<void> {
 				for (const f of results.failures) {
 					lines.push(`FAIL: ${f}`);
 				}
-				fs.writeFileSync(reportPath, lines.join("\n") + "\n");
+				// Append, don't overwrite: UNCAUGHT/UNHANDLED lines from the crash
+				// handlers are in this file and are the only trace of a crashed run.
+				const existing = fs.existsSync(reportPath)
+					? fs.readFileSync(reportPath, "utf8")
+					: "";
+				fs.writeFileSync(reportPath, existing + lines.join("\n") + "\n");
 				if (failures > 0) {
 					reject(new Error(`${failures} tests failed.`));
 				} else {

@@ -43,18 +43,20 @@
     if (!vscode) return;
 
     function handleMessage(event: MessageEvent) {
-      const { type } = event.data;
-      if (type === "pi-event") {
-        const evt = event.data.data;
-        if (evt?.type === "message_start" || evt?.type === "tool_execution_start")
-          isStreaming = true;
-        if (
-          evt?.type === "message_end" ||
-          evt?.type === "tool_execution_end" ||
-          evt?.type === "agent_end"
-        )
-          isStreaming = false;
-      }
+      // Shape-guard like App.svelte: a null/non-object payload thrown on
+      // destructuring here previously killed the listener's future events.
+      const raw: unknown = event.data;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+      const envelope = raw as { type?: unknown; data?: unknown };
+      if (envelope.type !== "pi-event") return;
+      const evt = envelope.data as { type?: string } | undefined;
+      if (evt?.type === "message_start" || evt?.type === "tool_execution_start") isStreaming = true;
+      if (
+        evt?.type === "message_end" ||
+        evt?.type === "tool_execution_end" ||
+        evt?.type === "agent_end"
+      )
+        isStreaming = false;
     }
 
     window.addEventListener("message", handleMessage);
@@ -75,8 +77,11 @@
 
   const spinner = $derived(isStreaming ? spinnerFrames[spinnerIndex] : "");
 
-  /** Sanitize text for single-line display */
-  function sanitizeStatusText(text: string): string {
+  /** Sanitize text for single-line display. Accepts unknown: the activity
+   *  item's text is compile-time-typed only, and a non-string value would
+   *  otherwise throw inside this derived and break rendering. */
+  function sanitizeStatusText(text: unknown): string {
+    if (typeof text !== "string") return "";
     return text
       .replace(/[\r\n\t]/g, " ")
       .replace(/ +/g, " ")

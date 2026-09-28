@@ -40,6 +40,10 @@ export class MessageHandler {
 	async handle(message: { type: string; id?: string; data?: any }): Promise<any> {
 		try {
 			let result: any;
+			// Webview messages are untrusted input: most handlers dereference
+			// `message.data.<prop>`, so a missing payload would throw a TypeError.
+			// Default to a permissive record ( callers validate their own fields).
+			const payload = (message.data ?? {}) as any;
 
 			switch (message.type) {
 				case "ready":
@@ -50,7 +54,7 @@ export class MessageHandler {
 
 				case "prompt":
 					result = await this.withErrorReporting(() =>
-						this.provider.prompt(message.data.text, message.data.images),
+						this.provider.prompt(payload.text, payload.images),
 					);
 					break;
 
@@ -94,49 +98,49 @@ export class MessageHandler {
 
 				case "slashCommand": {
 					result = await this.withErrorReporting(() =>
-						this.provider.tryHandleBuiltinCommand(message.data.text),
+						this.provider.tryHandleBuiltinCommand(payload.text),
 					);
 					break;
 				}
 
 				case "switchSession":
 					result = await this.withErrorReporting(() =>
-						this.provider.switchSession(message.data.sessionId),
+						this.provider.switchSession(payload.sessionId),
 					);
 					break;
 
 				case "navigateTree":
-					await this.provider.navigateTree(message.data.nodeId);
+					// withErrorReporting so failures reach the webview like the
+					// sibling cases instead of only the generic sendResponse path.
+					await this.withErrorReporting(() => this.provider.navigateTree(payload.nodeId));
 					result = { success: true };
 					break;
 
 				case "setSessionName":
 					result = await this.withErrorReporting(() =>
-						this.provider.setSessionName(message.data.name),
+						this.provider.setSessionName(payload.name),
 					);
 					break;
 
 				case "switchModel":
 					result = await this.withErrorReporting(() =>
-						this.provider.setModel(message.data.modelId),
+						this.provider.setModel(payload.modelId),
 					);
 					break;
 
 				case "setThinkingLevel":
 					result = await this.withErrorReporting(() =>
-						this.provider.setThinkingLevel(message.data.level),
+						this.provider.setThinkingLevel(payload.level),
 					);
 					break;
 
 				case "steer":
-					result = await this.withErrorReporting(() =>
-						this.provider.steer(message.data.text),
-					);
+					result = await this.withErrorReporting(() => this.provider.steer(payload.text));
 					break;
 
 				case "followUp":
 					result = await this.withErrorReporting(() =>
-						this.provider.followUp(message.data.text),
+						this.provider.followUp(payload.text),
 					);
 					break;
 
@@ -164,20 +168,18 @@ export class MessageHandler {
 
 				case "checkProviderAuth":
 					result = await this.withErrorReporting(async () => {
-						const authResult = await this.provider.checkProviderAuth(
-							message.data.provider,
-						);
+						const authResult = await this.provider.checkProviderAuth(payload.provider);
 						this.sendProviderAuthCheckResult(authResult);
 					});
 					break;
 
 				case "setApiKey":
-					await this.provider.setApiKey(message.data.provider, message.data.apiKey);
+					await this.provider.setApiKey(payload.provider, payload.apiKey);
 					result = { success: true };
 					break;
 
 				case "removeAuth":
-					await this.provider.removeAuth(message.data.provider);
+					await this.provider.removeAuth(payload.provider);
 					result = { success: true };
 					break;
 
@@ -321,8 +323,8 @@ export class MessageHandler {
 
 				case "toggleFavorite":
 					result = await this.provider.toggleFavorite(
-						message.data.modelId,
-						message.data.isFavorite,
+						payload.modelId,
+						payload.isFavorite,
 					);
 					break;
 
@@ -386,7 +388,7 @@ export class MessageHandler {
 				}
 
 				case "setSkillDiscovery":
-					this.provider.setSkillDiscovery(message.data.enabled);
+					this.provider.setSkillDiscovery(payload.enabled);
 					result = { success: true };
 					break;
 
@@ -401,7 +403,7 @@ export class MessageHandler {
 				}
 
 				case "setLightMode":
-					await this.provider.setLightMode(message.data.enabled);
+					await this.provider.setLightMode(payload.enabled);
 					result = { success: true };
 					break;
 
@@ -451,20 +453,17 @@ export class MessageHandler {
 				}
 
 				case "setSkillEnabled":
-					await this.provider.setSkillEnabled(message.data.key, message.data.enabled);
+					await this.provider.setSkillEnabled(payload.key, payload.enabled);
 					result = { success: true };
 					break;
 
 				case "setPackageEnabled":
-					await this.provider.setPackageEnabled(
-						message.data.source,
-						message.data.enabled,
-					);
+					await this.provider.setPackageEnabled(payload.source, payload.enabled);
 					result = { success: true };
 					break;
 
 				case "setExtraSkillPaths":
-					await this.provider.setExtraSkillPaths(message.data.paths);
+					await this.provider.setExtraSkillPaths(payload.paths);
 					result = { success: true };
 					break;
 
@@ -483,12 +482,12 @@ export class MessageHandler {
 					break;
 
 				case "setAutoCompaction":
-					this.provider.setAutoCompactionEnabled(message.data.enabled);
+					this.provider.setAutoCompactionEnabled(payload.enabled);
 					result = { success: true };
 					break;
 
 				case "setAutoContext":
-					this.provider.setAutoContext(message.data.enabled);
+					this.provider.setAutoContext(payload.enabled);
 					result = { success: true };
 					break;
 
@@ -532,7 +531,7 @@ export class MessageHandler {
 
 				case "installPackage":
 					result = await this.withErrorReporting(async () => {
-						await this.provider.installPackage(message.data.source);
+						await this.provider.installPackage(payload.source);
 						const pkgs = await this.provider.listPackages();
 						this.sendPackagesList(pkgs);
 					});
@@ -540,7 +539,7 @@ export class MessageHandler {
 
 				case "uninstallPackage":
 					result = await this.withErrorReporting(async () => {
-						await this.provider.uninstallPackage(message.data.source);
+						await this.provider.uninstallPackage(payload.source);
 						const pkgs = await this.provider.listPackages();
 						this.sendPackagesList(pkgs);
 					});
@@ -599,7 +598,12 @@ export class MessageHandler {
 					break;
 
 				case "deleteSessions": {
-					const sessionIds = message.data?.sessionIds ?? [];
+					// Validate shape: a non-array payload (e.g. a bare string) would
+					// otherwise iterate characters and pass garbage to deleteSessions.
+					const rawIds: unknown = message.data?.sessionIds;
+					const sessionIds = Array.isArray(rawIds)
+						? rawIds.filter((id): id is string => typeof id === "string")
+						: [];
 					if (sessionIds.length === 0) {
 						result = { success: true, skipped: true };
 						break;
@@ -632,7 +636,7 @@ export class MessageHandler {
 
 				case "edit-message":
 					result = await this.withErrorReporting(() =>
-						this.provider.editMessage(message.data.index, message.data.text),
+						this.provider.editMessage(payload.index, payload.text),
 					);
 					break;
 

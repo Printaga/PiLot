@@ -9,11 +9,17 @@ export interface SessionCwd {
 	sessionName: string | null | undefined;
 }
 
+/** Poll cadence for git branch resolution (kept small so the footer stays fresh). */
+const POLL_INTERVAL_MS = 5000;
+
 export class FooterManager {
 	private footerCwd = "";
 	private footerGitBranch: string | null = null;
 	private footerSessionName: string | null = null;
 	private gitBranchPoller: ReturnType<typeof setInterval> | undefined;
+	// Held as an instance field (not captured in the interval closure) so the
+	// poller always reports the CURRENT session instead of a stale capture.
+	private session: SessionCwd | null | undefined;
 
 	constructor(
 		private readonly binaryService: {
@@ -24,10 +30,11 @@ export class FooterManager {
 
 	start(session: SessionCwd | null | undefined): void {
 		this.stop();
-		this.sendFooterData(session);
+		this.session = session;
+		this.sendFooterData();
 		this.gitBranchPoller = setInterval(() => {
-			this.sendFooterData(session);
-		}, 5000);
+			this.sendFooterData();
+		}, POLL_INTERVAL_MS);
 	}
 
 	stop(): void {
@@ -37,15 +44,23 @@ export class FooterManager {
 		}
 	}
 
-	sendFooterData(session: SessionCwd | null | undefined): void {
-		if (!session) return;
-		const rawCwd = session.getCwd();
-		const sessionName = session.sessionName ?? null;
-		const gitBranch = this.binaryService.resolveGitBranch(rawCwd);
+	sendFooterData(session?: SessionCwd | null | undefined): void {
+		const current = session !== undefined ? session : this.session;
+		if (!current) return;
+		const rawCwd = current.getCwd();
+		const sessionName = current.sessionName ?? null;
+		// resolveGitBranch does sync fs I/O; a throw must not escape the interval
+		// callback and kill the whole footer update tick.
+		let gitBranch: string | null;
+		try {
+			gitBranch = this.binaryService.resolveGitBranch(rawCwd);
+		} catch {
+			gitBranch = null;
+		}
 
 		const home = process.env.HOME || process.env.USERPROFILE || "";
 		let cwd = rawCwd;
-		if (home && rawCwd.startsWith(home)) {
+		if (home && (rawCwd === home || rawCwd.startsWith(home + "/"))) {
 			const rest = rawCwd.slice(home.length);
 			cwd = rest === "" ? "~" : `~${rest.startsWith("/") ? "" : "/"}${rest}`;
 		}

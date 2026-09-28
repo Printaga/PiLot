@@ -71,8 +71,14 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onDismiss();
-    if (e.key === "ArrowRight" || e.key === "Enter") next();
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onDismiss();
+      return;
+    }
+    // Enter is excluded: a focused card button fires its own click on Enter,
+    // and handling it here too would double-trigger next()/onComplete().
+    if (e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") prev();
   }
 
@@ -93,12 +99,7 @@
   onkeydown={handleKeydown}
   use:focusOnMount
 >
-  <div
-    class="onboarding-card"
-    role="presentation"
-    onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
-  >
+  <div class="onboarding-card" role="presentation" onclick={(e) => e.stopPropagation()}>
     <button class="dismiss-btn" onclick={onDismiss} aria-label="Close tour">
       <svg
         width="16"

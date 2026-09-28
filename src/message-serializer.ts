@@ -79,10 +79,14 @@ function normalizeMessage(entryOrMessage: RawAgentMessage | RawSessionEntry): {
 	timestamp?: number;
 } | null {
 	if ("type" in entryOrMessage && entryOrMessage.type === "message" && entryOrMessage.message) {
-		const timestamp =
+		const parsed =
 			typeof entryOrMessage.timestamp === "string"
 				? Date.parse(entryOrMessage.timestamp)
 				: entryOrMessage.timestamp;
+		// An unparseable string yields NaN; don't forward it to the webview —
+		// fall back to 0 like the missing-timestamp case.
+		const timestamp =
+			typeof parsed === "number" && Number.isFinite(parsed) ? parsed : undefined;
 		return {
 			message: entryOrMessage.message,
 			entryId: entryOrMessage.id,
@@ -130,22 +134,12 @@ export function serializeMessages(
 					parentId,
 				});
 			} else if (Array.isArray(msg.content)) {
-				const textParts: string[] = [];
-				const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
-				for (const c of msg.content) {
-					if (c.type === "text" && "text" in c) {
-						textParts.push(c.text || "");
-					} else if (c.type === "image" && "data" in c && "mimeType" in c) {
-						images.push({
-							type: "image",
-							data: c.data,
-							mimeType: c.mimeType,
-						});
-					}
-				}
+				// Reuse the shared extractor so the element guards (null/primitive
+				// blocks, non-string fields) match the rest of the module.
+				const { text, images } = extractTextAndImages(msg.content);
 				result.push({
 					role: "user",
-					content: textParts.join("\n"),
+					content: text,
 					images: images.length > 0 ? images : undefined,
 					timestamp: timestamp ?? 0,
 					entryId,
@@ -204,11 +198,9 @@ export function serializeMessages(
 				parentId,
 			});
 		} else if (msg.role === "toolResult") {
-			const content = Array.isArray(msg.content)
-				? msg.content
-						.map((c) => (c.type === "text" && "text" in c ? c.text : "") || "")
-						.join("\n")
-				: "";
+			// Shared extractor keeps the null/element guards consistent with the
+			// user branch (a primitive element previously threw on `c.type`).
+			const { text: content } = extractTextAndImages(msg.content);
 			result.push({
 				role: "system",
 				content: `[Tool: ${msg.toolName}] ${content.slice(0, 200)}`,

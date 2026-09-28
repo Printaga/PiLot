@@ -172,7 +172,6 @@ export class SessionResources {
 		return absPath;
 	}
 
-	/** Resolve @file mentions in text, replacing them with file content blocks. */
 	/**
 	 * Read one resolved @mention into a `<file>` context block.
 	 * Returns null when the mention should be skipped (unreadable, missing, or
@@ -196,12 +195,23 @@ export class SessionResources {
 		}
 
 		try {
+			const stat = fs.statSync(absPath);
+			// Guard the read: a multi-GB text file would be loaded whole into the
+			// extension host before the truncation below ever applies.
+			if (stat.size > 10 * 1024 * 1024) {
+				this.deps.logDebug(`[PI] @mention file too large (${stat.size} bytes): ${absPath}`);
+				return null;
+			}
 			const content = fs.readFileSync(absPath, "utf-8");
 			const maxBytes = 50 * 1024;
-			const truncated =
-				content.length > maxBytes
-					? content.slice(0, maxBytes) + "\n... [file truncated at 50KB]"
-					: content;
+			// Compare with Buffer.byteLength: UTF-16 code units over-count ASCII
+			// and under-count multi-byte, so content.length against a byte budget
+			// is wrong in both directions.
+			let truncated = content;
+			if (Buffer.byteLength(content, "utf-8") > maxBytes) {
+				const buf = Buffer.from(content, "utf-8").subarray(0, maxBytes);
+				truncated = buf.toString("utf-8") + "\n... [file truncated at 50KB]";
+			}
 			return {
 				context: `<file path="${mention.filePath}">\n${truncated}\n</file>`,
 				remainingText: "",
@@ -239,7 +249,12 @@ export class SessionResources {
 			const read = this.readMentionContext(root, mention);
 			if (!read) continue;
 			fileContexts.push(read.context);
-			resolvedText = resolvedText.replace(mention.match, "");
+			// Remove by index+length, not by value: `.replace(mention.match, "")`
+			// deletes the FIRST occurrence anywhere in the text, so a repeated
+			// mention (`@a.txt @a.txt`) left the wrong one behind.
+			resolvedText =
+				resolvedText.slice(0, mention.index) +
+				resolvedText.slice(mention.index + mention.match.length);
 		}
 
 		if (fileContexts.length === 0) return text;

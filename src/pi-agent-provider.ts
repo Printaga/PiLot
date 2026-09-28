@@ -581,14 +581,19 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 			this.configRefreshPromise = undefined;
 			this.configRefreshResolve = undefined;
 			this.logDebug(`[PI] ${filename} changed on disk, reloading and refreshing models`);
-			// ModelRuntime keeps models and credentials fresh in memory;
-			// refresh() is the SDK 0.80+ equivalent of the legacy
-			// AuthStorage.reload() + ModelRegistry.refresh() pair.
-			if (filename === "auth.json" && this.modelRuntime) {
-				await this.modelRuntime.refresh();
+			try {
+				// ModelRuntime keeps models and credentials fresh in memory;
+				// refresh() is the SDK 0.80+ equivalent of the legacy
+				// AuthStorage.reload() + ModelRegistry.refresh() pair.
+				if (filename === "auth.json" && this.modelRuntime) {
+					await this.modelRuntime.refresh();
+				}
+				await this.refreshModels(false);
+			} finally {
+				// Resolve in finally: a rejected refresh would otherwise leave the
+				// shared promise pending forever, hanging every future caller.
+				resolve?.();
 			}
-			await this.refreshModels(false);
-			resolve?.();
 		}, 300);
 		return this.configRefreshPromise;
 	}
@@ -2381,6 +2386,18 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		if (!baseUrl) {
 			throw new Error("Base URL is required to list provider models");
 		}
+		// The API key is sent as a Bearer token — require an http(s) URL so a
+		// typo'd or malicious base (file:, ftp:, arbitrary scheme) can't receive
+		// the credential.
+		let parsedUrl: URL;
+		try {
+			parsedUrl = new URL(baseUrl);
+		} catch {
+			throw new Error(`Invalid base URL: ${baseUrl}`);
+		}
+		if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+			throw new Error(`Base URL must use http or https: ${baseUrl}`);
+		}
 		// OpenAI-compatible providers expose a `/models` listing.
 		const modelsUrl = baseUrl.replace(/\/+$/, "") + "/models";
 		const headers: Record<string, string> = { Accept: "application/json" };
@@ -2678,15 +2695,18 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	): Promise<string> {
 		const promptId = `login-prompt-${++this.loginPromptSeq}`;
 		const { signal: _signal, ...serializable } = prompt;
-		this.notifyWebview({
-			type: "provider-login-prompt",
-			data: { provider: providerId, promptId, prompt: serializable },
-		});
 		return new Promise<string>((resolve, reject) => {
+			// Register the pending entry BEFORE notifying the webview: if the
+			// answer arrives synchronously (or the provider aborts mid-flight),
+			// resolveLoginPrompt must find the entry instead of silently dropping it.
 			this.pendingLoginPrompts.set(promptId, {
 				provider: providerId,
 				resolve,
 				reject,
+			});
+			this.notifyWebview({
+				type: "provider-login-prompt",
+				data: { provider: providerId, promptId, prompt: serializable },
 			});
 		});
 	}

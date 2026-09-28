@@ -92,7 +92,9 @@ export class ModelRegistryHandler {
 	}
 
 	getFavorites(): string[] {
-		return this.deps.favoriteModels;
+		// Defensive copy: callers mutating the returned array must not silently
+		// mutate the handler's dep state (and shared notifyWebview payloads).
+		return [...this.deps.favoriteModels];
 	}
 
 	/** Sync the live favorites list from the host into the handler. */
@@ -169,8 +171,11 @@ export class ModelRegistryHandler {
 					return ids;
 				})
 				.catch(() => {
-					this.cliModelIdsCache = new Set();
-					return this.cliModelIdsCache;
+					// Do NOT memoize a failed/empty resolution: the CLI may be
+					// transiently unavailable, and caching the empty set here made
+					// favorites sync permanently dead until an explicit invalidate.
+					this.cliModelIdsPromise = null;
+					return new Set<string>();
 				});
 		}
 		return this.cliModelIdsPromise;
@@ -269,8 +274,15 @@ export class ModelRegistryHandler {
 		}
 		await this.deps.globalState.update("favoriteModels", this.deps.favoriteModels);
 
-		// Sync to PI CLI settings.json (validates against CLI model list)
-		await this.syncFavoritesToSettings();
+		// Sync to PI CLI settings.json (validates against CLI model list). The
+		// toggle already succeeded — a settings flush failure must not reject the
+		// whole call (leaving global state and settings.json inconsistent with an
+		// unhandled rejection), so log and continue.
+		try {
+			await this.syncFavoritesToSettings();
+		} catch (err) {
+			this.deps.logError("[PI] Failed to sync favorites to CLI settings:", err);
+		}
 
 		return this.deps.favoriteModels;
 	}
@@ -280,7 +292,10 @@ export class ModelRegistryHandler {
 		if (models.length === 0) return;
 
 		const currentIndex = models.findIndex((m) => m.id === this.deps.currentModelId);
-		const nextModel = models[(currentIndex + 1) % models.length];
+		// A missing current model (-1) would wrap to index 0 every time; treat it
+		// as "start from the beginning" explicitly.
+		const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % models.length;
+		const nextModel = models[nextIndex];
 		if (nextModel) {
 			this.deps.currentModelId = nextModel.id;
 			await this.deps.globalState.update("currentModelId", nextModel.id);

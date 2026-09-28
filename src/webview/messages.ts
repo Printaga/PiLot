@@ -36,8 +36,12 @@ export function asNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** Clamp a number into [min, max], returning fallback for non-finite input. */
+/** Clamp a number into [min, max], returning fallback for non-finite input
+ *  or invalid bounds (min > max would otherwise yield an arbitrary value). */
 export function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(fallback) || min > max) {
+    return fallback;
+  }
   const n = asNumber(value, fallback);
   return Math.min(max, Math.max(min, n));
 }

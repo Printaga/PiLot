@@ -94,9 +94,27 @@ export interface CopyStatus {
  */
 function readAbiFromNodeFile(nodeFile: string): number | null {
 	if (!fs.existsSync(nodeFile)) return null;
-	const content = fs.readFileSync(nodeFile, "latin1");
-	const match = content.match(/node_register_module_v(\d+)/);
-	return match ? Number.parseInt(match[1], 10) : null;
+	try {
+		const stat = fs.statSync(nodeFile);
+		// Read a bounded prefix: a .node binary can be tens of MB and this runs
+		// on the extension-host startup path; the ABI symbol sits near the start.
+		const fd = fs.openSync(nodeFile, "r");
+		try {
+			const PROBE_BYTES = 256 * 1024;
+			const length = Math.min(stat.size, PROBE_BYTES);
+			const buffer = Buffer.alloc(length);
+			fs.readSync(fd, buffer, 0, length, 0);
+			const content = buffer.toString("latin1");
+			// Word-boundary anchor so an incidental "node_register_module_v12"
+			// substring inside symbol/strings can't produce a false version.
+			const match = content.match(/\bnode_register_module_v(\d+)\b/);
+			return match ? Number.parseInt(match[1], 10) : null;
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -360,10 +378,28 @@ function tryUpgradeToV12(brokenDir: string): boolean {
 		const topMajor = parseInt(topPkg.version?.split(".")[0] ?? "0", 10);
 		if (topMajor < 12) return false;
 
-		// Replace broken v11 with symlink to top-level v12
-		fs.rmSync(brokenDir, { recursive: true, force: true });
-		fs.symlinkSync(topLevel, brokenDir, "dir");
-		return true;
+		// Replace broken v11 with symlink to top-level v12 — but move the broken
+		// copy aside instead of deleting it so user patches/local builds are
+		// recoverable if the top-level copy later disappears or upgrades.
+		const backupDir = brokenDir + ".bak-v11";
+		try {
+			fs.rmSync(backupDir, { recursive: true, force: true });
+			fs.renameSync(brokenDir, backupDir);
+		} catch {
+			fs.rmSync(brokenDir, { recursive: true, force: true });
+		}
+		try {
+			fs.symlinkSync(topLevel, brokenDir, "dir");
+			return true;
+		} catch {
+			// Symlink failed — restore the backup so nothing is lost.
+			try {
+				fs.renameSync(backupDir, brokenDir);
+			} catch {
+				/* best effort */
+			}
+			return false;
+		}
 	} catch {
 		return false;
 	}

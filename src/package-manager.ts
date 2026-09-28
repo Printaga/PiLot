@@ -13,7 +13,7 @@ import {
 	type InstalledPackage,
 	type EnrichedPackage,
 } from "./pi-binary.js";
-import { getShellCommand, execFileAsync } from "./utils/shell.js";
+import { getShellCommand, execFileAsync, quoteShellArg } from "./utils/shell.js";
 
 export interface PackageManagerDeps {
 	getResourceLoader: () => ResourceLoader | undefined;
@@ -240,11 +240,24 @@ export class PackageManager {
 
 	private spawnPackageCommand(args: string[]): ChildProcess {
 		const binaryPath = this.deps.binaryService.getBinaryPath();
-		// Use shell to resolve via PATH on all platforms when binaryPath is a simple name
+		// Use shell to resolve via PATH when binaryPath is a simple name. Args are
+		// user-influenced package sources, so they MUST be quoted: with shell:true
+		// Node joins command+args unescaped, letting `;`, `&&` or `$(...)` in a
+		// source be interpreted by the shell (argv injection).
 		if (binaryPath === "pi" || !path.isAbsolute(binaryPath)) {
-			return spawn(binaryPath, args, { shell: true });
+			if (process.platform === "win32") {
+				const quoted = args.map((a) => quoteShellArg(a, "win32"));
+				if (quoted.some((q) => q === null)) {
+					throw new Error("Refusing to run: unquotable characters in package source");
+				}
+				return spawn(binaryPath, quoted as string[], { shell: true });
+			}
+			const shellCommand = getShellCommand(binaryPath, args);
+			if (shellCommand) {
+				return spawn(shellCommand.command, shellCommand.args);
+			}
 		}
-		// On non-Windows, use shell for better output streaming
+		// On non-Windows with an absolute path, use shell for better output streaming
 		if (process.platform !== "win32") {
 			const shellCommand = getShellCommand(binaryPath, args);
 			if (shellCommand) {
@@ -261,16 +274,23 @@ export class PackageManager {
 
 			const proc = this.spawnPackageCommand(args);
 
-			let output = "";
+			// Keep only a bounded tail for the error message — a chatty command
+			// previously accumulated unbounded output in memory and pushed an
+			// enormous error payload to the UI. Full output still streams live.
+			const MAX_ERROR_OUTPUT = 8 * 1024;
+			let outputTail = "";
+			const appendOutput = (chunk: string) => {
+				outputTail = (outputTail + chunk).slice(-MAX_ERROR_OUTPUT);
+			};
 			proc.stdout?.on("data", (chunk) => {
-				output += chunk.toString();
+				appendOutput(chunk.toString());
 				this.deps.notifyWebview({
 					type: "output",
 					data: { text: chunk.toString() },
 				});
 			});
 			proc.stderr?.on("data", (chunk) => {
-				output += chunk.toString();
+				appendOutput(chunk.toString());
 				this.deps.notifyWebview({
 					type: "output",
 					data: { text: chunk.toString() },
@@ -284,7 +304,7 @@ export class PackageManager {
 					this.deps.notifyWebview({ type: "packages-updated" });
 					resolve();
 				} else {
-					reject(new Error(output || `Command failed with code ${code}`));
+					reject(new Error(outputTail || `Command failed with code ${code}`));
 				}
 			});
 

@@ -480,6 +480,9 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // An open autocomplete swallows Enter even when its filtered list is
+      // empty — submitting would send the literal "@query" text as a message.
+      if (showSlashAutocomplete || showAutocomplete) return;
       if (showSlashAutocomplete && filteredSlashCommands.length > 0) {
         applySlashCommand(filteredSlashCommands[selectedSlashIndex]);
         return;
@@ -822,14 +825,24 @@
     }
   }
 
+  /** Per-file and total limits: unbounded image accumulation previously read
+   *  any number/size of dropped files into memory as base64. */
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+  const MAX_IMAGES = 6;
+
   function readImageFile(file: File, name?: string) {
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > MAX_IMAGE_BYTES) return;
+    if (inputImages.length >= MAX_IMAGES) return;
     const reader = new FileReader();
     reader.onload = () => {
       const data = reader.result as string;
       const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
       if (base64Match) {
+        // Append to the CURRENT value (not a stale closure capture): two
+        // concurrent reads otherwise overwrote each other's attachment.
         inputImages = [
-          ...inputImages,
+          ...$state.snapshot(inputImages),
           {
             type: "image",
             data: base64Match[2],
@@ -838,6 +851,10 @@
           },
         ];
       }
+    };
+    reader.onerror = () => {
+      // A failed read must not silently drop the attachment without a trace.
+      console.error("[PiLot] Failed to read image file:", file.name);
     };
     reader.readAsDataURL(file);
   }

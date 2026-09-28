@@ -27,8 +27,12 @@
       dismissToast(oldest.id);
     }
 
-    const duration = opts.duration ?? 30000;
-    if (!opts.persistent && duration > 0) {
+    // Normalize: NaN/Infinity/undefined-with-no-default all mean "no auto
+    // dismiss" here — treat them explicitly instead of letting NaN silently
+    // disable auto-dismiss while looking like a numeric duration.
+    const rawDuration = typeof opts.duration === "number" ? opts.duration : NaN;
+    const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 30000;
+    if (!opts.persistent) {
       const timer = setTimeout(() => {
         timers.delete(id);
         dismissToast(id);
@@ -53,10 +57,23 @@
     toasts = [];
   }
 
-  // Expose globally for other components to use
-  if (typeof window !== "undefined") {
+  // Expose globally for other components to use. Mounted once at app startup;
+  // the guard keeps a re-mount (HMR) from orphaning timers registered against
+  // the previous instance's timers Map.
+  if (typeof window !== "undefined" && !(window as any).__toast) {
     (window as any).__toast = { showToast, dismissToast, clearToasts };
   }
+
+  // Release timers/state when the component is torn down so a destroyed
+  // instance's pending timeouts can't fire against discarded module state.
+  $effect(() => {
+    return () => {
+      if ((window as any).__toast?.showToast === showToast) {
+        clearToasts();
+        delete (window as any).__toast;
+      }
+    };
+  });
 
   function getTypeIcon(type: Toast["type"]): string {
     switch (type) {
@@ -75,12 +92,7 @@
 {#if toasts.length > 0}
   <div class="toast-container" role="status" aria-live="polite" aria-atomic="false">
     {#each toasts as toast (toast.id)}
-      <div
-        class="toast toast-{toast.type}"
-        role="alert"
-        aria-labelledby="{toast.id}-title"
-        style="animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
-      >
+      <div class="toast toast-{toast.type}" role="alert" aria-labelledby="{toast.id}-title">
         <div class="toast-icon">{getTypeIcon(toast.type)}</div>
         <div class="toast-body">
           <div class="toast-title" id="{toast.id}-title">{toast.title}</div>

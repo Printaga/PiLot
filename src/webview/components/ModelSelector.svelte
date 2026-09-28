@@ -46,6 +46,17 @@
 
   const providerNames = $derived(getProviders());
 
+  // Reset a stale selection: if the selected provider disappears (refresh,
+  // unconfigure), filteredModels would otherwise stay permanently empty.
+  $effect(() => {
+    if (selectedProvider !== "all" && !providerNames.includes(selectedProvider)) {
+      selectedProvider = "all";
+    }
+  });
+
+  // O(1) favorite lookups: `includes` per item was O(n*m) across the list.
+  const favoriteIds = $derived(new Set(favoriteModels));
+
   function getProviders(): string[] {
     const providerSet = new Set(configuredModels.map((m) => m.provider));
     return ["all", ...Array.from(providerSet)];
@@ -184,20 +195,18 @@
             <span class="provider-pill">{model.provider}</span>
             <button
               class="fav-btn"
-              class:active={favoriteModels.includes(model.id)}
+              class:active={favoriteIds.has(model.id)}
               onclick={(e) => {
                 e.stopPropagation();
                 onToggleFavorite(model.id);
               }}
-              title={favoriteModels.includes(model.id)
-                ? "Remove from favorites"
-                : "Add to favorites"}
+              title={favoriteIds.has(model.id) ? "Remove from favorites" : "Add to favorites"}
             >
               <svg
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
-                fill={favoriteModels.includes(model.id) ? "currentColor" : "none"}
+                fill={favoriteIds.has(model.id) ? "currentColor" : "none"}
                 stroke="currentColor"
                 stroke-width="2"
               >

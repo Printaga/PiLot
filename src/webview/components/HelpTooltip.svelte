@@ -6,25 +6,46 @@
   }
 
   let { text, title = "", position = "top" }: Props = $props();
+  // SSR-safe unique id (stable across hydration, unlike Math.random).
+  let uid = $props.id();
+  const tooltipId = `help-tooltip-${uid}`;
   let visible = $state(false);
-  // Unique id so the trigger button can reference the tooltip via
-  // aria-describedby (tooltip was previously invisible to assistive tech).
-  const tooltipId = `help-tooltip-${Math.random().toString(36).slice(2, 10)}`;
+  let wrapper: HTMLElement | null = $state(null);
+
+  // Keep focus only while it stays within the wrapper: focusout fires when
+  // focus moves between the button and the wrapper, so checking relatedTarget
+  // prevents flicker/hide while the button is still focused.
+  function handleFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget;
+    if (next instanceof Node && wrapper?.contains(next)) return;
+    visible = false;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && visible) {
+      event.stopPropagation();
+      visible = false;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div
   class="help-tooltip-wrapper"
   role="presentation"
+  bind:this={wrapper}
   onmouseenter={() => (visible = true)}
   onmouseleave={() => (visible = false)}
   onfocusin={() => (visible = true)}
-  onfocusout={() => (visible = false)}
+  onfocusout={handleFocusOut}
 >
   <button
     class="help-icon-btn"
     aria-label="Help: {title || text}"
-    aria-describedby={visible ? tooltipId : undefined}
+    aria-describedby={tooltipId}
     aria-expanded={visible}
+    onclick={() => (visible = !visible)}
     tabindex="0"
   >
     <svg
@@ -34,6 +55,7 @@
       fill="none"
       stroke="currentColor"
       stroke-width="2.5"
+      aria-hidden="true"
     >
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
@@ -41,14 +63,14 @@
     </svg>
   </button>
 
-  {#if visible}
-    <div class="tooltip-content tooltip-{position}" role="tooltip" id={tooltipId}>
-      {#if title}
-        <div class="tooltip-title">{title}</div>
-      {/if}
-      <div class="tooltip-text">{text}</div>
-    </div>
-  {/if}
+  <!-- Always in the DOM so aria-describedby always resolves; hidden visually
+       (and from AT via the hidden attribute semantics) when not visible. -->
+  <div class="tooltip-content tooltip-{position}" role="tooltip" id={tooltipId} hidden={!visible}>
+    {#if title}
+      <div class="tooltip-title">{title}</div>
+    {/if}
+    <div class="tooltip-text">{text}</div>
+  </div>
 </div>
 
 <style>
@@ -81,6 +103,7 @@
     position: absolute;
     z-index: 1000;
     width: 260px;
+    max-width: min(260px, 90vw);
     padding: var(--space-2) var(--space-3);
     background: var(--color-surface);
     border: 1px solid oklch(from var(--color-primary) l c h / 0.25);
@@ -122,16 +145,5 @@
     left: calc(100% + 6px);
     top: 50%;
     transform: translateY(-50%);
-  }
-
-  .tooltip-title {
-    font-weight: 700;
-    margin-bottom: var(--space-1);
-    font-size: var(--text-sm);
-    color: var(--color-primary);
-  }
-
-  .tooltip-text {
-    color: var(--color-text-muted);
   }
 </style>

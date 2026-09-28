@@ -37,6 +37,46 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Test mocks: `pi-sdk-mocks` Proxy is overrideable and `disposeCalls` tracks; `session-mock` no longer double-registers handlers or force-casts; `vscode-facade` fires listeners exactly once.
 - Deduplicated `PiAgentConfig`/`ThinkingLevel`/`SessionNode` definitions and the cross-component `sendMessage` helper (shared in `webview/messages.ts`); native-addon ABI scan logic consolidated.
 - `pnpm-workspace.yaml`: removed invalid `allowBuilds`/`minimumReleaseAgeExclude` keys; `.vscodeignore` no longer ships nested `.env`/secret files and keeps shared `.vscode` config; removed redundant tsconfig globs/excludes; removed dead `wrapperEl` in `HelpTooltip`.
+- `App.svelte`: array payloads from the host (e.g. `provider-auth`) are no longer discarded when unwrapping message envelopes, and `models-updated` payloads are array-checked.
+- `ToolsPanel`: manual tool toggles now switch the preset to `custom` so they actually apply, and unknown presets are rejected.
+- `VoiceCapture`: no longer writes to `$props()` — state ownership moved to `App.svelte`, with `aria-label`/`aria-pressed` on the stop button.
+- `global.css`: restored hover styles for enabled buttons (`:where(...)` wrapper had zero specificity).
+- `esbuild.config.mjs`: `copyLoader()` also runs during `--watch` and creates `dist/` if missing.
+- `MessageBubble`: markdown re-render effect keyed on content/thinking/searchQuery so updates can't be missed, fresh regex per search, clipboard errors handled.
+- `ContextIndicator`: progress falls back to loading after 30s without updates; percent and tooltip values are clamped.
+- `OnboardingTour`: keyboard handling no longer double-advances on Enter and no longer swallows app-wide shortcuts.
+- `ProviderSettings`: errors are attributed to the right provider, API-key saves wait for host confirmation instead of optimistically succeeding, and each blocks are keyed.
+- `PromptTemplates`: stored templates are validated before use and the editor is focused on mount.
+- `PiPackagesPanel`: exact `npm:` source matching for installed checks, capped install log, safety-timer cleanup, `noopener,noreferrer` links, normalized install payloads.
+- `SkeletonLoader`: skeleton count clamped to 0–50.
+- `Toast`: NaN durations normalized, duplicate mounts guarded, timers cleaned up on teardown.
+- `SessionTree`: select-all only selects visible sessions, selection is pruned when sessions change, the list refreshes after deletes, and the hover pointer resets.
+- `ModelSelector`: favorites use a Set and stale provider state resets when the provider changes.
+- `ChatPanel`: Enter is no longer swallowed when autocomplete is open with an empty filtered list.
+- `HelpTooltip`: rewritten so the tooltip element always exists for `aria-describedby`; click/Enter/Space toggle it and Escape closes it.
+- `ExportDialog`: close timer is cleared and exports time out after 30s instead of hanging forever.
+- `StatusLine`: unknown envelope shapes are guarded and status text is sanitized.
+- Image attachments: 10MB per-file and 6-image limits with read-error handling.
+- `footer-manager`: home-prefix truncation only happens at path boundaries, poll interval is a constant, and git-branch errors are caught.
+- `message-handler`: missing message payloads default to `{}`, `navigateTree` errors are reported, and `deleteSessions` payloads are validated.
+- `binary-service`: failed PI binary resolution is no longer cached, startup errors are reported once, and the CLI version is read from stdout only.
+- `message-serializer`: NaN timestamps are dropped and text/image extraction is shared between user and tool-result messages.
+- `model-registry-handler`: favorites are defensively copied, failed CLI-model lookups aren't memoized, favorites sync errors are caught, and `cycleModel` handles empty model lists.
+- `package-manager`: Windows shell calls quote arguments and captured output is capped at 8KB.
+- `pi-agent-provider`: config refresh always resolves, model-fetch URLs are validated as http(s), and login prompts are registered before use.
+- `update-checker`: the correct auto-update command is used per update kind, `LAST_CHECK` is persisted only after checks complete, and semver prereleases compare correctly.
+- `session-resources`: 10MB file-read guard, byte-length-aware truncation, and `@mention` removal by index.
+- `voice-manager`: non-200 responses unblock the stream, voice stop has a 2s kill timer, and starting voice capture is re-entrancy guarded.
+- `loader.cjs`: double-hook guard, sub-path imports can't escape the package root, `.`/`..` segments are rejected, and `globalPaths` is deduped.
+- `git-extension`: repo path normalization case-folds drive/home prefixes and resolves symlinks.
+- `commands/`: user-facing commands report errors via toast instead of failing silently.
+- `diagnostics`: log is capped at 2000 lines (FIFO) and JSON stringify has a safe fallback.
+- `messages.ts` / `main.ts`: numeric bounds are validated and a missing `#app` element is checked.
+- `native-addons.ts`: ABI probe output is bounded with anchored matching, and v11→v12 upgrades rename broken directories to `.bak-v11` instead of failing.
+- `test/suite/index.ts`: uncaught errors fail the run (exit code 1) and the report summary is appended, not overwritten.
+- Webview `index.html`: removed the bare `https:` wildcard from `img-src`.
+- CI: added a concurrency group, pinned pnpm via `package_json_file`, and installed xvfb for integration tests.
+- Repo hygiene: `.editorconfig` webview indentation, `.husky/pre-commit` shebang with `set -e`, `.prettierignore` for generated dirs, and canonical Apache-2.0 LICENSE text.
 
 ## [2.6.1] - 2026-09-19
 

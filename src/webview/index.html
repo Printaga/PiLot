@@ -11,11 +11,13 @@
         without it the directive is absent and falls back to default-src,
         which blocks the request.
       - style-src keeps 'unsafe-inline' because Svelte injects component styles;
-        img-src allows data: for inline base64 message images.
+        img-src allows data: for inline base64 message images but NOT a bare
+        `https:` wildcard — rendered message content could otherwise pull
+        tracking pixels from arbitrary hosts and leak that the webview is open.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src https://registry.npmjs.org; font-src 'self' data:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://registry.npmjs.org; font-src 'self' data:;"
     />
     <title>PiLot Studio</title>
   </head>

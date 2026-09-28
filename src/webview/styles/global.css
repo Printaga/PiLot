@@ -128,7 +128,9 @@ button:focus-visible {
   border-color: var(--color-primary);
 }
 
-button:hover:not(:disabled) {
+/* Zero-specificity wrapper so component-level hover styles (e.g. semantic
+   danger buttons using --color-error) can win over this global default. */
+:where(button:hover:not(:disabled)) {
   background: var(--color-primary);
   color: var(--color-text-inverse);
   border-color: var(--color-primary);
@@ -136,7 +138,7 @@ button:hover:not(:disabled) {
   transform: translate(-2px, -2px);
 }
 
-button:active:not(:disabled) {
+:where(button):active:not(:disabled) {
   transform: translate(2px, 2px);
   box-shadow: none;
 }

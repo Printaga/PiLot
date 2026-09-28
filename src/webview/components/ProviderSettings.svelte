@@ -48,6 +48,9 @@
   >({});
   // provider -> check in flight
   let checkingProvider = $state<Record<string, boolean>>({});
+  // Provider whose checkProviderAuth is in flight, so an uncorrelated host
+  // `error` can be attributed instead of clearing every check flag.
+  let lastAuthProvider = $state<string | null>(null);
 
   let showAddForm = $state(false);
   let editingProviderId = $state<string | null>(null);
@@ -117,17 +120,18 @@
       // arrives as a bare `error` message with no requestId. Only treat it
       // as an auth-check failure when a check is actually in flight.
       if (msg.type === "error" && !msg.data?.requestId) {
-        const anyChecking = Object.values(checkingProvider).some(Boolean);
-        if (!anyChecking) return;
-        for (const id of Object.keys(checkingProvider)) {
-          if (checkingProvider[id]) checkingProvider[id] = false;
-        }
+        // Attribute the failure to the provider whose check is in flight —
+        // clear only its flag so concurrent/other checks aren't cancelled.
+        if (!lastAuthProvider || !checkingProvider[lastAuthProvider]) return;
+        checkingProvider[lastAuthProvider] = false;
+        const failedProvider = lastAuthProvider;
+        lastAuthProvider = null;
         const detail =
           typeof msg.data?.message === "string" ? msg.data.message : "Auth check failed";
         const toast = (window as any).__toast;
         toast?.showToast({
           type: "error",
-          title: "Auth check failed",
+          title: `Auth check failed for ${failedProvider}`,
           message: detail,
         });
         return;
@@ -136,6 +140,7 @@
       const d = msg.data;
       if (!d || typeof d.provider !== "string") return;
       checkingProvider[d.provider] = false;
+      if (lastAuthProvider === d.provider) lastAuthProvider = null;
       if (typeof d.configured === "boolean") {
         authCheckResults[d.provider] = {
           configured: d.configured,
@@ -247,6 +252,9 @@
 
   function checkAuth(provider: string) {
     checkingProvider[provider] = true;
+    // Correlate by provider so an uncorrelated error can be attributed to the
+    // in-flight check instead of blindly clearing every flag.
+    lastAuthProvider = provider;
     sendMessage({ type: "checkProviderAuth", data: { provider } });
   }
 
@@ -267,15 +275,17 @@
 
   async function saveApiKey() {
     if (!editingProvider || !apiKeyInput.trim()) return;
-    sendMessage({
-      type: "setApiKey",
-      data: { provider: editingProvider, apiKey: apiKeyInput.trim() },
-    });
-    providers = providers.map((p) =>
-      p.provider === editingProvider ? { ...p, configured: true, status: "stored" } : p,
-    );
+    const provider = editingProvider;
+    const apiKey = apiKeyInput.trim();
+    // Close the editor immediately, but do NOT flip the provider to
+    // "configured" yet: wait for the host's `provider-auth` refresh so a
+    // failed persist doesn't leave a bogus success state behind.
     editingProvider = null;
     apiKeyInput = "";
+    sendMessage({
+      type: "setApiKey",
+      data: { provider, apiKey },
+    });
   }
 
   function resetAddForm() {
@@ -408,13 +418,13 @@
   }
 
   async function removeAuth(provider: string) {
+    // Do not mutate local state: the host refreshes `provider-auth` on success
+    // (same pattern as deleteProvider), so a backend failure never leaves the
+    // UI claiming credentials were removed when they weren't.
     sendMessage({
       type: "removeAuth",
       data: { provider },
     });
-    providers = providers.map((p) =>
-      p.provider === provider ? { ...p, configured: false, status: "not_configured" } : p,
-    );
   }
 
   async function deleteProvider(provider: string) {
@@ -800,7 +810,7 @@
   {/if}
 
   <div class="auth-list">
-    {#each sortedProviders.configured as p (p.name)}
+    {#each sortedProviders.configured as p (p.provider)}
       <div class="auth-card" data-configured={p.configured}>
         <div class="auth-main">
           <div class="auth-icon">
@@ -963,7 +973,7 @@
       </div>
     {/if}
 
-    {#each sortedProviders.unconfigured as p (p.name)}
+    {#each sortedProviders.unconfigured as p (p.provider)}
       <div class="auth-card" data-configured={p.configured}>
         <div class="auth-main">
           <div class="auth-icon">

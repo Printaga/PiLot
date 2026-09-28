@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteMap } from "svelte/reactivity";
   import ChatPanel from "./components/ChatPanel.svelte";
   import SessionTree from "./components/SessionTree.svelte";
   import ModelSelector from "./components/ModelSelector.svelte";
@@ -71,7 +72,9 @@
     }>
   >([]);
   let isListening = $state(false);
-  let activeToolCalls: Map<string, { toolName: string; args: any }> = $state(new Map());
+  // SvelteMap: a native Map is not proxied by $state, so .set()/.delete() on
+  // a plain Map never triggers reactivity for anything that reads it.
+  let activeToolCalls = new SvelteMap<string, { toolName: string; args: any }>();
   let toolPreset = $state<string | null>(null);
 
   // Update notification state
@@ -302,8 +305,12 @@
     const envelope = raw as { type?: unknown; data?: unknown };
     if (typeof envelope.type !== "string") return;
     const type: string = envelope.type;
+    // Preserve array payloads: the host sends `provider-auth` with an array as
+    // `envelope.data`, so the old object-only check silently replaced it with
+    // `{}` and provider settings never populated. Callers below validate the
+    // shape of what they read (e.g. Array.isArray for list fields).
     const data =
-      envelope.data && typeof envelope.data === "object" && !Array.isArray(envelope.data)
+      envelope.data && typeof envelope.data === "object"
         ? (envelope.data as Record<string, any>)
         : ({} as Record<string, any>);
 
@@ -332,7 +339,7 @@
         activeTab = "chat";
         break;
       case "models-updated":
-        models = data.models;
+        if (Array.isArray(data.models)) models = data.models;
         break;
 
       // State and list arrive together, so the chooser is correct even if
@@ -456,6 +463,9 @@
         );
         if (lastUserIdx !== -1) {
           editRequestIndex = lastUserIdx;
+          // Clear after dispatch: a leftover index re-triggers the edit prompt
+          // whenever ChatPanel remounts (e.g. returning to the chat tab).
+          setTimeout(() => (editRequestIndex = null), 0);
         }
         break;
       }
@@ -661,6 +671,17 @@
   }
 
   function handlePiEvent(event: any) {
+    // Guard the whole handler: it runs from the window `message` listener, and
+    // a malformed pi-event (missing nested fields) would otherwise throw there
+    // and abort processing of the remaining stream, leaving isStreaming stuck.
+    try {
+      handlePiEventInner(event);
+    } catch (err) {
+      console.error("[PiLot] Failed to process pi-event:", event?.type, err);
+    }
+  }
+
+  function handlePiEventInner(event: any) {
     switch (event.type) {
       case "agent_start":
         isStreaming = true;
@@ -807,8 +828,10 @@
           if (lastMsg.isStreaming) {
             const partialContent = extractTextFromAssistantMessage(event.message);
             const partialThinking = extractThinkingFromAssistantMessage(event.message);
-            // Only update if the partial message content is longer than what we've accumulated
-            if (partialContent && partialContent.length > (lastMsg.content || "").length) {
+            // Prefer the authoritative partial when it is at least as long as
+            // the accumulated buffer: a strict `>` kept diverged (duplicated or
+            // lost) text when deltas were dropped mid-stream.
+            if (partialContent && partialContent.length >= (lastMsg.content || "").length) {
               messages = [
                 ...messages.slice(0, -1),
                 {

@@ -12,9 +12,16 @@
   let { percent, contextTokens, contextWindow, autoCompaction, onCompact }: Props = $props();
 
   let compacting = $state(false);
+  let compactingFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
   function handleClick() {
+    const vscode = (window as any).vscode;
+    if (!vscode?.postMessage) return;
     compacting = true;
+    // Fallback: if the host never emits `compaction_end` (compaction could not
+    // start, host error, dropped event), recover instead of sticking forever.
+    clearTimeout(compactingFallbackTimer);
+    compactingFallbackTimer = setTimeout(() => (compacting = false), 30_000);
     onCompact();
   }
 
@@ -29,6 +36,7 @@
       const msg = parseHostMessage(event);
       if (msg && msg.type === "compaction_end") {
         compacting = false;
+        clearTimeout(compactingFallbackTimer);
       }
     }
 
@@ -36,6 +44,7 @@
 
     return () => {
       window.removeEventListener("message", handleVSCodeMessage);
+      clearTimeout(compactingFallbackTimer);
     };
   });
 
@@ -60,7 +69,7 @@
   const strokeWidth = 2;
   const circleRadius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * circleRadius;
-  const progress = $derived(percent !== null ? Math.min(percent, 100) / 100 : 0);
+  const progress = $derived(percent !== null ? clampNumber(percent, 0, 100, 0) / 100 : 0);
   const strokeDasharray = circumference;
   const strokeDashoffset = $derived(circumference * (1 - progress));
 </script>
@@ -71,7 +80,7 @@
   class:auto-on={autoCompaction}
   onclick={handleClick}
   title={percent !== null
-    ? `Context: ${Math.round(percent)}% (${contextTokens?.toLocaleString() ?? "?"} / ${contextWindow.toLocaleString()} tokens)\nAuto-compaction: ${autoCompaction ? "ON" : "OFF"}\nClick to compact`
+    ? `Context: ${Math.round(clampNumber(percent, 0, 100, 0))}% (${contextTokens?.toLocaleString() ?? "?"} / ${contextWindow.toLocaleString()} tokens)\nAuto-compaction: ${autoCompaction ? "ON" : "OFF"}\nClick to compact`
     : `Context window (no data yet) | Auto-compaction: ${autoCompaction ? "ON" : "OFF"}\nClick to compact`}
 >
   <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} class="ctx-circle">

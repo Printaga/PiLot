@@ -10,6 +10,12 @@ on:
 permissions:
     contents: read
 
+# Cancel superseded runs on the same ref (rapid re-pushes, PR updates) so a
+# 30-minute verify job isn't queued/running several times per commit.
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
 jobs:
     verify:
         runs-on: ubuntu-latest
@@ -21,6 +27,10 @@ jobs:
                   fetch-depth: 0
 
             - uses: pnpm/action-setup@v4
+              with:
+                  # Read from packageManager in package.json (11.8.0) so the
+                  # toolchain can't drift from the lockfile.
+                  package_json_file: package.json
 
             - uses: actions/setup-node@v4
               with:
@@ -50,6 +60,11 @@ jobs:
 
             - name: Build
               run: pnpm run build
+
+            # The VS Code integration suite opens an Electron window; the runner
+            # has no display, so xvfb must be installed or the suite cannot start.
+            - name: Install xvfb
+              run: sudo apt-get update && sudo apt-get install -y xvfb
 
             - name: E2E tests (VS Code integration suite)
               run: pnpm test:e2e

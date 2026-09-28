@@ -577,9 +577,13 @@ function extractNodeModulesPath(cliPath) {
  * via require.resolve().
  */
 function hookModuleResolution(piNodeModules) {
+	// Guard against double-hooking: the extension host can reload this module
+	// (hot restart), and re-capturing our own wrapper would build an unbounded
+	// chain of resolvers that slows every require() in the host.
+	if (Module._resolveFilename.__pillotHooked) return;
 	const originalResolveFilename = Module._resolveFilename;
 
-	Module._resolveFilename = function (request, parent, isMain, options) {
+	const hooked = function (request, parent, isMain, options) {
 		// Intercept @earendil-works/* packages, resolve from global PI install.
 		if (request.startsWith("@earendil-works/")) {
 			const resolved = resolveSdkRequest(piNodeModules, request);
@@ -591,6 +595,8 @@ function hookModuleResolution(piNodeModules) {
 		}
 		return originalResolveFilename.call(this, request, parent, isMain, options);
 	};
+	hooked.__pillotHooked = true;
+	Module._resolveFilename = hooked;
 }
 
 /**
@@ -648,8 +654,10 @@ function resolveBareImport(pkgDir) {
  */
 function resolveSubPathImport(pkgDir, subPath) {
 	const resolvedPath = path.resolve(pkgDir, subPath);
-	const pkgDirWithSep = pkgDir.endsWith(path.sep) ? pkgDir : pkgDir + path.sep;
-	if (!resolvedPath.startsWith(pkgDirWithSep)) {
+	// path.relative is case-insensitive on Windows/macOS where startsWith
+	// (case-sensitive) could be bypassed by differing path casing.
+	const rel = path.relative(pkgDir, resolvedPath);
+	if (rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
 		return null; // traversal attempt
 	}
 	if (fs.existsSync(resolvedPath)) {
@@ -671,6 +679,11 @@ function resolveSubPathImport(pkgDir, subPath) {
 function resolveSdkRequest(piNodeModules, request) {
 	const parts = request.split("/");
 	if (parts.length < 2) return null;
+	// Reject traversal at parse time (defense-in-depth): `@earendil-works/../../etc`
+	// must not build a pkgDir outside piNodeModules.
+	for (const part of parts) {
+		if (part === "" || part === "." || part === "..") return null;
+	}
 	const pkgDir = path.join(piNodeModules, parts[0], parts[1]);
 	if (!fs.existsSync(pkgDir)) return null;
 	if (parts.length === 2) {
@@ -744,8 +757,12 @@ function load() {
 	// NOTE: runs before VS Code extension host — no logDebug() available here.
 	console.log("[PiLot] Using global PI SDK from: " + piNodeModules);
 
-	// Add global PI node_modules to module resolution paths as secondary fallback
-	Module.globalPaths.push(piNodeModules);
+	// Add global PI node_modules to module resolution paths as secondary fallback.
+	// Unshift only when absent: repeated activation previously grew the list and
+	// re-injected the same path at a lower priority each time.
+	if (!Module.globalPaths.includes(piNodeModules)) {
+		Module.globalPaths.unshift(piNodeModules);
+	}
 
 	// Hook module resolution to bypass ESM-only exports map
 	hookModuleResolution(piNodeModules);
@@ -760,9 +777,11 @@ function load() {
 		return {
 			activate(_context) {
 				const vscode = require("vscode");
+				// A thrown string/object has no .message — stringify defensively.
+				const detail = error instanceof Error ? error.message : String(error);
 				vscode.window.showErrorMessage(
 					"PiLot Studio failed to load: " +
-						error.message +
+						detail +
 						"\n\nCheck the developer console for details.",
 				);
 				return { subscriptions: [] };

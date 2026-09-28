@@ -10,6 +10,8 @@
   let exportFormat = $state<"html" | "markdown" | "jsonl">("html");
   let exportStatus = $state<"idle" | "exporting" | "done" | "error">("idle");
   let statusMessage = $state("");
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let exportTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
   function sendMessage(msg: any) {
     postToHost(msg);
@@ -19,10 +21,14 @@
   function handleMessage(event: MessageEvent) {
     const msg = parseHostMessage(event);
     if (!msg || msg.type !== "exportResult") return;
+    clearTimeout(exportTimeoutTimer);
     if (msg.data.success === true) {
       exportStatus = "done";
       statusMessage = "Export completed successfully!";
-      setTimeout(() => onClose(), 2000);
+      // Track the deferred close so an earlier Escape/Cancel can't fire it
+      // against an already-destroyed component.
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => onClose(), 2000);
     } else if (typeof msg.data.error === "string" && msg.data.error) {
       exportStatus = "error";
       statusMessage = `Export failed: ${msg.data.error}`;
@@ -38,6 +44,8 @@
 
   function stopListening() {
     window.removeEventListener("message", handleMessage);
+    clearTimeout(closeTimer);
+    clearTimeout(exportTimeoutTimer);
   }
 
   $effect(() => {
@@ -52,6 +60,16 @@
     try {
       // Use the dedicated exportSession message type for proper response handling
       sendMessage({ type: "exportSession", data: { format: exportFormat } });
+      // postToHost is synchronous and silently no-ops without the host API, so
+      // the try/catch can never fire — bound the wait instead, or the Export
+      // button stays disabled forever when the host never replies.
+      clearTimeout(exportTimeoutTimer);
+      exportTimeoutTimer = setTimeout(() => {
+        if (exportStatus === "exporting") {
+          exportStatus = "error";
+          statusMessage = "Export timed out waiting for the extension host.";
+        }
+      }, 30_000);
     } catch (e) {
       exportStatus = "error";
       statusMessage = `Export failed: ${e instanceof Error ? e.message : String(e)}`;

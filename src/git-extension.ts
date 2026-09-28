@@ -5,6 +5,7 @@
 // exports, `getAPI(1)`, `repositories`, and `inputBox.value`.
 
 import * as vscode from "vscode";
+import * as fs from "node:fs";
 
 /** The SCM commit-message input box. */
 export interface GitInputBox {
@@ -66,10 +67,23 @@ export async function findGitRepository(repoRoot: string): Promise<GitRepository
 		};
 	}
 
-	const normalize = (target: string) =>
-		process.platform === "win32" ? target.toLowerCase() : target;
+	// Case-fold on case-insensitive filesystems (win32 AND darwin), strip
+	// trailing separators, and realpath so symlinked roots still match.
+	const normalize = (target: string) => {
+		let t = target.replace(/[\\/]+$/, "");
+		const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
+		if (caseInsensitive) t = t.toLowerCase();
+		try {
+			t = fs.realpathSync.native(t).replace(/[\\/]+$/, "");
+			if (caseInsensitive) t = t.toLowerCase();
+		} catch {
+			/* unresolvable path (e.g. deleted): keep the lexical form */
+		}
+		return t;
+	};
+	const normalizedRepoRoot = normalize(repoRoot);
 	const match = api.repositories.find(
-		(repository) => normalize(repository.rootUri.fsPath) === normalize(repoRoot),
+		(repository) => normalize(repository.rootUri.fsPath) === normalizedRepoRoot,
 	);
 	if (!match) {
 		return {

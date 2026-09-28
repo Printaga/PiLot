@@ -168,6 +168,9 @@ async function downloadVoiceModel(
 					}
 
 					if (response.statusCode !== 200) {
+						// Drain/destroy the body: an unconsumed response can hold the
+						// socket in the keep-alive pool and stall the request.
+						response.resume();
 						reject(
 							new Error(
 								`Failed to download voice model: HTTP ${response.statusCode}`,
@@ -241,6 +244,7 @@ export interface VoiceManagerDeps {
 export class VoiceManager {
 	private voiceHelperProcess?: ChildProcess;
 	private isListening = false;
+	private isStartingVoice = false;
 	private voiceModel: string = "tiny-q5_1";
 	private voiceLineBuffer = "";
 	private deps: VoiceManagerDeps;
@@ -262,8 +266,17 @@ export class VoiceManager {
 	async toggleVoiceCapture() {
 		if (this.isListening) {
 			this.stopVoiceCapture();
-		} else {
+			return;
+		}
+		// Re-entrancy guard: startVoiceCapture awaits a modal download prompt /
+		// withProgress, so rapid toggles previously passed the !isListening check
+		// multiple times and spawned orphaned helper processes.
+		if (this.isStartingVoice) return;
+		this.isStartingVoice = true;
+		try {
 			await this.startVoiceCapture();
+		} finally {
+			this.isStartingVoice = false;
 		}
 	}
 
@@ -479,6 +492,19 @@ export class VoiceManager {
 			} catch {
 				/* helper already gone */
 			}
+			// Give the helper a short grace period to exit on its own, then kill:
+			// without this a helper blocked in its native capture loop ignored the
+			// stdin EOF and stayed alive holding the audio device. Optional-chained
+			// so test mocks without a full ChildProcess surface keep working.
+			const killTimer = setTimeout(() => {
+				try {
+					if (proc.exitCode === null && !proc.killed) proc.kill?.("SIGTERM");
+				} catch {
+					/* already gone */
+				}
+			}, 2000);
+			killTimer.unref?.();
+			proc.once?.("exit", () => clearTimeout(killTimer));
 			// Detach stdio listeners before dropping the reference: the helper can
 			// emit stderr lines for a while after stop, and those handlers kept the
 			// buffers alive and kept logging after a stop/dispose.

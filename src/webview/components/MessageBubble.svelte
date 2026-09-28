@@ -81,10 +81,17 @@
   }
 
   function copyCode(code: string) {
-    navigator.clipboard.writeText(code);
-    copiedCode = true;
-    clearTimeout(copyCodeTimer);
-    copyCodeTimer = setTimeout(() => (copiedCode = false), 1500);
+    // Only flag success after the clipboard write actually resolves; an
+    // unhandled rejection would surface as a console error and the UI would
+    // still show "copied".
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        copiedCode = true;
+        clearTimeout(copyCodeTimer);
+        copyCodeTimer = setTimeout(() => (copiedCode = false), 1500);
+      })
+      .catch(() => {});
   }
 
   function applyCode(code: string) {
@@ -102,10 +109,14 @@
   }
 
   function copyMessage() {
-    navigator.clipboard.writeText(message.content);
-    copiedMessage = true;
-    clearTimeout(copyMessageTimer);
-    copyMessageTimer = setTimeout(() => (copiedMessage = false), 1500);
+    navigator.clipboard
+      .writeText(message.content)
+      .then(() => {
+        copiedMessage = true;
+        clearTimeout(copyMessageTimer);
+        copyMessageTimer = setTimeout(() => (copiedMessage = false), 1500);
+      })
+      .catch(() => {});
   }
 
   function openInEditor(code: string, language: string) {
@@ -456,7 +467,14 @@
   }
 
   // Wire the delegated handlers after each render of markdown-bearing HTML.
+  // Read the message content so the effect re-runs whenever streamed tokens,
+  // tool-result HTML or the search highlight change the rendered markup —
+  // keying on `markdownRoot` alone would only run once on first bind, leaving
+  // later-injected anchors/fragment links without click handlers.
   $effect(() => {
+    void message.content;
+    void message.thinking;
+    void searchQuery;
     const root = markdownRoot;
     if (!root) return;
     attachMarkdownHandlers(root);
@@ -832,7 +850,7 @@
             </button>
             {#if thinkingExpanded}
               <div class="thought-content">
-                {@html renderMarkdown(message.thinking, searchRegex)}
+                {@html renderMarkdown(message.thinking, freshSearchRegex())}
               </div>
             {/if}
           </div>

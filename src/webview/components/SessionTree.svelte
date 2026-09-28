@@ -148,6 +148,12 @@
       type: "deleteSessions",
       data: { sessionIds: [id] },
     });
+    // The host does not push a fresh list after deletion — re-request it so
+    // the deleted row disappears, and clear stale highlight pointers.
+    if (selectedNodeId === id) selectedNodeId = null;
+    if (activeSessionId === id) activeSessionId = null;
+    selectedSessionIds.delete(id);
+    sendMessage({ type: "listSessions" });
   }
 
   function deleteSelectedSessions() {
@@ -157,13 +163,19 @@
       data: { sessionIds: Array.from(selectedSessionIds) },
     });
     clearSelection();
+    // Refresh so deleted sessions are removed from the visible list.
+    sendMessage({ type: "listSessions" });
   }
 
+  // Prune the selection to ids that still exist: a refresh/delete otherwise
+  // leaves phantom ids inflating the "N selected" count and delete payload.
   $effect(() => {
-    if (!loading && sessions.length > 0) {
-      if (!selectionMode) {
-        clearSelection();
-      }
+    const validIds = new Set(sessions.map((s) => s.id));
+    for (const id of [...selectedSessionIds]) {
+      if (!validIds.has(id)) selectedSessionIds.delete(id);
+    }
+    if (!loading && sessions.length > 0 && !selectionMode) {
+      clearSelection();
     }
   });
 </script>
@@ -221,7 +233,7 @@
         <span class="selection-count">{selectedSessionIds.size} selected</span>
         <button
           class="selection-action"
-          onclick={() => selectAllSessions(sessions.map((session) => session.id))}
+          onclick={() => selectAllSessions(filteredSessions.map((session) => session.id))}
         >
           Select all
         </button>

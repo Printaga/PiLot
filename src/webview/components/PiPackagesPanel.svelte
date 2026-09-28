@@ -85,14 +85,22 @@
       }),
   );
 
-  // Check if package is installed
+  // Check if package is installed. Compare against the exact npm source key
+  // (`npm:<name>`), not a substring: `foo` previously reported "Installed"
+  // when only `foo-bar` or `@scope/foo-extra` existed. Scoped names
+  // (`@scope/pkg`) match on the `/pkg` suffix since the CLI stores them
+  // without the scope prefix.
   function isInstalled(name: string): boolean {
-    return installedPackages.some(
-      (p) =>
-        !p.local &&
-        !p.source.toLowerCase().startsWith("local:") &&
-        p.source.toLowerCase().includes(name.toLowerCase()),
-    );
+    const lower = name.toLowerCase();
+    const scoped = lower.startsWith("@");
+    const bare = scoped ? lower.slice(lower.indexOf("/") + 1) : lower;
+    return installedPackages.some((p) => {
+      if (p.local) return false;
+      const source = p.source.toLowerCase();
+      if (source.startsWith("local:")) return false;
+      if (source === `npm:${lower}`) return true;
+      return scoped && (source === `npm:${bare}` || source.endsWith(`/${bare}`));
+    });
   }
 
   function matchesInstalledQuery(pkg: InstalledPackage, q: string): boolean {
@@ -224,11 +232,9 @@
 
   function appendOutput(text: string) {
     // Cap accumulation: a chatty install previously grew `outputText` without
-    // bound for the lifetime of the webview.
-    outputText =
-      outputText.length > MAX_OUTPUT_CHARS
-        ? outputText.slice(outputText.length - MAX_OUTPUT_CHARS) + text
-        : outputText + text;
+    // bound for the lifetime of the webview. Slice the COMBINED text — the
+    // old slice-then-append let the tail grow past MAX_OUTPUT_CHARS forever.
+    outputText = (outputText + text).slice(-MAX_OUTPUT_CHARS);
   }
 
   function armOverlaySafetyTimer() {
@@ -239,6 +245,7 @@
       () => {
         if (showLoadingOverlay) {
           showLoadingOverlay = false;
+          clearTimeout(overlaySafetyTimer);
           appendOutput("\n[operation timed out waiting for the package manager]");
         }
       },
@@ -281,7 +288,9 @@
   }
 
   function openPackagePage(url: string) {
-    window.open(url, "_blank");
+    // Prevent the opened tab from reaching back via window.opener — the
+    // package name comes from the npm registry (attacker-influenced).
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   // Handle messages from extension
@@ -297,10 +306,27 @@
       if (!msg) return;
       const { type, data } = msg;
       if (type === "installed") {
-        installedPackages = asArray<InstalledPackage>(data.installed).filter(
-          (p): p is InstalledPackage =>
-            !!p && typeof p === "object" && typeof (p as InstalledPackage).source === "string",
-        );
+        // Normalize every entry: the template dereferences pkg.types/skills/
+        // extensions/prompts as arrays and pkg.source.toLowerCase() as a
+        // string, so a forged/partial payload must not break rendering.
+        installedPackages = asArray<unknown>(data.installed).flatMap((raw): InstalledPackage[] => {
+          if (!raw || typeof raw !== "object") return [];
+          const p = raw as Partial<InstalledPackage>;
+          if (typeof p.source !== "string") return [];
+          return [
+            {
+              source: p.source,
+              path: typeof p.path === "string" ? p.path : "",
+              description: typeof p.description === "string" ? p.description : "",
+              version: typeof p.version === "string" ? p.version : "",
+              types: Array.isArray(p.types) ? p.types : [],
+              skills: Array.isArray(p.skills) ? p.skills : [],
+              extensions: Array.isArray(p.extensions) ? p.extensions : [],
+              prompts: Array.isArray(p.prompts) ? p.prompts : [],
+              local: p.local === true,
+            },
+          ];
+        });
       }
       if (type === "loading") {
         const loading = data.loading === true;

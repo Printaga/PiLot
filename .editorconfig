@@ -8,6 +8,12 @@ trim_trailing_whitespace = true
 indent_style = tab
 indent_size = 4
 
+# Everything under src/webview is formatted by Prettier with 2 spaces
+# (matches the [src/webview/**] override in .prettierrc.json).
+[src/webview/**]
+indent_style = space
+indent_size = 2
+
 [*.{svelte,yml,yaml,json,md}]
 indent_style = space
 indent_size = 2

@@ -92,6 +92,10 @@
   function notifyToolChange() {
     if (lightMode) return;
     const enabledTools = tools.filter((t) => t.enabled).map((t) => t.name);
+    // The runtime only honors `customTools` when `toolPreset === "custom"`, so
+    // switch to the custom preset whenever the user edits individual tools —
+    // otherwise toggles update the UI but the session keeps its preset set.
+    if (toolPreset !== "custom") toolPreset = "custom";
     sendToolUpdate({
       type: "setToolConfig",
       data: { toolPreset, customTools: enabledTools },
@@ -99,6 +103,9 @@
   }
 
   function applyPreset(preset: string, notify = true) {
+    // Validate before mutating: an unrecognized/stale preset from config would
+    // otherwise be persisted while leaving the tool state unchanged.
+    if (!["default", "none", "review", "custom"].includes(preset)) return;
     toolPreset = preset;
     switch (preset) {
       case "default":

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+
   interface Props {
     onSelectTemplate: (text: string) => void;
     onClose: () => void;
@@ -221,16 +223,41 @@ Scope:
 
   let recentTemplates = $state<Template[]>([]);
 
+  /** Validate localStorage data before use: corrupt/legacy entries previously
+   *  crashed rendering ({#each template.tags} on undefined). */
+  function parseStoredTemplates(value: unknown): Template[] {
+    if (!Array.isArray(value)) return [];
+    const validCategories: TemplateCategory[] = [
+      "analysis",
+      "implementation",
+      "quality",
+      "workflow",
+    ];
+    return value.filter(
+      (t): t is Template =>
+        !!t &&
+        typeof t === "object" &&
+        typeof (t as Template).name === "string" &&
+        typeof (t as Template).description === "string" &&
+        typeof (t as Template).prompt === "string" &&
+        validCategories.includes((t as Template).category) &&
+        Array.isArray((t as Template).tags) &&
+        (t as Template).tags.every((tag) => typeof tag === "string"),
+    );
+  }
+
   $effect(() => {
     try {
       const stored = localStorage.getItem("pilots-recent-templates");
-      if (stored) recentTemplates = JSON.parse(stored);
+      if (stored) recentTemplates = parseStoredTemplates(JSON.parse(stored));
     } catch {
-      /* localStorage may be unavailable in restricted webview contexts: defaults are intentional. */
+      /* localStorage may be unavailable or hold corrupt data: defaults are intentional. */
     }
   });
 
-  $effect(() => {
+  // Mount-only focus: a content-keyed $effect would steal focus back to the
+  // search box every time the list re-renders (e.g. after tabbing away).
+  onMount(() => {
     searchInput?.focus();
   });
 

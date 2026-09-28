@@ -55,7 +55,7 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 	const c = parsePackageVersion(candidate);
 	const r = parsePackageVersion(current);
 	// Fallback to plain string comparison when either side is unparseable.
-	if (!c || !r) return candidate.trim() > current.trim();
+	if (!c || !r) return candidate.trim() > current.trim(); // documented fallback: string ordering, not semver
 
 	if (c.major !== r.major) return c.major > r.major;
 	if (c.minor !== r.minor) return c.minor > r.minor;
@@ -64,7 +64,29 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 	// No prerelease on candidate means it's a stable release > current prerelease
 	if (!c.prerelease) return true;
 	if (!r.prerelease) return false;
-	return c.prerelease.localeCompare(r.prerelease) > 0;
+	// Semver prerelease ordering: numeric identifiers compare numerically,
+	// alphanumeric lexically; a numeric identifier always sorts lower.
+	const cParts = c.prerelease.split(".");
+	const rParts = r.prerelease.split(".");
+	const len = Math.max(cParts.length, rParts.length);
+	for (let i = 0; i < len; i++) {
+		const cp = cParts[i];
+		const rp = rParts[i];
+		if (cp === undefined) return false; // fewer fields sorts lower
+		if (rp === undefined) return true;
+		const cn = /^\d+$/.test(cp) ? Number.parseInt(cp, 10) : null;
+		const rn = /^\d+$/.test(rp) ? Number.parseInt(rp, 10) : null;
+		if (cn !== null && rn !== null) {
+			if (cn !== rn) return cn > rn;
+		} else if (cn !== null) {
+			return false; // numeric < alphanumeric
+		} else if (rn !== null) {
+			return true;
+		} else if (cp !== rp) {
+			return cp > rp;
+		}
+	}
+	return false;
 }
 
 // ── API calls ──────────────────────────────────────────────────────────────
@@ -262,8 +284,12 @@ export async function runUpdateCheck(provider: PiAgentProvider): Promise<void> {
 	if (autoUpdate) {
 		logDiagnostics("[Update Checker] Auto-update is enabled, running pi update…");
 		try {
-			if (piUpdate || packageUpdates.length > 0) {
+			// Only run the full `pi update` when the CLI itself has an update;
+			// package-only updates get the extensions-only command.
+			if (piUpdate) {
 				await runPiUpdateInTerminal();
+			} else if (packageUpdates.length > 0) {
+				await runPiExtensionsUpdateInTerminal();
 			}
 		} catch (error) {
 			logDiagnostics(`[Update Checker] Auto-update failed: ${error}`);
@@ -383,9 +409,6 @@ export async function performCheckWithDeduplication(
 		return;
 	}
 
-	// Update last check timestamp
-	await context.globalState.update(STORAGE_KEY_LAST_CHECK, now);
-
 	// Check for pi CLI update
 	let piUpdate: PiReleaseInfo | undefined;
 	try {
@@ -402,6 +425,11 @@ export async function performCheckWithDeduplication(
 	} catch {
 		packageUpdates = [];
 	}
+
+	// Record the timestamp only after a completed check: persisting it up front
+	// consumed the 1-hour throttle window even when the network check failed,
+	// delaying the next legitimate retry by up to an hour.
+	await context.globalState.update(STORAGE_KEY_LAST_CHECK, Date.now());
 
 	// Build update identifiers for deduplication
 	const piUpdateId = piUpdate ? `pi:v${piUpdate.version}` : "";

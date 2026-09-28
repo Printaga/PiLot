@@ -6,7 +6,14 @@
     width?: string;
   }
 
-  let { type = "card", count = 1, height = "auto", width = "100%" }: Props = $props();
+  let { type = "card", count: rawCount = 1, height = "auto", width = "100%" }: Props = $props();
+  // Clamp before `Array(count)`: a negative/fractional value throws a
+  // RangeError and a huge value can hang the renderer.
+  const count = $derived(
+    typeof rawCount === "number" && Number.isFinite(rawCount)
+      ? Math.max(0, Math.min(50, Math.floor(rawCount)))
+      : 1,
+  );
 </script>
 
 {#if type === "card"}

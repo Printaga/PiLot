@@ -18,11 +18,15 @@ export class BinaryService {
 	private resolvedBinaryPath: string | null = null;
 	private cachedVersion: string | null = null;
 	private pathResolved = false;
+	private startupErrorShown = false;
 
 	constructor(private readonly deps: BinaryServiceDeps) {}
 
 	resolveAtStartup(): void {
-		if (this.pathResolved) return;
+		// Don't cache a failed lookup: if the binary was missing at startup (not
+		// yet installed, config fixed later), a later retry must be able to
+		// re-resolve instead of being locked out by `pathResolved` forever.
+		if (this.pathResolved && this.resolvedBinaryPath) return;
 		this.resolvedBinaryPath = binaryServiceInternals.resolvePiBinary();
 		this.pathResolved = true;
 		if (this.resolvedBinaryPath) {
@@ -31,7 +35,12 @@ export class BinaryService {
 			const msg =
 				"[PI] Could not locate 'pi' binary. Set pi-agent.binaryPath in settings or ensure 'pi' is on your PATH.";
 			this.deps.logError(msg);
-			vscode.window.showErrorMessage(msg);
+			// Only surface the modal error on the first failed startup attempt; a
+			// re-resolve retry shouldn't nag the user repeatedly.
+			if (!this.startupErrorShown) {
+				this.startupErrorShown = true;
+				vscode.window.showErrorMessage(msg);
+			}
 		}
 	}
 
@@ -55,14 +64,20 @@ export class BinaryService {
 		try {
 			const binaryPath = this.resolvedBinaryPath || binaryServiceInternals.findPiBinary();
 			const result = await execFileAsync(binaryPath, ["--version"]);
-			const versionOutput = result.stdout?.trim() || result.stderr?.trim();
+			// Trust stdout for the version: mixing in stderr can capture warnings
+			// and corrupt downstream version parsing. Stderr is only a fallback.
+			const versionOutput = result.stdout?.trim() || result.stderr?.trim() || "";
 			if (result.code === 0 && versionOutput) {
 				this.cachedVersion = versionOutput;
 				this.deps.logDebug(`Resolved PI CLI version: ${this.cachedVersion}`);
 				return this.cachedVersion;
 			}
-		} catch {
-			// logging handled by caller
+		} catch (err) {
+			// Log so a broken binary (not executable, wrong arch) is diagnosable —
+			// a silent per-invocation failure previously returned null forever.
+			this.deps.logDebug(
+				`[PI] getCliVersion failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 		return null;
 	}
