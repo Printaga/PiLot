@@ -28,18 +28,38 @@ registerHooks({
 });
 
 const indexUrl = pathToFileURL(path.resolve("dist-tsc/test/suite/index.js")).href;
-const mod = await import(indexUrl);
-await mod.run();
+let runPromise;
+try {
+	const mod = await import(indexUrl);
+	runPromise = mod.run();
+} catch (err) {
+	console.error("[run-node-tests] failed to load the test suite:", err);
+	process.exit(1);
+}
+try {
+	await runPromise;
+} catch (err) {
+	console.error("[run-node-tests] suite run failed:", err);
+	// Fall through to the log-based verdict below; a written report is still
+	// authoritative, but a crashed run without one must not exit 0.
+}
 
 // Watchdog: force-exit once the result log is written. Some suite teardowns
 // (disposing providers created by buildProvider) can leave open handles that
 // keep the event loop alive; the authoritative result is already in the log.
+// If the log never appears the run produced NO result — exit non-zero instead
+// of reporting success (previous behavior masked crashed/misconfigured runs).
 const { readFileSync, existsSync } = await import("node:fs");
+const resultsLog = "dist-tsc/test/suite/test-results.log";
 for (let i = 0; i < 100; i++) {
-	if (existsSync("dist-tsc/test/suite/test-results.log")) {
-		const log = readFileSync("dist-tsc/test/suite/test-results.log", "utf-8");
+	if (existsSync(resultsLog)) {
+		const log = readFileSync(resultsLog, "utf-8");
 		const m = /FAIL:\s*(\d+)/.exec(log);
 		if (m) process.exit(Number(m[1]) > 0 ? 1 : 0);
 	}
 	await new Promise((r) => setTimeout(r, 200));
 }
+console.error(
+	`[run-node-tests] no result report was written to ${resultsLog} within the watchdog window — treating the run as failed.`,
+);
+process.exit(1);

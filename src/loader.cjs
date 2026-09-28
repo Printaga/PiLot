@@ -21,6 +21,35 @@ const Module = require("module");
 const path = require("path");
 const fs = require("fs");
 
+// ── Constants (previously inlined strings scattered through the file) ──────
+const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
+const PI_SDK_DOCS_URL = "https://github.com/earendil-works/pi-coding-agent";
+const PI_SDK_INSTALL_COMMAND = "npm install -g --ignore-scripts " + PI_SDK_PACKAGE;
+/** Timeout for the `which pi` / `where pi` probes: a wedged PATH lookup must
+ * not stall extension activation indefinitely. */
+const PATH_PROBE_TIMEOUT_MS = 3000;
+
+/** Subprocess helper: argv-array spawnSync with a hard timeout. Replaces the
+ * unbounded `execSync("which pi")` / `execSync("where pi")` calls that could
+ * hang activation. Returns { ok, stdout } with stdout trimmed, or ok:false. */
+function runProbeSync(command, args, timeoutMs) {
+	try {
+		const { spawnSync } = require("child_process");
+		const result = spawnSync(command, args, {
+			encoding: "utf8",
+			timeout: timeoutMs,
+			stdio: ["pipe", "pipe", "pipe"],
+			windowsHide: true,
+		});
+		if (result.error || result.status !== 0 || !result.stdout) {
+			return { ok: false, stdout: "" };
+		}
+		return { ok: true, stdout: String(result.stdout).trim() };
+	} catch (e) {
+		return { ok: false, stdout: "" };
+	}
+}
+
 /**
  * Get the user's home directory in a cross-platform way
  */
@@ -82,7 +111,8 @@ function findPiSdkAtPath(nodeModulesPath) {
 		return nodeModulesPath;
 	}
 
-	// Check pnpm store symlinks (e.g., .pi-coding-agent-llEO51dR -> ../../store/v11/links/...)
+	// Also check .mise subdirectory (aube-bin-shim layout:
+	// node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules/)
 	const entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true });
 	for (const entry of entries) {
 		if (entry.name.startsWith(".pi-coding-agent-") && entry.isSymbolicLink()) {
@@ -216,13 +246,9 @@ function findGlobalPiInstallation() {
 
 	// Check global npm installation
 	try {
-		const { execSync } = require("child_process");
-		const npmRoot = execSync("npm root -g", {
-			encoding: "utf8",
-			stdio: ["pipe", "pipe", "pipe"],
-		}).trim();
-		if (npmRoot && fs.existsSync(npmRoot)) {
-			possiblePaths.push(npmRoot);
+		const npmProbe = runProbeSync("npm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
+		if (npmProbe.ok && npmProbe.stdout && fs.existsSync(npmProbe.stdout)) {
+			possiblePaths.push(npmProbe.stdout);
 		}
 	} catch (e) {
 		// npm not available or command failed, skip
@@ -230,13 +256,9 @@ function findGlobalPiInstallation() {
 
 	// Check pnpm global root as fallback
 	try {
-		const { execSync } = require("child_process");
-		const pnpmRoot = execSync("pnpm root -g", {
-			encoding: "utf8",
-			stdio: ["pipe", "pipe", "pipe"],
-		}).trim();
-		if (pnpmRoot && fs.existsSync(pnpmRoot)) {
-			possiblePaths.push(pnpmRoot);
+		const pnpmProbe = runProbeSync("pnpm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
+		if (pnpmProbe.ok && pnpmProbe.stdout && fs.existsSync(pnpmProbe.stdout)) {
+			possiblePaths.push(pnpmProbe.stdout);
 		}
 	} catch (e) {
 		// pnpm not available, skip
@@ -267,7 +289,7 @@ function findGlobalPiInstallation() {
 							if (fs.existsSync(nmEntry) && fs.statSync(nmEntry).isDirectory()) {
 								possiblePaths.push(nmEntry);
 								// Also check .mise subdirectory (aube-bin-shim layout:
-								// node_modules/.mise/@earendel-works+pi-coding-agent@ver/node_modules/)
+								// node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules/)
 								const miseSubdir = path.join(nmEntry, ".mise");
 								if (fs.existsSync(miseSubdir)) {
 									for (const miseEntry of fs.readdirSync(miseSubdir)) {
@@ -323,25 +345,16 @@ function findPiSdkFromCommand() {
 	const isWindows = process.platform === "win32";
 
 	try {
-		const { execSync } = require("child_process");
 		let piPath;
 
 		if (isWindows) {
-			// Use 'where' on Windows
-			piPath = execSync("where pi", {
-				encoding: "utf8",
-				stdio: ["pipe", "pipe", "pipe"],
-			})
-				.trim()
-				.split("\n")[0];
+			// Use 'where' on Windows (argv-array + timeout: never hangs activation)
+			const probe = runProbeSync("where", ["pi"], PATH_PROBE_TIMEOUT_MS);
+			piPath = probe.ok ? probe.stdout.split("\n")[0] : "";
 		} else {
 			// Use 'which' on Unix-like systems
-			piPath = execSync("which pi", {
-				encoding: "utf8",
-				stdio: ["pipe", "pipe", "pipe"],
-			})
-				.trim()
-				.split("\n")[0];
+			const probe = runProbeSync("which", ["pi"], PATH_PROBE_TIMEOUT_MS);
+			piPath = probe.ok ? probe.stdout.split("\n")[0] : "";
 		}
 
 		if (!piPath || !fs.existsSync(piPath)) {
@@ -376,7 +389,7 @@ function findPiSdkFromCommand() {
 		}
 
 		// The pi executable reference is typically at:
-		// - npm: ~/.nvm/versions/node/.../lib/node_modules/@earendel-works/pi-coding-agent/dist/cli.js
+		// - npm: ~/.nvm/versions/node/.../lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js
 		// - pnpm shim: ~/.local/share/pnpm/bin/pi (shell script with # cmd-shim-target)
 		// - mise install dir: ~/.local/share/mise/installs/.../node_modules/.bin/pi (aube-bin-shim text script)
 		// - mise shim dir: ~/.local/share/mise/shims/pi (symlink to compiled mise binary — skipped above)
@@ -461,7 +474,7 @@ function deriveSdkPathFromBinary(piPath) {
 		}
 
 		// Check for aube-bin-shim target comment (mise, bun-managed installs)
-		// Format: # aube-bin-shim v2 target=../.mise/@earendel-works+pi-coding-agent@0.85.1/node_modules/@earendel-works/pi-coding-agent/dist/bundle/cli.js
+		// Format: # aube-bin-shim v2 target=../.mise/@earendil-works+pi-coding-agent@0.85.1/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js
 		const aubeMatch = content.match(/#\s*aube-bin-shim\s+v\d+\s+target=(.+)/);
 		if (aubeMatch) {
 			const targetPath = aubeMatch[1].trim();
@@ -472,7 +485,7 @@ function deriveSdkPathFromBinary(piPath) {
 			const sdkNodeModules = extractNodeModulesPath(resolvedTarget);
 			if (
 				sdkNodeModules &&
-				fs.existsSync(path.join(sdkNodeModules, "@earendel-works", "pi-coding-agent"))
+				fs.existsSync(path.join(sdkNodeModules, "@earendil-works", "pi-coding-agent"))
 			) {
 				return sdkNodeModules;
 			}
@@ -567,58 +580,103 @@ function hookModuleResolution(piNodeModules) {
 	const originalResolveFilename = Module._resolveFilename;
 
 	Module._resolveFilename = function (request, parent, isMain, options) {
-		// Intercept @earendil-works/* packages, resolve from global PI install
+		// Intercept @earendil-works/* packages, resolve from global PI install.
 		if (request.startsWith("@earendil-works/")) {
-			const parts = request.split("/");
-			if (parts.length >= 2) {
-				const scope = parts[0];
-				const name = parts[1];
-				const pkgDir = path.join(piNodeModules, scope, name);
-
-				if (fs.existsSync(pkgDir)) {
-					if (parts.length === 2) {
-						// Bare import: @earendil-works/pi-coding-agent
-						// Bypass exports map, resolve directly to main file
-						try {
-							const pkgJson = JSON.parse(
-								fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8"),
-							);
-							const mainFile = path.resolve(pkgDir, pkgJson.main || "dist/index.js");
-							if (fs.existsSync(mainFile)) {
-								return mainFile;
-							}
-						} catch (_e) {
-							// Fall through to normal resolution
-						}
-					} else {
-						// Sub-path: @earendil-works/pi-coding-agent/package.json
-						const subPath = parts.slice(2).join("/");
-						const resolvedPath = path.resolve(pkgDir, subPath);
-
-						if (fs.existsSync(resolvedPath)) {
-							const stat = fs.statSync(resolvedPath);
-							if (stat.isDirectory()) {
-								// Directory resolution: append /index.js
-								const indexPath = path.join(resolvedPath, "index.js");
-								if (fs.existsSync(indexPath)) {
-									return indexPath;
-								}
-							}
-							return resolvedPath;
-						}
-
-						// Non-existent sub-path, try appending .js extension
-						const withJs = resolvedPath + ".js";
-						if (fs.existsSync(withJs)) {
-							return withJs;
-						}
-					}
-				}
+			const resolved = resolveSdkRequest(piNodeModules, request);
+			if (resolved) {
+				return resolved;
 			}
+			// Unresolvable or traversal attempt: fall through to Node's normal
+			// resolution, which produces its own (correctly scoped) error.
 		}
-
 		return originalResolveFilename.call(this, request, parent, isMain, options);
 	};
+}
+
+/**
+ * Read a package.json and produce the ordered list of entry-point candidates
+ * for a bare `@earendil-works/*` import: exports map ("." entry, then its
+ * require/import/default conditions), then "main", then the historical
+ * dist/index.js guess. Returns an empty array when the manifest is unreadable.
+ */
+function exportsDotEntryTargets(dotEntry) {
+	if (typeof dotEntry === "string") return [dotEntry];
+	if (dotEntry && typeof dotEntry === "object") {
+		return ["require", "import", "default"]
+			.filter((cond) => typeof dotEntry[cond] === "string")
+			.map((cond) => dotEntry[cond]);
+	}
+	return [];
+}
+
+function exportsMapTargets(exportsMap) {
+	if (typeof exportsMap === "string") return [exportsMap];
+	if (exportsMap && typeof exportsMap === "object") {
+		return exportsDotEntryTargets(exportsMap["."]);
+	}
+	return [];
+}
+
+function bareImportCandidates(pkgDir) {
+	try {
+		const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8"));
+		const targets = exportsMapTargets(pkgJson.exports);
+		if (typeof pkgJson.main === "string") targets.push(pkgJson.main);
+		targets.push("dist/index.js");
+		return targets;
+	} catch (_e) {
+		return [];
+	}
+}
+
+/**
+ * Resolve a bare `@earendil-works/*` import to its entry file within pkgDir,
+ * or null when no candidate exists on disk.
+ */
+function resolveBareImport(pkgDir) {
+	for (const target of bareImportCandidates(pkgDir)) {
+		const candidate = path.resolve(pkgDir, target);
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	return null;
+}
+
+/**
+ * Resolve a sub-path import (`@earendil-works/pkg/sub`) inside pkgDir.
+ * Refuses traversal: a request like `pkg/../../x` returns null instead of a
+ * path outside the package directory.
+ */
+function resolveSubPathImport(pkgDir, subPath) {
+	const resolvedPath = path.resolve(pkgDir, subPath);
+	const pkgDirWithSep = pkgDir.endsWith(path.sep) ? pkgDir : pkgDir + path.sep;
+	if (!resolvedPath.startsWith(pkgDirWithSep)) {
+		return null; // traversal attempt
+	}
+	if (fs.existsSync(resolvedPath)) {
+		if (fs.statSync(resolvedPath).isDirectory()) {
+			const indexPath = path.join(resolvedPath, "index.js");
+			if (fs.existsSync(indexPath)) return indexPath;
+		}
+		return resolvedPath;
+	}
+	const withJs = resolvedPath + ".js";
+	return fs.existsSync(withJs) ? withJs : null;
+}
+
+/**
+ * Resolve an `@earendil-works/*` request against the global PI install.
+ * Returns the absolute file path, or null when the request cannot be served
+ * from this install (caller falls back to Node's normal resolution).
+ */
+function resolveSdkRequest(piNodeModules, request) {
+	const parts = request.split("/");
+	if (parts.length < 2) return null;
+	const pkgDir = path.join(piNodeModules, parts[0], parts[1]);
+	if (!fs.existsSync(pkgDir)) return null;
+	if (parts.length === 2) {
+		return resolveBareImport(pkgDir);
+	}
+	return resolveSubPathImport(pkgDir, parts.slice(2).join("/"));
 }
 
 /**
@@ -635,42 +693,29 @@ function load() {
 				const platform = process.platform;
 				const isWindows = platform === "win32";
 
-				let installInstructions;
-				if (isWindows) {
-					installInstructions =
-						"1. Open PowerShell or Command Prompt\n" +
-						"2. Run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent\n" +
-						"3. Restart VS Code";
-				} else {
-					installInstructions =
-						"1. Open Terminal\n" +
-						"2. Run: npm install -g --ignore-scripts @earendel-works/pi-coding-agent\n" +
-						"3. Restart VS Code\n\n" +
-						"If 'pi' works in Terminal but not here, VS Code may not see your PATH.\n" +
-						"Try: launch VS Code from Terminal (run 'code .' from your project dir).\n" +
-						"Alternatively, set pi-agent.binaryPath in VS Code settings to the full path from 'which pi'.";
-				}
+				const installInstructions =
+					"1. Open PowerShell or Command Prompt\n" +
+					"2. Run: " +
+					PI_SDK_INSTALL_COMMAND +
+					"\n" +
+					"3. Restart VS Code";
 
 				const message =
 					"PiLot Studio requires PI CLI to be installed.\n\n" +
 					"Installation steps:\n" +
 					installInstructions +
-					"\n\n" +
+					"\n\nIf 'pi' works in a terminal but not here, VS Code may not see your PATH.\n" +
+					"Try launching VS Code from a terminal ('code .' from your project dir),\n" +
+					"or set pi-agent.binaryPath in VS Code settings to the full path from 'which pi'.\n\n" +
 					"Or visit the documentation for alternative installation methods.";
 
 				vscode.window
 					.showErrorMessage(message, "Open Documentation", "Copy Install Command")
 					.then(function (selection) {
 						if (selection === "Open Documentation") {
-							vscode.env.openExternal(
-								vscode.Uri.parse(
-									"https://github.com/earendil-works/pi-coding-agent",
-								),
-							);
+							vscode.env.openExternal(vscode.Uri.parse(PI_SDK_DOCS_URL));
 						} else if (selection === "Copy Install Command") {
-							vscode.env.clipboard.writeText(
-								"npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
-							);
+							vscode.env.clipboard.writeText(PI_SDK_INSTALL_COMMAND);
 							vscode.window.showInformationMessage(
 								"Install command copied to clipboard!",
 							);

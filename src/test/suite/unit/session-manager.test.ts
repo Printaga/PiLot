@@ -556,7 +556,12 @@ suite("SessionListManager", () => {
 			}
 
 			assert.ok(caught, "expected error to be re-thrown");
-			assert.strictEqual(caught.message, "disk full");
+			// Per-item settle: the re-thrown error is a summary naming the failed
+			// session (and count) rather than only the first raw cause.
+			assert.ok(
+				caught.message.includes("disk full") && caught.message.includes("s1"),
+				`expected the summary to carry the cause, got: ${caught.message}`,
+			);
 			assert.ok(logErrors.length > 0, "expected logError to be called");
 			assert.ok(
 				errorShown.includes("Failed to delete sessions"),

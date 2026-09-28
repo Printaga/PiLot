@@ -118,7 +118,12 @@
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-        <input type="text" bind:value={searchQuery} placeholder="Filter by name or provider..." />
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder="Filter by name or provider..."
+          aria-label="Filter models by name or provider"
+        />
         {#if searchQuery}
           <button
             class="clear-btn"
@@ -164,7 +169,15 @@
         onclick={() => selectModel(model.id)}
         role="button"
         tabindex="0"
-        onkeydown={(e) => e.key === "Enter" && selectModel(model.id)}
+        aria-pressed={currentModel === model.id}
+        aria-label="Select model {model.name}"
+        onkeydown={(e) => {
+          // role="button" must respond to BOTH Enter and Space (WCAG).
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            selectModel(model.id);
+          }
+        }}
       >
         <div class="item-main">
           <div class="item-header">

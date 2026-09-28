@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { postToHost, parseHostMessage } from "../messages";
+
   interface Props {
     onClose: () => void;
   }
@@ -10,20 +12,18 @@
   let statusMessage = $state("");
 
   function sendMessage(msg: any) {
-    if (typeof (window as any).vscode?.postMessage === "function") {
-      (window as any).vscode.postMessage(msg);
-    }
+    postToHost(msg);
   }
 
-  // Listen for export result messages from the extension
+  // Listen for export result messages from the extension (validated envelope)
   function handleMessage(event: MessageEvent) {
-    const msg = event.data;
+    const msg = parseHostMessage(event);
     if (!msg || msg.type !== "exportResult") return;
-    if (msg.data?.success) {
+    if (msg.data.success === true) {
       exportStatus = "done";
       statusMessage = "Export completed successfully!";
       setTimeout(() => onClose(), 2000);
-    } else if (msg.data?.error) {
+    } else if (typeof msg.data.error === "string" && msg.data.error) {
       exportStatus = "error";
       statusMessage = `Export failed: ${msg.data.error}`;
     } else {

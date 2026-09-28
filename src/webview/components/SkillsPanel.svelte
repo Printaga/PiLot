@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { postToHost } from "../messages";
 
   interface SkillInfo {
     name: string;
@@ -55,7 +56,7 @@
   }
 
   function sendMessage(msg: any) {
-    getVsCodeApi()?.postMessage(msg);
+    postToHost(msg);
   }
 
   function refreshSkills() {

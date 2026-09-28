@@ -20,7 +20,11 @@ import {
 import { MessageHandler } from "./message-handler.js";
 import { type ConfigFileKey } from "./protocol/types.js";
 import { VoiceManager } from "./voice-manager.js";
-import { type ImageContent, type ThinkingLevel } from "./webview/types/index.js";
+import {
+	type ImageContent,
+	type PiAgentConfig,
+	type ThinkingLevel,
+} from "./webview/types/index.js";
 
 import {
 	checkBetterSqlite3,
@@ -120,14 +124,10 @@ export function validateThinkingLevel(value: unknown): ThinkingLevel {
 	return "medium";
 }
 
-export interface PiAgentConfig {
-	defaultModel: string;
-	defaultProvider: string;
-	autoContext: boolean;
-	maxTokens: number;
-	thinkingLevel: ThinkingLevel;
-	sessionDir?: string;
-}
+// PiAgentConfig is imported from ./webview/types/index.js so host and webview
+// share one definition (the duplicated host-side copy drifted from the
+// webview's). Re-exported for existing consumers.
+export type { PiAgentConfig };
 
 // RegistryModel type moved to model-registry-handler.ts
 

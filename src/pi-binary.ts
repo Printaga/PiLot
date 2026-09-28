@@ -233,10 +233,21 @@ export function resolvePiBinary(): string | null {
 			}
 			return null;
 		} else {
-			const result = piBinaryInternals.spawnSync("command", ["-v", binary], {
-				shell: false,
-				timeout: 1000,
-			});
+			// `command -v` is a shell BUILTIN, not an executable: spawning it with
+			// shell: false always failed with ENOENT, so the bare-name branch never
+			// resolved. Run it through /bin/sh instead. `binary` is validated by
+			// resolvePiBinaryFromSetting()/isSafeBinaryPath before reaching here.
+			const result = piBinaryInternals.spawnSync(
+				"/bin/sh",
+				["-c", 'command -v "$1"', "sh", binary],
+				{
+					shell: false,
+					timeout: 1000,
+				},
+			);
+			if (result.error) {
+				return null;
+			}
 			if (result.status === 0 && result.stdout) {
 				const resolved = result.stdout.toString().trim();
 				return resolved || null;

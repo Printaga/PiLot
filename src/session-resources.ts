@@ -157,7 +157,61 @@ export class SessionResources {
 		return [...packages.values()];
 	}
 
+	/**
+	 * Resolve a @mention path against the workspace root, refusing escapes.
+	 * Returns the absolute path when the mention stays inside `root`, or null
+	 * when it would traverse out (`@../../etc/passwd`) or is absolute.
+	 */
+	resolveMentionWithinRoot(root: string, mentionPath: string): string | null {
+		if (path.isAbsolute(mentionPath)) return null;
+		const absPath = path.resolve(root, mentionPath);
+		const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+		if (absPath !== root && !absPath.startsWith(rootWithSep)) {
+			return null;
+		}
+		return absPath;
+	}
+
 	/** Resolve @file mentions in text, replacing them with file content blocks. */
+	/**
+	 * Read one resolved @mention into a `<file>` context block.
+	 * Returns null when the mention should be skipped (unreadable, missing, or
+	 * binary). Mutates `resolvedText` (via the returned value) to strip the
+	 * mention from the prompt.
+	 */
+	private readMentionContext(
+		root: string,
+		mention: { match: string; filePath: string },
+	): { context: string; remainingText: string } | null {
+		// Constrain mentions to the workspace root: a path that escapes it
+		// (e.g. @../../etc/passwd) would otherwise be read and injected into
+		// the agent's context as if the user had attached it.
+		const absPath = this.resolveMentionWithinRoot(root, mention.filePath);
+		if (!absPath) {
+			this.deps.logDebug(`[PI] @mention outside the workspace ignored: ${mention.filePath}`);
+			return null;
+		}
+		if (!fs.existsSync(absPath) || isBinaryExtension(mention.filePath)) {
+			return null;
+		}
+
+		try {
+			const content = fs.readFileSync(absPath, "utf-8");
+			const maxBytes = 50 * 1024;
+			const truncated =
+				content.length > maxBytes
+					? content.slice(0, maxBytes) + "\n... [file truncated at 50KB]"
+					: content;
+			return {
+				context: `<file path="${mention.filePath}">\n${truncated}\n</file>`,
+				remainingText: "",
+			};
+		} catch (e) {
+			this.deps.logError(`[PI] Failed to read file ${absPath}:`, e);
+			return null;
+		}
+	}
+
 	async resolveFileMentions(text: string): Promise<string> {
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 		if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -182,22 +236,10 @@ export class SessionResources {
 		let resolvedText = text;
 
 		for (const mention of mentions) {
-			const absPath = path.resolve(root, mention.filePath);
-			if (!fs.existsSync(absPath)) continue;
-			if (isBinaryExtension(mention.filePath)) continue;
-
-			try {
-				const content = fs.readFileSync(absPath, "utf-8");
-				const maxBytes = 50 * 1024;
-				const truncated =
-					content.length > maxBytes
-						? content.slice(0, maxBytes) + "\n... [file truncated at 50KB]"
-						: content;
-				fileContexts.push(`<file path="${mention.filePath}">\n${truncated}\n</file>`);
-				resolvedText = resolvedText.replace(mention.match, "");
-			} catch (e) {
-				this.deps.logError(`[PI] Failed to read file ${absPath}:`, e);
-			}
+			const read = this.readMentionContext(root, mention);
+			if (!read) continue;
+			fileContexts.push(read.context);
+			resolvedText = resolvedText.replace(mention.match, "");
 		}
 
 		if (fileContexts.length === 0) return text;

@@ -85,6 +85,30 @@ export function quoteShellArg(value: string, platform: string = process.platform
 	return shellQuote(value);
 }
 
+/**
+ * Last-line defense for the Windows `shell: true` seam.
+ *
+ * Callers are expected to pre-quote with `quoteShellArg()`, but a caller that
+ * forgets hands cmd.exe raw argv: Node joins command + args into the shell line
+ * without escaping, so `%VAR%`, `^`, `!`, an embedded quote, or a newline would
+ * be executed. POSIX shells are covered by `quoteShellArg` at the call sites and
+ * by the argv-injection-guard tests; cmd.exe has no safe quoting, so the seam
+ * itself refuses the run instead of interpreting hostile argv.
+ *
+ * Returns an error message when the invocation must not be spawned, or null when
+ * it is safe to hand to the shell.
+ */
+function windowsShellSafetyRejection(command: string, args: string[]): string | null {
+	const offenders: string[] = [];
+	if (CMD_UNQUOTABLE.test(command)) offenders.push(`command: ${JSON.stringify(command)}`);
+	for (const arg of args) {
+		if (CMD_UNQUOTABLE.test(arg)) offenders.push(`arg: ${JSON.stringify(arg)}`);
+	}
+	return offenders.length > 0
+		? `Refused to run under cmd.exe: unquotable shell metacharacters in ${offenders.join(", ")}`
+		: null;
+}
+
 /** Build a shell command object for spawning pi via shell (Unix only). */
 export function getShellCommand(
 	binaryPath: string,
@@ -118,6 +142,12 @@ async function execFileAsyncImpl(
 	timeoutMs = 15_000,
 	options?: ShellExecOptions,
 ): Promise<CommandResult> {
+	if (process.platform === "win32") {
+		const rejection = windowsShellSafetyRejection(command, args);
+		if (rejection) {
+			return { code: 1, stdout: "", stderr: rejection };
+		}
+	}
 	return new Promise((resolve) => {
 		let settled = false;
 		const child = execFile(
@@ -188,6 +218,12 @@ async function execFileWithStdinImpl(
 	timeoutMs = 15_000,
 	options?: ShellExecOptions,
 ): Promise<CommandResult> {
+	if (process.platform === "win32") {
+		const rejection = windowsShellSafetyRejection(command, args);
+		if (rejection) {
+			return { code: 1, stdout: "", stderr: rejection };
+		}
+	}
 	return new Promise((resolve) => {
 		let settled = false;
 

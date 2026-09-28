@@ -1,4 +1,6 @@
 <script lang="ts">
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- timer bookkeeping is intentionally non-reactive
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
   interface Toast {
     id: string;
     type: "info" | "success" | "warning" | "error";
@@ -10,23 +12,44 @@
 
   let toasts = $state<Toast[]>([]);
   let toastIdCounter = 0;
+  // Tracked auto-dismiss timers: cleared per-toast on dismiss/clear so a
+  // closed toast can never fire its timeout callback afterwards.
+  /** Upper bound on simultaneously visible toasts — a runaway loop previously
+   *  stacked unbounded DOM nodes; the oldest are dropped beyond the cap. */
+  const MAX_TOASTS = 5;
 
   export function showToast(opts: Omit<Toast, "id">) {
     const id = `toast-${++toastIdCounter}`;
     const toast: Toast = { ...opts, id };
     toasts = [...toasts, toast];
+    if (toasts.length > MAX_TOASTS) {
+      const oldest = toasts[0];
+      dismissToast(oldest.id);
+    }
 
-    if (!opts.persistent && (opts.duration ?? 30000) > 0) {
-      setTimeout(() => dismissToast(id), opts.duration ?? 30000);
+    const duration = opts.duration ?? 30000;
+    if (!opts.persistent && duration > 0) {
+      const timer = setTimeout(() => {
+        timers.delete(id);
+        dismissToast(id);
+      }, duration);
+      timers.set(id, timer);
     }
     return id;
   }
 
   export function dismissToast(id: string) {
+    const timer = timers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timers.delete(id);
+    }
     toasts = toasts.filter((t) => t.id !== id);
   }
 
   export function clearToasts() {
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
     toasts = [];
   }
 
@@ -50,16 +73,17 @@
 </script>
 
 {#if toasts.length > 0}
-  <div class="toast-container" role="status" aria-live="polite">
+  <div class="toast-container" role="status" aria-live="polite" aria-atomic="false">
     {#each toasts as toast (toast.id)}
       <div
         class="toast toast-{toast.type}"
         role="alert"
+        aria-labelledby="{toast.id}-title"
         style="animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
       >
         <div class="toast-icon">{getTypeIcon(toast.type)}</div>
         <div class="toast-body">
-          <div class="toast-title">{toast.title}</div>
+          <div class="toast-title" id="{toast.id}-title">{toast.title}</div>
           {#if toast.message}
             <div class="toast-message">{toast.message}</div>
           {/if}

@@ -281,7 +281,18 @@
   }
 
   function handleVSCodeMessage(event: MessageEvent) {
-    const { type, data } = event.data;
+    // Validate the envelope: any window can dispatch a MessageEvent at this
+    // webview, so treat event.data as untrusted (a non-object payload would
+    // previously throw on destructuring).
+    const raw: unknown = event.data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+    const envelope = raw as { type?: unknown; data?: unknown };
+    if (typeof envelope.type !== "string") return;
+    const type: string = envelope.type;
+    const data =
+      envelope.data && typeof envelope.data === "object" && !Array.isArray(envelope.data)
+        ? (envelope.data as Record<string, any>)
+        : ({} as Record<string, any>);
 
     switch (type) {
       case "ready":
@@ -319,11 +330,15 @@
         break;
 
       case "model-changed":
-        currentModel = data.modelId;
+        if (typeof data.modelId === "string") {
+          currentModel = data.modelId;
+        }
         break;
 
       case "thinking-level-changed":
-        thinkingLevel = data.level;
+        if (typeof data.level === "string") {
+          thinkingLevel = data.level;
+        }
         break;
 
       case "context-usage":
@@ -361,11 +376,13 @@
         break;
 
       case "auto-compaction-changed":
-        autoCompaction = data.enabled;
+        if (typeof data.enabled === "boolean") {
+          autoCompaction = data.enabled;
+        }
         break;
 
       case "provider-auth":
-        providers = data || [];
+        providers = Array.isArray(data) ? data : [];
         break;
 
       case "settings-response":
@@ -448,6 +465,9 @@
           const lastMsg = messages[messages.length - 1];
           messages = [...messages.slice(0, -1), { ...lastMsg, isStreaming: false }];
         }
+        // Clear in-flight tool calls: entries left by an aborted run previously
+        // lingered forever and kept the "Executing tool..." rows after an error.
+        activeToolCalls.clear();
         showToast({
           type: "error",
           title: "Error",
@@ -1111,6 +1131,10 @@
     contextTokens = null;
     contextWindow = 0;
     activityStatuses = {};
+    // Reset streaming state too: starting fresh from an in-flight run left
+    // isStreaming stuck true and stale tool-call rows on screen.
+    isStreaming = false;
+    activeToolCalls.clear();
     sendMessage({ type: "newSession" });
   }
 

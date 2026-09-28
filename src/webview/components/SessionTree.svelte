@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { parseHostMessage, asString, asNumber, postToHost } from "../messages";
 
   interface SessionItem {
     id: string;
@@ -32,24 +33,45 @@
     };
   });
 
+  /** Validate a session list item coming over the wire; invalid entries are dropped. */
+  function asSession(value: unknown): SessionItem | null {
+    if (!value || typeof value !== "object") return null;
+    const v = value as Record<string, unknown>;
+    if (typeof v.id !== "string" || v.id.length === 0) return null;
+    return {
+      id: v.id,
+      label: asString(v.label, ""),
+      timestamp: asNumber(v.timestamp, 0),
+      messageCount: asNumber(v.messageCount, 0),
+    };
+  }
+
+  function asSessionList(value: unknown): SessionItem[] {
+    if (!Array.isArray(value)) return [];
+    return value.map(asSession).filter((s): s is SessionItem => s !== null);
+  }
+
   function handleMessage(event: MessageEvent) {
-    const { type, data } = event.data;
+    // Validate the envelope and payload: a forged message could previously
+    // overwrite the whole session list or crash the handler on non-object data.
+    const msg = parseHostMessage(event);
+    if (!msg) return;
+    const { type, data } = msg;
     if (type === "sessions-list") {
-      sessions = data || [];
+      sessions = asSessionList(data.sessions);
       loading = false;
-    } else if (type === "ready" && data?.sessions) {
-      sessions = data.sessions || [];
+    } else if (type === "ready" && Array.isArray(data.sessions)) {
+      sessions = asSessionList(data.sessions);
       loading = false;
     } else if (type === "session-updated") {
-      activeSessionId = data?.sessionId || null;
+      const sessionId = asString(data.sessionId, "");
+      activeSessionId = sessionId || null;
       sendMessage({ type: "listSessions" });
     }
   }
 
-  function sendMessage(msg: any) {
-    if (typeof (window as any).vscode?.postMessage === "function") {
-      (window as any).vscode.postMessage(msg);
-    }
+  function sendMessage(msg: unknown) {
+    postToHost(msg);
   }
 
   function selectSession(id: string) {

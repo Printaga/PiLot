@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { parseHostMessage, clampNumber } from "../messages";
+
   interface Props {
     percent: number | null;
     contextTokens: number | null;
@@ -22,8 +24,10 @@
     if (!vscode) return;
 
     function handleVSCodeMessage(event: MessageEvent) {
-      const { type } = event.data;
-      if (type === "compaction_end") {
+      // Validate envelope + payload shape: a forged or malformed message must
+      // not flip the compacting state (previously it threw on non-object data).
+      const msg = parseHostMessage(event);
+      if (msg && msg.type === "compaction_end") {
         compacting = false;
       }
     }
@@ -37,8 +41,9 @@
 
   function getColor(pct: number | null): string {
     if (pct === null) return "var(--color-text-muted)";
-    if (pct >= 90) return "var(--color-error)";
-    if (pct >= 70) return "var(--color-warning)";
+    const clamped = Math.min(100, Math.max(0, pct));
+    if (clamped >= 90) return "var(--color-error)";
+    if (clamped >= 70) return "var(--color-warning)";
     return "var(--color-success)";
   }
 
@@ -46,7 +51,8 @@
   const label = $derived.by(() => {
     if (compacting) return "·";
     if (percent === null) return "---";
-    return `${Math.round(percent)}%`;
+    // Clamp before display so a hostile/buggy value can't render e.g. "830%".
+    return `${Math.round(clampNumber(percent, 0, 100, 0))}%`;
   });
 
   // SVG circle calculations (30x30px viewbox, 4px radius for the ring)

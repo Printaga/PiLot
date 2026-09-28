@@ -14,5 +14,5 @@
     "noEmit": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/webview/**/*", "src/webview/**/*.svelte"]
+  "include": ["src/webview/**/*"]
 }

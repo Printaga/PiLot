@@ -3,9 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP notes:
+      - script-src 'self' only: no inline handlers or inline scripts are used
+        (markdown anchors/fragment links get delegated JS listeners instead).
+      - connect-src restricts the single registry fetch PiPackagesPanel makes;
+        without it the directive is absent and falls back to default-src,
+        which blocks the request.
+      - style-src keeps 'unsafe-inline' because Svelte injects component styles;
+        img-src allows data: for inline base64 message images.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src https://registry.npmjs.org; font-src 'self' data:;"
     />
     <title>PiLot Studio</title>
   </head>

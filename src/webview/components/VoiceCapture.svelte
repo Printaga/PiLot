@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { parseHostMessage } from "../messages";
+
   interface Props {
     isListening: boolean;
     onToggle: () => void;
@@ -12,9 +14,11 @@
     if (!vscode) return;
 
     function handleVSCodeMessage(event: MessageEvent) {
-      const { type, data } = event.data;
-      if (type === "voice-listening-changed") {
-        isListening = data.listening;
+      // Shape-check before use: a malformed or forged message previously
+      // threw on `data.listening` or flipped dictation state at will.
+      const msg = parseHostMessage(event);
+      if (msg && msg.type === "voice-listening-changed") {
+        isListening = msg.data.listening === true;
       }
     }
 

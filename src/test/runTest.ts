@@ -5,14 +5,39 @@ import { glob } from "glob";
 import { pathToFileURL } from "node:url";
 import { runTests } from "@vscode/test-electron";
 
+/**
+ * Windows install roots that can contain a per-user (LOCALAPPDATA) or
+ * per-machine (ProgramFiles) desktop VS Code.
+ */
+const WIN32_VSCODE_ROOT_VARS = ["LOCALAPPDATA", "ProgramFiles"] as const;
+
+function win32VscodeCandidates(): string[] {
+	return WIN32_VSCODE_ROOT_VARS.flatMap((rootVar) =>
+		[
+			["Programs", "Microsoft VS Code", "Code.exe"],
+			["Microsoft VS Code", "Code.exe"],
+		].map((segments) => path.join(process.env[rootVar] || "", ...segments)),
+	);
+}
+
+/**
+ * Candidate paths for this platform. Distro `code` (/usr/bin/code) is a shell
+ * wrapper that re-forks the GUI via cli.js; the test runner then loses process
+ * ownership and the run exits 0 without ever starting mocha. The real
+ * Electron binary (/usr/share/code/code) is preferred on Linux.
+ */
+function platformVscodeCandidates(): string[] {
+	if (process.platform === "win32") return win32VscodeCandidates();
+	if (process.platform === "darwin") {
+		return ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron"];
+	}
+	return ["/usr/share/code/code", "/usr/bin/code"];
+}
+
 function getVscodeExecutablePath(): string | undefined {
 	const envPath = process.env.VSCODE_PATH;
 	if (envPath) return envPath;
-	// Distro `code` (/usr/bin/code) is a shell wrapper that re-forks the GUI via
-	// cli.js; the test runner then loses process ownership and the run exits 0
-	// without ever starting mocha. Prefer the real Electron binary.
-	if (existsSync("/usr/share/code/code")) return "/usr/share/code/code";
-	return existsSync("/usr/bin/code") ? "/usr/bin/code" : undefined;
+	return platformVscodeCandidates().find((c) => c.length > 0 && existsSync(c));
 }
 
 // Host-injected electron vars would make the test host reuse the parent IDE's
@@ -95,18 +120,23 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 	sanitizeElectronEnv();
 	const extensionDevelopmentPath = path.resolve(import.meta.dirname, "../../");
 
+	// Unique tmpdir suffix per test file: parallel CI jobs (or two runs on one
+	// machine) sharing a fixed os.tmpdir() name deleted each other's workspace
+	// and user-data dirs mid-run. process.pid keeps concurrent runs apart.
+	const tmpSuffix = `${process.pid}-${testFile.replace(/[^a-zA-Z0-9_-]/g, "_").slice(-40)}`;
+
 	// Open a tiny, empty workspace instead of the project root. The project
 	// (node_modules included) contains thousands of directories; VS Code's
 	// recursive file watcher would create one inotify instance per directory
 	// and exhaust the per-user inotify instance limit (often 128), causing
 	// EMFILE and a host crash (exit 7) on Linux.
-	const testWorkspace = path.join(os.tmpdir(), "pilot-test-workspace");
+	const testWorkspace = path.join(os.tmpdir(), `pilot-test-workspace-${tmpSuffix}`);
 	mkdirSync(testWorkspace, { recursive: true });
 	const folderUri = pathToFileURL(testWorkspace).toString();
 
 	// Fresh, minimal user-data dir per file (stale storage accumulates watchers
 	// and profile locks; a fresh dir also makes the plants below authoritative).
-	const testUserDataDir = path.join(os.tmpdir(), "pilot-test-userdata");
+	const testUserDataDir = path.join(os.tmpdir(), `pilot-test-userdata-${tmpSuffix}`);
 	rmSync(testUserDataDir, { recursive: true, force: true });
 	mkdirSync(testUserDataDir, { recursive: true });
 	// VS Code 1.101+ polyfills globalThis.navigator in the Node extension host
@@ -176,6 +206,11 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 			return;
 		}
 		throw err;
+	} finally {
+		// Best-effort cleanup of this file's per-run temp dirs (unique per pid +
+		// file, so removal can never race a concurrent run).
+		rmSync(testWorkspace, { recursive: true, force: true });
+		rmSync(testUserDataDir, { recursive: true, force: true });
 	}
 }
 
@@ -215,6 +250,12 @@ for (const file of testFiles) {
 		}
 	}
 	if (!green) break;
+}
+if (testFiles.length === 0) {
+	console.error(
+		"[runTest] no test files found — the suite is misconfigured (or dist-tsc is stale); failing instead of reporting an empty green run.",
+	);
+	process.exit(1);
 }
 if (failed.length > 0) {
 	console.error(`Failed test files: ${failed.join(", ")}`);

@@ -37,12 +37,14 @@
   --space-12: 80px;
   --space-16: 120px;
 
-  /* Typography: Utilitarian Monospace Dominance */
-  @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
-
-  --font-body: "Inter", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
-  --font-display: "JetBrains Mono", monospace;
+  /* Typography: Utilitarian Monospace Dominance.
+   * Remote Google Fonts @import removed: it sat inside :root (invalid CSS —
+   * @import must precede all rules), was blocked by the webview CSP, and
+   * leaked every panel open to Google Fonts. The webview renders with the
+   * system fallbacks below. */
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --text-xs: 11px;
   --text-sm: 13px;

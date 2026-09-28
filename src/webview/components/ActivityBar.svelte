@@ -136,6 +136,17 @@
     }
   }
 
+  /* Respect the OS reduce-motion preference: the dot pulse is decorative and
+   * runs infinitely, so it must stop for users who opt out. */
+  @media (prefers-reduced-motion: reduce) {
+    .activity-dot {
+      animation: none;
+    }
+    .activity-pill {
+      animation: none;
+    }
+  }
+
   @keyframes pill-slide-in {
     from {
       opacity: 0;

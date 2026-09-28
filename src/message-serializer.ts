@@ -38,7 +38,9 @@ interface RawAgentMessage {
 }
 
 /** Extract joined text and images from a content value that is either a plain
- * string or an array of content blocks (text/image). */
+ * string or an array of content blocks (text/image). Every block is shape-checked:
+ * SDK extensions can inject arbitrary content parts, and a malformed one
+ * previously surfaced as `undefined` fields reaching the webview. */
 function extractTextAndImages(content: string | any[] | undefined): {
 	text: string;
 	images: Array<{ type: "image"; data: string; mimeType: string }>;
@@ -48,9 +50,14 @@ function extractTextAndImages(content: string | any[] | undefined): {
 	const textParts: string[] = [];
 	const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
 	for (const c of content) {
-		if (c.type === "text" && "text" in c) {
-			textParts.push(c.text || "");
-		} else if (c.type === "image" && "data" in c && "mimeType" in c) {
+		if (!c || typeof c !== "object") continue;
+		if (c.type === "text" && typeof c.text === "string") {
+			textParts.push(c.text);
+		} else if (
+			c.type === "image" &&
+			typeof c.data === "string" &&
+			typeof c.mimeType === "string"
+		) {
 			images.push({ type: "image", data: c.data, mimeType: c.mimeType });
 		}
 	}
@@ -108,6 +115,10 @@ export function serializeMessages(
 		const normalized = normalizeMessage(item);
 		if (!normalized) continue;
 		const { message: msg, entryId, parentId, timestamp } = normalized;
+
+		if (!msg || typeof msg.role !== "string") {
+			continue; // malformed entry from an extension: skip rather than crash
+		}
 
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
@@ -178,13 +189,16 @@ export function serializeMessages(
 			// these via CustomMessageComponent when `display` is true; hidden ones
 			// (display === false) are context-only and never surfaced in the UI.
 			if (msg.display === false) continue;
+			// The customType label is interpolated into the webview header — keep it a
+			// string (a hostile object previously flowed through as `label: any`).
+			const customLabel = typeof msg.customType === "string" ? msg.customType : undefined;
 			const { text, images } = extractTextAndImages(msg.content);
 			if (!text.trim() && images.length === 0) continue;
 			result.push({
 				role: "provider",
 				content: text,
 				images: images.length > 0 ? images : undefined,
-				label: msg.customType,
+				label: customLabel,
 				timestamp: timestamp ?? 0,
 				entryId,
 				parentId,

@@ -30,9 +30,13 @@ export function createMockAgentSession(options?: {
 	sessionId?: string;
 	messages?: any[];
 	resourceLoader?: ResourceLoader;
+	/** Accept for API compatibility; dispose() counting now lives on the
+	 *  returned mock itself (`mock._disposeCalls`), incremented per call. */
 	disposeCalls?: number;
 }): MockAgentSession {
-	const disposeCalls = 0;
+	// Count dispose() invocations on the mock itself. The previous `disposeCalls`
+	// option captured a local `0` that nothing ever incremented — assertions on it
+	// could only pass vacuously.
 	const session = {
 		sessionName: options?.sessionName ?? null,
 		sessionId: options?.sessionId ?? "test-session-id",
@@ -51,11 +55,13 @@ export function createMockAgentSession(options?: {
 		sessionManager: {
 			getCwd: () => "/fake/workspace",
 		} as any,
+		_disposeCalls: 0,
 		...(options || {}),
-		_disposeCalls: disposeCalls,
 	} as unknown as MockAgentSession;
 
-	(session as any).disposeCalls = disposeCalls;
+	(session as any).dispose = () => {
+		(session as any)._disposeCalls = ((session as any)._disposeCalls ?? 0) + 1;
+	};
 	return session;
 }
 
@@ -150,8 +156,12 @@ export function createMockSettingsManager(): SettingsManager {
 		update: async () => {},
 	};
 	// The SDK surface keeps growing; unknown method access becomes an async
-	// no-op so resource-loader calls never explode in tests.
-	return new Proxy(base, {
+	// no-op so resource-loader calls never explode in tests. Overrides win:
+	// a test that assigns `mock.someMethod = ...` (or sets it in `base`)
+	// gets its implementation back instead of being silently masked by the
+	// Proxy fallback — the previous proxy read straight from `target` on every
+	// access and made per-test overrides impossible.
+	const proxy = new Proxy(base, {
 		get(target, prop) {
 			if (prop === "then") return undefined;
 			if (typeof prop === "string" && prop in target) {
@@ -159,7 +169,12 @@ export function createMockSettingsManager(): SettingsManager {
 			}
 			return async () => undefined;
 		},
+		set(target, prop, value) {
+			(target as any)[prop] = value;
+			return true;
+		},
 	}) as unknown as SettingsManager;
+	return proxy;
 }
 
 export function createMockSessionManager(cwd = "/fake"): any {

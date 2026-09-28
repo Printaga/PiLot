@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { postToHost } from "../messages";
 
   interface ProviderAuth {
     provider: string;
@@ -250,9 +251,7 @@
   }
 
   function sendMessage(msg: any) {
-    if (typeof (window as any).vscode?.postMessage === "function") {
-      (window as any).vscode.postMessage(msg);
-    }
+    postToHost(msg);
   }
 
   function startEditApiKey(provider: string) {

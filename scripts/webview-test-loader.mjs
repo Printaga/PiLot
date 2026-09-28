@@ -11,13 +11,56 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 const preprocessor = vitePreprocess();
 
+/** Parent directory of the importing module, or the process cwd. */
+function parentDirOf(context) {
+	return context.parentURL ? dirname(fileURLToPath(context.parentURL)) : process.cwd();
+}
+
+/**
+ * True when Node can resolve the specifier on its own: relative paths that
+ * already carry a resolvable extension, or anything non-relative.
+ */
+function needsExtensionProbe(specifier) {
+	if (!specifier.startsWith(".")) return false;
+	return [".ts", ".js", ".json"].every((ext) => !specifier.endsWith(ext));
+}
+
+/** Try resolving `base` with each candidate extension; first hit wins. */
+async function probeExtensions(base, context, nextResolve) {
+	for (const ext of [".ts", ".js", ".svelte"]) {
+		const candidate = pathToFileURL(base + ext).href;
+		try {
+			await nextResolve(candidate, context);
+			return candidate;
+		} catch {
+			/* try next extension */
+		}
+	}
+	return null;
+}
+
+/**
+ * Components import workspace modules without an extension ("../messages").
+ * Vite resolves those at build time; plain Node does not, so probe the
+ * .ts/.js/.svelte siblings before giving up. Returns the URL or null.
+ */
+async function resolveWorkspaceSpecifier(specifier, context, nextResolve) {
+	if (!needsExtensionProbe(specifier)) return null;
+	const base = resolvePath(parentDirOf(context), specifier);
+	return probeExtensions(base, context, nextResolve);
+}
+
 // fallow-ignore-next-line unused-export
 export async function resolve(specifier, context, nextResolve) {
 	if (specifier.endsWith(".svelte")) {
-		const parentDir = context.parentURL
-			? dirname(fileURLToPath(context.parentURL))
-			: process.cwd();
-		return { url: pathToFileURL(resolvePath(parentDir, specifier)).href, shortCircuit: true };
+		return {
+			url: pathToFileURL(resolvePath(parentDirOf(context), specifier)).href,
+			shortCircuit: true,
+		};
+	}
+	const workspaceUrl = await resolveWorkspaceSpecifier(specifier, context, nextResolve);
+	if (workspaceUrl) {
+		return { url: workspaceUrl, shortCircuit: true };
 	}
 	// Client runtime: svelte's "." → src/index-client.js, esm-env → browser build.
 	const conditions = context.conditions.includes("browser")
