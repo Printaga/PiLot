@@ -76,6 +76,14 @@
     }
   }
 
+  /* Respect the OS reduce-motion preference: the shimmer is an infinite
+   * animation; freeze it while keeping the placeholder shapes visible. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+    }
+  }
+
   .skeleton-card {
     display: flex;
     flex-direction: column;

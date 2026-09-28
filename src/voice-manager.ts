@@ -63,6 +63,8 @@ export const voiceManagerInternals = {
 	accessSync: (path: string, mode?: number) => fs.accessSync(path, mode),
 	existsSync: (path: fs.PathLike) => fs.existsSync(path),
 	statSync: (path: fs.PathLike) => fs.statSync(path),
+	/** Seam for VoiceManager to track in-flight <model>.tmp downloads. */
+	onPendingTmpFile: undefined as ((tmpPath: string) => void) | undefined,
 };
 
 // ── Helper path resolution ──────────────────────────────────────────────
@@ -148,6 +150,7 @@ async function downloadVoiceModel(
 	const { createWriteStream } = await import("node:fs");
 
 	const tmpPath = destPath + ".tmp";
+	voiceManagerInternals.onPendingTmpFile?.(tmpPath);
 
 	await new Promise<void>((resolve, reject) => {
 		const doRequest = (requestUrl: string) => {
@@ -207,7 +210,14 @@ async function downloadVoiceModel(
 		doRequest(url);
 	});
 
-	await fs.promises.rename(tmpPath, destPath);
+	try {
+		await fs.promises.rename(tmpPath, destPath);
+	} catch (e) {
+		// A failed rename (cross-device, cancelled mid-flight) must not leak the
+		// temp file; the next download recreates it.
+		await fs.promises.rm(tmpPath, { force: true }).catch(() => {});
+		throw e;
+	}
 	logDebug?.(`[PI Voice] Model downloaded to: ${destPath}`);
 	onPhase?.("ready", "Voice model ready.");
 	return destPath;
@@ -234,6 +244,8 @@ export class VoiceManager {
 	private voiceModel: string = "tiny-q5_1";
 	private voiceLineBuffer = "";
 	private deps: VoiceManagerDeps;
+	/** Partial model downloads are staged at <dest>.tmp; tracked for cleanup. */
+	private pendingTmpFile?: string;
 
 	constructor(deps: VoiceManagerDeps) {
 		this.deps = deps;
@@ -304,6 +316,9 @@ export class VoiceManager {
 				if (choice !== "Download") return;
 
 				try {
+					voiceManagerInternals.onPendingTmpFile = (tmpPath) => {
+						this.pendingTmpFile = tmpPath;
+					};
 					modelPath = await vscode.window.withProgress(
 						{
 							location: vscode.ProgressLocation.Notification,
@@ -344,11 +359,20 @@ export class VoiceManager {
 						},
 					);
 				} catch (err) {
-					if (err instanceof Error && err.message === "Download cancelled") return;
+					voiceManagerInternals.onPendingTmpFile = undefined;
+					if (err instanceof Error && err.message === "Download cancelled") {
+						// Cancelled mid-download: remove the partial temp file.
+						await this.removePendingTmpFile();
+						return;
+					}
 					vscode.window.showErrorMessage(
 						`Failed to download voice model: ${err instanceof Error ? err.message : String(err)}`,
 					);
+					await this.removePendingTmpFile();
 					return;
+				} finally {
+					// Whatever the outcome, stop tracking the (now consumed/removed) temp file.
+					this.pendingTmpFile = undefined;
 				}
 			}
 
@@ -433,10 +457,38 @@ export class VoiceManager {
 		}
 	}
 
+	/** Remove a partial voice-model download left by a cancelled/failed transfer. */
+	private async removePendingTmpFile(): Promise<void> {
+		const tmp = this.pendingTmpFile;
+		this.pendingTmpFile = undefined;
+		if (!tmp) return;
+		try {
+			await fs.promises.rm(tmp, { force: true });
+		} catch {
+			/* best-effort cleanup */
+		}
+	}
 	private stopVoiceCapture() {
-		if (this.voiceHelperProcess && this.isListening) {
-			this.voiceHelperProcess.stdin?.write(JSON.stringify({ type: "stop" }) + "\n");
-			this.voiceHelperProcess.stdin?.end();
+		if (this.voiceHelperProcess) {
+			const proc = this.voiceHelperProcess;
+			try {
+				if (this.isListening) {
+					proc.stdin?.write(JSON.stringify({ type: "stop" }) + "\n");
+				}
+				proc.stdin?.end();
+			} catch {
+				/* helper already gone */
+			}
+			// Detach stdio listeners before dropping the reference: the helper can
+			// emit stderr lines for a while after stop, and those handlers kept the
+			// buffers alive and kept logging after a stop/dispose.
+			try {
+				proc.stdout?.removeAllListeners();
+				proc.stderr?.removeAllListeners();
+				proc.removeAllListeners();
+			} catch {
+				/* listeners already gone */
+			}
 			this.voiceHelperProcess = undefined;
 		}
 		this.isListening = false;
@@ -531,11 +583,24 @@ export class VoiceManager {
 
 	dispose() {
 		if (this.voiceHelperProcess) {
-			this.voiceHelperProcess.stdin?.end();
-			this.voiceHelperProcess.kill();
+			const proc = this.voiceHelperProcess;
+			try {
+				proc.stdin?.end();
+			} catch {
+				/* already closed */
+			}
+			try {
+				proc.stdout?.removeAllListeners();
+				proc.stderr?.removeAllListeners();
+				proc.removeAllListeners();
+			} catch {
+				/* listeners already gone */
+			}
+			proc.kill();
 			this.voiceHelperProcess = undefined;
 		}
 		this.isListening = false;
 		this.voiceLineBuffer = "";
+		void this.removePendingTmpFile();
 	}
 }

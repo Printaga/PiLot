@@ -59,14 +59,7 @@ export interface SessionItem {
   messageCount: number;
 }
 
-/** Session tree node (for tree view) */
-export interface SessionNode {
-  id: string;
-  label: string;
-  timestamp: number;
-  children: SessionNode[];
-  parent: string | null;
-}
+/** Session tree node (for tree view) — REMOVED: dead type; no component or host code ever imported it. */
 
 /** Tool configuration for getSettings/setToolConfig */
 export interface ToolConfig {
@@ -98,10 +91,23 @@ export interface VoiceModelDef {
 export type OpenConfigFileKey =
   "auth" | "models" | "settings" | "system-prompt" | "append-system-prompt";
 
-/** Thinking level enumeration */
+/**
+ * Thinking level enumeration.
+ *
+ * Single shared definition: this is THE type both the webview and the host
+ * import (the host re-exports it from model-registry-handler, and the ordered
+ * list lives in THINKING_LEVELS). Previously an identical union was repeated
+ * inline in protocol/types.ts and drifted from this one.
+ */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-/** Pi agent configuration */
+/**
+ * Pi agent configuration.
+ *
+ * Single shared definition: the host (pi-agent-provider.ts) imports this from
+ * here instead of declaring its own structurally-identical duplicate that could
+ * drift from the webview's copy.
+ */
 export interface PiAgentConfig {
   defaultModel: string;
   defaultProvider: string;

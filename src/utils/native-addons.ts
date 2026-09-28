@@ -12,7 +12,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 /**
  * Known Node.js module version -> Node.js major mapping.
@@ -86,6 +86,20 @@ export interface CopyStatus {
 }
 
 /**
+ * Read the ABI version from a compiled better_sqlite3.node file.
+ *
+ * Single shared implementation — previously the scan in `checkBetterSqlite3`
+ * and this helper duplicated the same regex, and only one of the two was kept
+ * in sync when the pattern changed.
+ */
+function readAbiFromNodeFile(nodeFile: string): number | null {
+	if (!fs.existsSync(nodeFile)) return null;
+	const content = fs.readFileSync(nodeFile, "latin1");
+	const match = content.match(/node_register_module_v(\d+)/);
+	return match ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
  * Check all installed better-sqlite3 copies for ABI compatibility.
  * Returns the FIRST incompatible copy found, or ok:true if all are compatible.
  */
@@ -110,36 +124,17 @@ export function checkBetterSqlite3(paths?: string[]): {
 		if (!fs.existsSync(betterDir)) continue;
 
 		const nodeFile = path.join(betterDir, "build", "Release", "better_sqlite3.node");
-		if (fs.existsSync(nodeFile)) {
-			const content = fs.readFileSync(nodeFile, "utf-8");
-			const match = content.match(/node_register_module_v(\d+)/);
-			const abi = match ? parseInt(match[1], 10) : null;
-			const compatible = abi === runtimeABI;
-			const status: CopyStatus = {
-				dir: betterDir,
-				nodeFile,
-				moduleABI: abi,
-				compatible,
-			};
-			copies.push(status);
-			if (!compatible && !firstMismatch) {
-				firstMismatch = status;
-			}
-		} else {
-			copies.push({
-				dir: betterDir,
-				nodeFile: null,
-				moduleABI: null,
-				compatible: false,
-			});
-			if (!firstMismatch) {
-				firstMismatch = {
-					dir: betterDir,
-					nodeFile: null,
-					moduleABI: null,
-					compatible: false,
-				};
-			}
+		const abi = readAbiFromNodeFile(nodeFile);
+		const compatible = abi !== null && abi === runtimeABI;
+		const status: CopyStatus = {
+			dir: betterDir,
+			nodeFile: abi !== null ? nodeFile : null,
+			moduleABI: abi,
+			compatible,
+		};
+		copies.push(status);
+		if (!compatible && !firstMismatch) {
+			firstMismatch = status;
 		}
 	}
 
@@ -157,32 +152,86 @@ export function checkBetterSqlite3(paths?: string[]): {
 /**
  * Run prebuild-install in a better-sqlite3 directory to download a
  * prebuilt binary for the given Electron target.
+ *
+ * Values are passed as an argv array (no shell), so filesystem-derived
+ * paths and version strings can never be reinterpreted as shell syntax.
  */
 function tryPrebuildInstall(targetDir: string, electronVersion: string): string | null {
 	try {
-		const result = execSync(
-			`npx --yes prebuild-install --runtime electron --target ${electronVersion} --arch x64`,
-			{ cwd: targetDir, timeout: 30_000, maxBuffer: 256 * 1024 },
+		const result = spawnSync(
+			process.execPath,
+			[
+				// npx without a shell: run the package's CLI via node
+				path.join("node_modules", ".bin", "prebuild-install"),
+				"--runtime",
+				"electron",
+				"--target",
+				electronVersion,
+				"--arch",
+				"x64",
+			],
+			{
+				cwd: targetDir,
+				timeout: 30_000,
+				maxBuffer: 256 * 1024,
+				shell: false,
+				windowsHide: true,
+			},
 		);
-		return result.toString();
+		if (result.error || result.status !== 0) {
+			return null; // prebuild not available
+		}
+		return result.stdout?.toString() ?? "";
 	} catch {
 		return null; // prebuild not available
 	}
 }
 
+/** argv for `node-gyp rebuild`, tagged with the Electron target when running inside Electron. */
+function nodeGypArgs(electronVersion: string | undefined): string[] {
+	const args: string[] = ["rebuild"];
+	if (electronVersion) {
+		args.push(`--target=${electronVersion}`);
+		args.push("--arch=x64");
+		args.push("--dist-url=https://electronjs.org/headers");
+	}
+	return args;
+}
+
+/** Interpret one spawnSync result for the node-gyp run. */
+function nodeGypOutcome(result: ReturnType<typeof spawnSync>): {
+	success: boolean;
+	output: string;
+} {
+	if (result.error) {
+		return { success: false, output: result.error.message };
+	}
+	if (result.signal) {
+		return { success: false, output: `node-gyp terminated by signal ${result.signal}` };
+	}
+	if (result.status !== 0) {
+		return {
+			success: false,
+			output: `node-gyp exited with code ${result.status}: ${(result.stderr?.toString() ?? "").slice(0, 400)}`,
+		};
+	}
+	return { success: true, output: result.stdout?.toString() ?? "" };
+}
+
 /**
  * Rebuild a single better-sqlite3 directory for the Electron ABI.
  * Tries prebuild-install first (fast download), then node-gyp (compilation).
+ * All child invocations use argv arrays with `shell: false` so the
+ * environment-derived electron version and filesystem-derived cwd are inert.
  */
 function rebuildOnePath(targetDir: string): {
 	success: boolean;
 	output: string;
 } {
 	const electronVersion = getElectronVersion();
-	const isElectron = !!electronVersion;
 
 	// Strategy 1: prebuild-install (fast — downloads prebuilt binary)
-	if (isElectron && electronVersion) {
+	if (electronVersion) {
 		const prebuildResult = tryPrebuildInstall(targetDir, electronVersion);
 		if (prebuildResult !== null) {
 			return { success: true, output: prebuildResult };
@@ -191,20 +240,18 @@ function rebuildOnePath(targetDir: string): {
 
 	// Strategy 2: node-gyp rebuild (slow — compiles from source)
 	try {
-		const args: string[] = ["rebuild"];
-		if (isElectron && electronVersion) {
-			args.push(`--target=${electronVersion}`);
-			args.push("--arch=x64");
-			args.push("--dist-url=https://electronjs.org/headers");
-		}
-
-		const result = execSync(`npx --yes node-gyp ${args.join(" ")}`, {
-			cwd: targetDir,
-			timeout: 300_000, // 5 min — sqlite3.c is huge
-			maxBuffer: 2 * 1024 * 1024,
-		});
-
-		return { success: true, output: result.toString() };
+		const result = spawnSync(
+			process.execPath,
+			[path.join("node_modules", ".bin", "node-gyp"), ...nodeGypArgs(electronVersion)],
+			{
+				cwd: targetDir,
+				timeout: 300_000, // 5 min — sqlite3.c is huge
+				maxBuffer: 2 * 1024 * 1024,
+				shell: false,
+				windowsHide: true,
+			},
+		);
+		return nodeGypOutcome(result);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return { success: false, output: message };
@@ -288,11 +335,7 @@ export function rebuildBetterSqlite3(): {
  * Read the ABI version from a compiled better_sqlite3.node file.
  */
 function readABI(targetDir: string): number | null {
-	const nodeFile = path.join(targetDir, "build", "Release", "better_sqlite3.node");
-	if (!fs.existsSync(nodeFile)) return null;
-	const content = fs.readFileSync(nodeFile, "utf-8");
-	const match = content.match(/node_register_module_v(\d+)/);
-	return match ? parseInt(match[1], 10) : null;
+	return readAbiFromNodeFile(path.join(targetDir, "build", "Release", "better_sqlite3.node"));
 }
 
 /**

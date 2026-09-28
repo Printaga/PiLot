@@ -18,9 +18,12 @@
   /** Lazily-initialized mermaid module (shared across all diagram instances). */
   let mermaidModule: typeof import("mermaid") | null = null;
   let mermaidInitialized = false;
-  /** cache: source string -> rendered svg (or null = failed) */
+  /** cache: source string -> rendered svg (or null = failed), LRU-bounded */
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- memo cache, intentionally non-reactive
   const renderCache = new Map<string, string | null>();
+  /** Upper bound on cached diagrams: SVG strings are large, and a long session
+   *  with many edited fences would otherwise grow without limit. */
+  const RENDER_CACHE_MAX_ENTRIES = 30;
 
   let renderedSvg = $state<string | null>(null);
   let hasError = $state(false);
@@ -41,42 +44,69 @@
     return mod;
   }
 
-  async function renderDiagram(source: string) {
-    if (renderCache.has(source)) {
-      const cached = renderCache.get(source);
-      renderedSvg = cached ?? null;
-      hasError = cached === null;
-      isLoading = false;
-      return;
+  function cacheSet(source: string, svg: string | null) {
+    // LRU: refresh insertion order, then evict the oldest beyond the cap.
+    renderCache.delete(source);
+    renderCache.set(source, svg);
+    while (renderCache.size > RENDER_CACHE_MAX_ENTRIES) {
+      const oldest = renderCache.keys().next().value;
+      if (oldest === undefined) break;
+      renderCache.delete(oldest);
     }
+  }
+
+  /** Serve a cached render; returns true when state was applied. */
+  function applyCachedRender(source: string, isCurrent: () => boolean): boolean {
+    if (!renderCache.has(source)) return false;
+    if (!isCurrent()) return true; // superseded: nothing to apply, done
+    const cached = renderCache.get(source);
+    renderedSvg = cached ?? null;
+    hasError = cached === null;
+    isLoading = false;
+    return true;
+  }
+
+  /** Render fresh, cache it, and apply it — only if still the newest render. */
+  async function renderFresh(source: string, isCurrent: () => boolean) {
     isLoading = true;
     hasError = false;
     try {
       const mod = await ensureMermaid();
       const id = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
       const { svg } = await mod.default.render(id, source);
+      cacheSet(source, svg);
+      // Only the newest render may write state: a superseded render finishing
+      // out of order must not clobber the current diagram.
+      if (!isCurrent()) return;
       renderedSvg = svg;
-      renderCache.set(source, svg);
-    } catch (e) {
+      isLoading = false;
+    } catch {
       // Parse/render failure: fall back to showing the raw source.
-      renderCache.set(source, null);
+      cacheSet(source, null);
+      if (!isCurrent()) return;
       hasError = true;
       renderedSvg = null;
-    } finally {
       isLoading = false;
     }
   }
 
+  async function renderDiagram(source: string, isCurrent: () => boolean) {
+    if (applyCachedRender(source, isCurrent)) return;
+    if (!isCurrent()) return;
+    await renderFresh(source, isCurrent);
+  }
+
   // Re-render whenever the fence source changes (handles streaming updates);
-  // unchanged sources are served from the cache. Initial + every change.
+  // unchanged sources are served from the cache. The token guard closes the
+  // stale-render race: a slower older render never overwrites the newer one.
   $effect(() => {
     const src = code;
-    let cancelled = false;
-    void renderDiagram(src).then(() => {
-      if (cancelled) return;
+    let current = true;
+    void renderDiagram(src, () => current).catch(() => {
+      /* renderDiagram never rejects; keep the effect failure-free regardless */
     });
     return () => {
-      cancelled = true;
+      current = false;
     };
   });
 </script>

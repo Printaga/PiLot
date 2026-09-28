@@ -9,7 +9,6 @@
 // `Uri`/`EventEmitter` (the two APIs the SDK and production code rely on at
 // import time) plus minimal stubs for the rest. Test setup (`resetVscodeMocks`)
 // then fills in behaviour.
-import { EventEmitter as NodeEventEmitter } from "node:events";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -87,15 +86,15 @@ class FacadeUri {
 }
 
 class FacadeEventEmitter<T> {
-	private readonly emitter = new NodeEventEmitter();
+	// Single dispatch registry. The previous implementation registered every
+	// listener on BOTH a NodeEventEmitter and its own Set, and fire() invoked
+	// both — every listener ran twice per event, corrupting call-count asserts.
 	private readonly listeners = new Set<(e: T) => any>();
 	readonly event = (listener: (e: T) => any): { dispose(): void } => {
 		this.listeners.add(listener);
-		this.emitter.on("e", listener as any);
 		return { dispose: () => this.listeners.delete(listener) };
 	};
 	fire(data?: T): void {
-		this.emitter.emit("e", data);
 		for (const l of [...this.listeners]) {
 			try {
 				l(data as T);
@@ -105,7 +104,6 @@ class FacadeEventEmitter<T> {
 		}
 	}
 	dispose(): void {
-		this.emitter.removeAllListeners();
 		this.listeners.clear();
 	}
 }

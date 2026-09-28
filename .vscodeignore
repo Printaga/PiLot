@@ -1,5 +1,9 @@
 # ── Build / test output (only dist/ ships) ──
+# Ship only the team-shared VS Code workspace files; everything else in .vscode stays out.
 .vscode/**
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
 .vscode-test/**
 out/**
 dist-tsc/**
@@ -91,8 +95,18 @@ media/screenshot.png
 *.vsix
 *.log
 .DS_Store
+# Environment/secret files at ANY depth (root .env entries above don't cover
+# nested ones like .claude/.env or media/.env.local).
 .env
 .env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+**/*.pem
+**/*.key
+credentials*.json
+**/credentials*.json
 **/*.ts.map
 **/tsconfig.json
 **/tslint.json

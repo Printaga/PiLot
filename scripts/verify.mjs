@@ -57,10 +57,24 @@ for (const stage of chain) {
 		stdio: "inherit",
 		shell: process.platform === "win32",
 	});
-	const code = result.status ?? 1;
-	if (code !== 0) {
-		console.error(`\n✖ verify (${level}) failed at stage "${stage}" (exit ${code}).`);
-		process.exit(code);
+	// Distinguish the three failure shapes a spawn can produce; collapsing them
+	// into one code masks e.g. a SIGKILL'd stage as an ordinary nonzero exit.
+	if (result.error) {
+		console.error(
+			`\n✖ verify (${level}) failed at stage "${stage}": could not run ${cmd} (${result.error.message}).`,
+		);
+		process.exit(3);
+	}
+	if (result.signal) {
+		console.error(
+			`\n✖ verify (${level}) stage "${stage}" was terminated by signal ${result.signal}.`,
+		);
+		process.exit(2);
+	}
+	const code = result.status;
+	if (code === null || code !== 0) {
+		console.error(`\n✖ verify (${level}) failed at stage "${stage}" (exit ${code ?? "none"}).`);
+		process.exit(code ?? 1);
 	}
 	console.log(`<-- [${stage}] ok\n`);
 }

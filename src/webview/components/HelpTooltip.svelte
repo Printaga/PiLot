@@ -7,20 +7,26 @@
 
   let { text, title = "", position = "top" }: Props = $props();
   let visible = $state(false);
-  let wrapperEl = $state<HTMLElement | null>(null);
+  // Unique id so the trigger button can reference the tooltip via
+  // aria-describedby (tooltip was previously invisible to assistive tech).
+  const tooltipId = `help-tooltip-${Math.random().toString(36).slice(2, 10)}`;
 </script>
 
 <div
   class="help-tooltip-wrapper"
-  role="group"
-  aria-label="Help tooltip"
-  bind:this={wrapperEl}
+  role="presentation"
   onmouseenter={() => (visible = true)}
   onmouseleave={() => (visible = false)}
   onfocusin={() => (visible = true)}
   onfocusout={() => (visible = false)}
 >
-  <button class="help-icon-btn" aria-label="Help: {title || text}" tabindex="0">
+  <button
+    class="help-icon-btn"
+    aria-label="Help: {title || text}"
+    aria-describedby={visible ? tooltipId : undefined}
+    aria-expanded={visible}
+    tabindex="0"
+  >
     <svg
       width="14"
       height="14"
@@ -36,7 +42,7 @@
   </button>
 
   {#if visible}
-    <div class="tooltip-content tooltip-{position}" role="tooltip">
+    <div class="tooltip-content tooltip-{position}" role="tooltip" id={tooltipId}>
       {#if title}
         <div class="tooltip-title">{title}</div>
       {/if}

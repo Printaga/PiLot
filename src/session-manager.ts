@@ -332,6 +332,10 @@ export class SessionListManager {
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
 		try {
 			const allSessions = await PiSessionManager.list(cwd, this.deps.config.sessionDir);
+			// Settle per-item: one undeletable file previously aborted the whole
+			// Promise.all, leaving the other selected sessions undeleted with no
+			// indication. Now every item is attempted and failures are collected.
+			const failures: Array<{ sessionId: string; error: unknown }> = [];
 			await Promise.all(
 				sessionIds.map(async (sessionId) => {
 					try {
@@ -341,19 +345,33 @@ export class SessionListManager {
 						}
 					} catch (error) {
 						this.deps.logError(`[PI] Failed to delete session ${sessionId}:`, error);
-						throw error;
+						failures.push({ sessionId, error });
 					}
 				}),
 			);
 
+			// Dispose/refresh around the sessions that DID get deleted.
+			const deletedIds = sessionIds.filter((id) => !failures.some((f) => f.sessionId === id));
 			const session = this.deps.getSession();
-			if (session && sessionIds.includes(session.sessionId)) {
+			if (session && deletedIds.includes(session.sessionId)) {
 				session.dispose();
 				this.deps.setSession?.(undefined);
-				await this.deps.onSessionDeleted?.(sessionIds);
+				await this.deps.onSessionDeleted?.(deletedIds);
 			}
 
 			await this.refreshSessionList(true);
+
+			if (failures.length > 0) {
+				const details = failures
+					.map(
+						(f) =>
+							`${f.sessionId} (${f.error instanceof Error ? f.error.message : String(f.error)})`,
+					)
+					.join(", ");
+				throw new Error(
+					`${failures.length} of ${sessionIds.length} session(s) could not be deleted: ${details}`,
+				);
+			}
 		} catch (error) {
 			this.deps.logError("[PI] Failed to delete sessions:", error);
 			vscode.window.showErrorMessage(`Failed to delete sessions: ${String(error)}`);

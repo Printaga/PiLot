@@ -185,9 +185,21 @@ export async function run(): Promise<void> {
 
 	const testsRoot = path.resolve(import.meta.dirname, ".");
 	// Per-file host isolation (see runTest.ts): load only the file under test.
-	const fileFilter = process.env.MOCHA_TEST_FILE
-		? [process.env.MOCHA_TEST_FILE]
-		: await glob("**/**.test.js", { cwd: testsRoot });
+	// The env var must name a file INSIDE the suite dir — resolve and verify
+	// instead of trusting it, so `../evil.js` cannot escape the tests directory.
+	let fileFilter: string[];
+	if (process.env.MOCHA_TEST_FILE) {
+		const requested = path.resolve(testsRoot, process.env.MOCHA_TEST_FILE);
+		const rootWithSep = testsRoot.endsWith(path.sep) ? testsRoot : testsRoot + path.sep;
+		if (requested !== testsRoot && !requested.startsWith(rootWithSep)) {
+			throw new Error(
+				`MOCHA_TEST_FILE must resolve inside ${testsRoot}: got ${process.env.MOCHA_TEST_FILE}`,
+			);
+		}
+		fileFilter = [path.relative(testsRoot, requested)];
+	} else {
+		fileFilter = await glob("**/**.test.js", { cwd: testsRoot });
+	}
 
 	for (const file of fileFilter) {
 		mocha.addFile(path.resolve(testsRoot, file));
@@ -238,5 +250,10 @@ const isMain =
 	!!process.argv[1] &&
 	pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isMain) {
-	void run();
+	// Direct invocation must propagate failure: a swallowed rejection here made
+	// a crashed run look green under the plain-Node runner.
+	run().catch((err) => {
+		console.error("[suite] run failed:", err);
+		process.exitCode = 1;
+	});
 }

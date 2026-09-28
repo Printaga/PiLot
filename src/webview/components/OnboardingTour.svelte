@@ -53,12 +53,16 @@
   ];
 
   const isLast = $derived(step === steps.length - 1);
+  // Clamp the index so a corrupted/Out-of-range `step` can never read
+  // `steps[step]` as undefined and crash the render.
+  const safeStep = $derived(Math.min(Math.max(0, step), steps.length - 1));
+  const currentStep = $derived(steps[safeStep] ?? steps[0]);
 
   function next() {
     if (isLast) {
       onComplete();
     } else {
-      step++;
+      step = Math.min(step + 1, steps.length - 1);
     }
   }
 
@@ -71,6 +75,12 @@
     if (e.key === "ArrowRight" || e.key === "Enter") next();
     if (e.key === "ArrowLeft") prev();
   }
+
+  /** Svelte action: move focus into the dialog on mount (a modal dialog that
+   *  doesn't take focus is invisible to keyboard and screen-reader users). */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
 </script>
 
 <div
@@ -81,6 +91,7 @@
   tabindex="-1"
   onclick={onDismiss}
   onkeydown={handleKeydown}
+  use:focusOnMount
 >
   <div
     class="onboarding-card"
@@ -103,12 +114,12 @@
 
     <div class="step-indicator">
       {#each steps as _, i (i)}
-        <span class="step-dot" class:active={i === step} class:completed={i < step}></span>
+        <span class="step-dot" class:active={i === safeStep} class:completed={i < safeStep}></span>
       {/each}
     </div>
 
-    <h2 class="step-title">{steps[step].title}</h2>
-    <p class="step-content">{steps[step].content}</p>
+    <h2 class="step-title">{currentStep.title}</h2>
+    <p class="step-content">{currentStep.content}</p>
 
     <div class="step-nav">
       <button class="nav-btn" onclick={prev} disabled={step === 0}>

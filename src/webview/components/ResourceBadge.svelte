@@ -10,6 +10,9 @@
   let { type, count, previousCount = 0, title, onClick }: Props = $props();
 
   let showTooltip = $state(false);
+  // Unique id for aria-describedby so screen readers announce the tooltip text
+  // when the badge receives focus (previously the tooltip was invisible to AT).
+  const tooltipId = `resource-badge-tooltip-${Math.random().toString(36).slice(2, 10)}`;
 
   const hasChanged = $derived(previousCount !== count && previousCount > 0);
 
@@ -37,13 +40,21 @@
 {#if count > 0}
   <div
     class="resource-badge-wrapper"
-    role="group"
+    role="presentation"
     onmouseenter={() => (showTooltip = true)}
     onmouseleave={() => (showTooltip = false)}
     onfocusin={() => (showTooltip = true)}
     onfocusout={() => (showTooltip = false)}
   >
-    <button class="resource-badge" class:changed={hasChanged} data-type={type} onclick={onClick}>
+    <!-- role=presentation: the wrapper exists only to hover/show the tooltip;
+         the interactive element is the button inside. -->
+    <button
+      class="resource-badge"
+      class:changed={hasChanged}
+      data-type={type}
+      onclick={onClick}
+      aria-describedby={showTooltip && title ? tooltipId : undefined}
+    >
       <svg
         width="12"
         height="12"
@@ -60,7 +71,7 @@
       {/if}
     </button>
     {#if showTooltip && title}
-      <div class="custom-tooltip" role="tooltip">
+      <div class="custom-tooltip" role="tooltip" id={tooltipId}>
         {#each title.split("\n") as line, i (i)}
           <div class="tooltip-line">{line}</div>
         {/each}

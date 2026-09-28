@@ -15,13 +15,50 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-function resolveBaseRef() {
-	if (process.env.FALLOW_BASE_REF) return process.env.FALLOW_BASE_REF;
+/** Abort with the audit's "invocation error" exit code and a reason. */
+function invocationError(reason) {
+	console.error(`fallow-audit: ${reason}`);
+	process.exit(2);
+}
+
+/** True when the probe never ran to completion (spawn failure or signal). */
+function hasSpawnAnomaly(head) {
+	return Boolean(head.error || head.signal);
+}
+
+/** Human-readable reason for a spawn anomaly (only valid after the check). */
+function anomalyReason(head) {
+	if (head.error) return `git probe failed: ${head.error.message}`;
+	return `git probe terminated by signal ${head.signal}`;
+}
+
+/**
+ * Read the probe result; null means "no answer" (non-zero status), while any
+ * spawn failure or signal termination aborts with the invocation-error exit
+ * code instead of silently degrading to the origin/main fallback.
+ */
+function probeAnswer(head) {
+	if (hasSpawnAnomaly(head)) invocationError(anomalyReason(head));
+	if (head.status === 0 && head.stdout.trim()) return head.stdout.trim();
+	return null;
+}
+
+/** Probe the repo's default branch via git; null when unresolvable. */
+function probeGitDefaultBranch() {
 	const head = spawnSync("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
 		encoding: "utf8",
 	});
-	if (head.status === 0 && head.stdout.trim()) return head.stdout.trim();
-	return "origin/main";
+	// A signal-terminated or spawn-failed probe is not "no result": don't
+	// silently fall through to origin/main with a generic code.
+	return probeAnswer(head);
+}
+
+function envBaseRef() {
+	return process.env.FALLOW_BASE_REF || null;
+}
+
+function resolveBaseRef() {
+	return envBaseRef() ?? probeGitDefaultBranch() ?? "origin/main";
 }
 
 const base = resolveBaseRef();
@@ -51,7 +88,21 @@ const args = [
 ];
 console.log(`fallow audit --base ${base}`);
 const result = spawnSync("pnpm", args, { stdio: "inherit" });
-const code = result.status ?? 2;
+if (result.error) {
+	console.error(`\n✖ fallow audit could not run pnpm: ${result.error.message}`);
+	process.exit(2);
+}
+if (result.signal) {
+	console.error(
+		`\n✖ fallow audit terminated by signal ${result.signal} — not a quality verdict.`,
+	);
+	process.exit(2);
+}
+const code = result.status;
+if (code === null) {
+	console.error("\n✖ fallow audit exited without a status — check the Fallow invocation.");
+	process.exit(2);
+}
 if (code === 1) {
 	console.error(
 		`\n✖ fallow audit gate FAILED (findings against ${base}). Fix the findings or agree on a recorded baseline before merging.`,

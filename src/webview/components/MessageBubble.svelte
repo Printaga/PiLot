@@ -60,6 +60,17 @@
   let copiedCode = $state(false);
   let copiedMessage = $state(false);
   let showAbsoluteTime = $state(false);
+  // Root element of the latest markdown render (used to attach click handlers).
+  let markdownRoot = $state<HTMLElement | null>(null);
+
+  // setTimeout handles for the copy-feedback flags — cleared on unmount so a
+  // destroyed component can never write to its state after it is gone.
+  let copyCodeTimer: ReturnType<typeof setTimeout> | undefined;
+  let copyMessageTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => () => {
+    clearTimeout(copyCodeTimer);
+    clearTimeout(copyMessageTimer);
+  });
 
   function openLightbox(dataUrl: string) {
     lightboxImage = dataUrl;
@@ -72,7 +83,8 @@
   function copyCode(code: string) {
     navigator.clipboard.writeText(code);
     copiedCode = true;
-    setTimeout(() => (copiedCode = false), 1500);
+    clearTimeout(copyCodeTimer);
+    copyCodeTimer = setTimeout(() => (copiedCode = false), 1500);
   }
 
   function applyCode(code: string) {
@@ -92,7 +104,8 @@
   function copyMessage() {
     navigator.clipboard.writeText(message.content);
     copiedMessage = true;
-    setTimeout(() => (copiedMessage = false), 1500);
+    clearTimeout(copyMessageTimer);
+    copyMessageTimer = setTimeout(() => (copiedMessage = false), 1500);
   }
 
   function openInEditor(code: string, language: string) {
@@ -241,8 +254,16 @@
     "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z";
   const clipboardSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
+  /** Escape a value for interpolation into an HTML *attribute* (double-quoted):
+   *  escapes &, <, >, double and single quotes so a hostile slug/URL/text cannot
+   *  break out of the attribute and inject markup or handlers. */
   function escapeHtml(text: string): string {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   /** Render a markdown string to HTML. Handles the rich formatting the PI agent outputs. */
@@ -280,8 +301,10 @@
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/(^-|-$)/g, "");
         const headerText = renderInline(headerMatch[2], searchRegex);
-        // Anchor link pill that appears on hover — copies #slug to clipboard
-        const anchorHtml = `<a class="md-header-anchor" href="#${slug}" onclick="event.preventDefault();navigator.clipboard.writeText(location.href.replace(/#.*/,'')+'#${slug}');this.nextElementSibling?.classList.add('anchor-copied');setTimeout(()=>this.nextElementSibling?.classList.remove('anchor-copied'),1500)" title="Copy link to this section">#</a><span class="anchor-copy-toast">Copied!</span>`;
+        // Anchor link pill that appears on hover — copies #slug to clipboard.
+        // No inline handler: the copy behavior is attached after injection via
+        // copyHeaderAnchor(), which also keeps the CSP free of 'unsafe-inline'.
+        const anchorHtml = `<a class="md-header-anchor" href="#${slug}" data-anchor-slug="${slug}" title="Copy link to this section">#</a><span class="anchor-copy-toast">Copied!</span>`;
         htmlParts.push(
           `<h${level} class="md-h" id="${slug}">${anchorHtml}${headerText}</h${level}>`,
         );
@@ -375,19 +398,69 @@
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     // Italic
     html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    // Links [text](url)
+    // Links [text](url). href is attribute-escaped with escapeHtml (which now
+    // covers quotes), and javascript:/data: URLs are refused outright so a
+    // crafted link cannot execute script in the webview.
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
-      if (url.startsWith("#")) {
-        // Fragment link — scroll to matching header inside this message bubble
-        const slug = url.slice(1);
-        return `<a class="md-link md-fragment-link" href="${escapeHtml(url)}" onclick="event.preventDefault();const t=this.closest('.message-content')?.querySelector('[id=&quot;${escapeHtml(slug)}&quot;]');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});" rel="noopener">${escapeHtml(text)}</a>`;
+      const rawUrl = String(url);
+      if (rawUrl.startsWith("#")) {
+        // Fragment link — scroll to matching header inside this message bubble.
+        const slug = rawUrl.slice(1);
+        return `<a class="md-link md-fragment-link" href="${escapeHtml(rawUrl)}" data-fragment-target="${escapeHtml(slug)}" rel="noopener">${escapeHtml(text)}</a>`;
       }
-      return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+      if (!isSafeLinkUrl(rawUrl)) {
+        return `<span class="md-link md-link-blocked" title="Link blocked for safety">${escapeHtml(text)}</span>`;
+      }
+      return `<a class="md-link" href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
     });
     // Line breaks (single newlines within paragraphs)
     html = html.replace(/\n/g, "<br>");
     return html;
   }
+
+  /** Only allow http(s), mailto, and in-page fragments — anything else
+   *  (javascript:, data:, vbscript:, file:, …) is refused in rendered markdown. */
+  function isSafeLinkUrl(url: string): boolean {
+    const trimmed = url.trim().toLowerCase();
+    return /^https:\/\//.test(trimmed) || /^mailto:/.test(trimmed);
+  }
+
+  /** Attach the click handlers for header anchors and fragment links after the
+   *  markdown HTML lands in the DOM. Replaces the previous inline onclick
+   *  attributes, which forced `script-src 'unsafe-inline'` in the webview CSP. */
+  function attachMarkdownHandlers(root: HTMLElement): void {
+    for (const anchor of root.querySelectorAll<HTMLAnchorElement>(".md-header-anchor")) {
+      anchor.addEventListener("click", (event) => {
+        event.preventDefault();
+        const slug = anchor.dataset.anchorSlug || "";
+        navigator.clipboard
+          .writeText(location.href.replace(/#.*/, "") + "#" + slug)
+          .then(() => {
+            const toast = anchor.nextElementSibling;
+            if (toast?.classList.contains("anchor-copy-toast")) {
+              toast.classList.add("anchor-copied");
+              setTimeout(() => toast.classList.remove("anchor-copied"), 1500);
+            }
+          })
+          .catch(() => {});
+      });
+    }
+    for (const link of root.querySelectorAll<HTMLAnchorElement>(".md-fragment-link")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        const slug = link.dataset.fragmentTarget || "";
+        const target = root.querySelector(`[id="${CSS.escape(slug)}"]`);
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
+  // Wire the delegated handlers after each render of markdown-bearing HTML.
+  $effect(() => {
+    const root = markdownRoot;
+    if (!root) return;
+    attachMarkdownHandlers(root);
+  });
 
   function renderToolResult(toolCall: ToolCallMessage): string {
     const details = toolCall.result?.details;
@@ -721,7 +794,7 @@
         <span>{@html highlightEscapedText(escapeHtml(message.content))}</span>
       </div>
     {:else}
-      <div class="content-body">
+      <div class="content-body" bind:this={markdownRoot}>
         {#if message.role === "assistant" && message.thinking}
           <div class="thought-container" class:expanded={thinkingExpanded}>
             <button

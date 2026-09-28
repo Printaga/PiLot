@@ -8,12 +8,15 @@
 //
 // This ensures root .md files are discovered as individual skills in ALL locations,
 // not just in .pi/skills/ directories.
+//
+// Implementation notes: everything runs through node:fs (no shell), so paths from
+// any source are inert and the script also works on Windows.
 
-import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Stub for the corrupt upstream photon.js. The original is a WASM (photon-rs)
 // image lib loader; every consumer null-checks the returned photon handle, so
@@ -27,16 +30,29 @@ export async function loadPhoton() {
 export default { loadPhoton };
 `;
 
-function findFiles(pattern) {
+/** Depth-first search under `dir` for files whose relative path matches
+ * `relativePattern` (e.g. "@earendil-works/pi-coding-agent/dist/utils/photon.js"). */
+function findFilesUnder(dir, relativePattern, depth = 0, out = []) {
+	if (depth > 12) return out; // bounded: node_modules nesting never goes deeper
+	let entries;
 	try {
-		const out = execSync(
-			`find "${root}/node_modules" -path "*/${pattern}" -type f 2>/dev/null`,
-			{ encoding: "utf-8", timeout: 10_000 },
-		);
-		return out.trim().split("\n").filter(Boolean);
+		entries = readdirSync(dir, { withFileTypes: true });
 	} catch {
-		return [];
+		return out; // unreadable/missing dir: nothing to find here
 	}
+	for (const entry of entries) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			findFilesUnder(full, relativePattern, depth + 1, out);
+		} else if (path.relative(dir, full).replace(/\\/g, "/") === relativePattern) {
+			out.push(full);
+		}
+	}
+	return out;
+}
+
+function findFiles(pattern) {
+	return findFilesUnder(path.join(root, "node_modules"), pattern);
 }
 
 function patchAgentsMode() {
@@ -49,10 +65,7 @@ function patchAgentsMode() {
 	let patched = 0;
 	for (const file of files) {
 		try {
-			const content = execSync(`cat "${file}"`, {
-				encoding: "utf-8",
-				timeout: 5000,
-			});
+			const content = readFileSync(file, "utf-8");
 			const next = content
 				.replace(
 					'collectAutoSkillEntries(agentsSkillsDir, "agents")',
@@ -68,7 +81,9 @@ function patchAgentsMode() {
 				patched++;
 			}
 		} catch (err) {
-			process.stderr.write(`[patch] fail ${file}: ${err.message}\n`);
+			process.stderr.write(
+				`[patch] fail ${file}: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
 		}
 	}
 	process.stdout.write(`[patch] pi-coding-agent agents→pi mode: ${patched} file(s)\n`);
@@ -84,22 +99,25 @@ function patchPhotonStub() {
 	let patched = 0;
 	for (const file of files) {
 		try {
-			const content = execSync(`head -c 16 "${file}"`, {
-				encoding: "utf-8",
-				timeout: 5000,
-			});
+			// Read the first 16 bytes as a Buffer (never utf-8): a healthy file
+			// starts with ASCII JS, the corrupt upstream file starts with binary
+			// bytes, and decoding binary garbage as text can throw.
+			const head = Buffer.from(readFileSync(file)).subarray(0, 16);
 			// Healthy photon.js starts with our stub comment or JS code.
 			// The corrupt upstream file starts with binary bytes (e.g. 0xe8...).
+			const headAscii = head.toString("latin1");
 			const startsJs =
-				content.startsWith("//") ||
-				content.startsWith("/*") ||
-				/^[A-Za-z_'"`]/.test(content);
+				headAscii.startsWith("//") ||
+				headAscii.startsWith("/*") ||
+				/^[A-Za-z_'"`]/.test(headAscii);
 			if (!startsJs) {
 				writeFileSync(file, PHOTON_STUB, "utf-8");
 				patched++;
 			}
 		} catch (err) {
-			process.stderr.write(`[patch] photon fail ${file}: ${err.message}\n`);
+			process.stderr.write(
+				`[patch] photon fail ${file}: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
 		}
 	}
 	process.stdout.write(`[patch] pi-coding-agent photon stub: ${patched} file(s)\n`);

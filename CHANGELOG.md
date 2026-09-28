@@ -2,6 +2,38 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- Replaced shell-string `execSync` interpolation with argv-array `execFileSync` / `node:fs` in `postinstall-patch.mjs`, `native-addons.ts`, and the VS Code download/clean-up scripts (command/shell injection).
+- Escaped quotes in `MessageBubble`'s `escapeHtml`, stopped emitting inline `onclick` attributes, and tightened the webview CSP (no `unsafe-inline`, explicit `connect-src`) — closes the attribute-injection XSS vector.
+- Removed the remote Google Fonts `@import` from the webview styles (blocked by CSP anyway; leaked a request per load).
+- Constrained `@mention` file resolution in `session-resources.ts` to the workspace root (path traversal like `@../../etc/passwd`).
+- Constrained `MOCHA_TEST_FILE` resolution in the test scaffold and sub-path imports in `loader.cjs` against escaping their intended roots.
+- All webview `message` handlers (`ContextIndicator`, `PiPackagesPanel`, `SessionTree`, `VoiceCapture`) now validate `event.data` shape via a shared guard before trusting payloads.
+- `message-serializer.ts` no longer trusts untyped upstream payload shapes (defensive parsing before serialization).
+
+### Fixed
+
+- `pi-binary.ts`: bare-name `pi` lookup now resolves again (spawned a shell builtin with `shell: false`); arg-env quoting hardened.
+- `loader.cjs`: fixed the `@earendel-works` package-name typo, extracted doc URLs to constants, added timeouts to `which`/`where` probes, hooked `Module._resolveFilename` without leaking a process-wide duplicate hook, and resolved bare imports via the package `exports` map before guessing `dist/index.js`.
+- `shell.ts`: Windows callers can no longer hit cmd.exe `shell: true` interpolation (quoting seam enforced).
+- `verify.mjs` / `fallow-audit.mjs`: signal-terminated and spawn-failed runs are reported distinctly instead of collapsing into a generic exit code; `result.error` is no longer ignored (fail-open CI).
+- `run-node-tests.mjs`, `runTest.ts`, test scaffold: watchdog/no-result paths now exit non-zero — no more green CI for failed or misconfigured runs; each test file gets a pid-suffixed tmpdir (parallel-safe) and VS Code discovery is cross-platform instead of hardcoded.
+- `dl-tmp.mjs` / `dl-vscode.mjs`: top-level awaits are handled; VS Code version comes from env/config instead of a hardcoded 1.85.0.
+- `run-clean.mjs`: removed the machine-specific `/home/lenovo/...` path; VS Code discovery matches `runTest.ts`.
+- `session-manager.ts`: multi-session delete now settles per item, reporting which sessions failed and why, instead of failing the whole batch.
+- `voice-manager.ts`: temp recording files are cleaned up and stdio listeners detached on stop/dispose.
+- `MermaidDiagram`: render cache is capped with eviction; stale async renders can no longer overwrite a newer diagram.
+- `MessageBubble`: markdown re-render effect no longer loops unboundedly; tool-call state is cleared on stream errors and new sessions in `App.svelte`.
+- `PiPackagesPanel`: registry lookups are batched (no N+1 fan-out), stale responses are discarded, install log is capped, and the installing overlay can no longer deadlock.
+- `Toast` timers are cleared on unmount and the stack is capped; `ContextIndicator` clamps percent to 0–100; `OnboardingTour` guards step bounds.
+- Accessibility: tooltips wired via `aria-describedby`, `role="button"` handles Space, dialogs focusable; `prefers-reduced-motion` respected by `ActivityBar` and `SkeletonLoader` animations.
+- Test mocks: `pi-sdk-mocks` Proxy is overrideable and `disposeCalls` tracks; `session-mock` no longer double-registers handlers or force-casts; `vscode-facade` fires listeners exactly once.
+- Deduplicated `PiAgentConfig`/`ThinkingLevel`/`SessionNode` definitions and the cross-component `sendMessage` helper (shared in `webview/messages.ts`); native-addon ABI scan logic consolidated.
+- `pnpm-workspace.yaml`: removed invalid `allowBuilds`/`minimumReleaseAgeExclude` keys; `.vscodeignore` no longer ships nested `.env`/secret files and keeps shared `.vscode` config; removed redundant tsconfig globs/excludes; removed dead `wrapperEl` in `HelpTooltip`.
+
 ## [2.6.0] - 2026-09-18
 
 ### Added

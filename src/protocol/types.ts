@@ -1,5 +1,14 @@
 // ── Message protocol types shared between extension host and webview ─────────
 
+import { type ThinkingLevel } from "../webview/types/index.js";
+
+/**
+ * The set of thinking levels as a plain union, derived from the single ordered
+ * source of truth (THINKING_LEVELS in model-registry-handler). Declaring the
+ * union by hand here duplicated webview/types' ThinkingLevel and drifted.
+ */
+export type ProtocolThinkingLevel = ThinkingLevel;
+
 /** Messages the webview sends to the extension host */
 export interface WebviewMessage {
 	type: string;
@@ -34,9 +43,7 @@ export interface ProviderApi {
 	navigateTree(nodeId: string): Promise<void>;
 	setSessionName(name: string): Promise<void>;
 	setModel(modelId: string): Promise<void>;
-	setThinkingLevel(
-		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
-	): Promise<void>;
+	setThinkingLevel(level: ProtocolThinkingLevel): Promise<void>;
 	getPiUISettings(): Promise<{ showCacheMissNotices: boolean }>;
 	setPiUISetting(key: "showCacheMissNotices", value: boolean): Promise<void>;
 	steer(text: string, images?: unknown[]): Promise<void>;
@@ -55,7 +62,7 @@ export interface ProviderApi {
 	getExtensionVersion(): string;
 	getPiCliVersion(): Promise<string | null>;
 	isBinaryAvailable(): boolean;
-	getThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+	getThinkingLevel(): ProtocolThinkingLevel;
 	getFavorites(): string[];
 	getProviderAuthData(): Promise<
 		Array<{

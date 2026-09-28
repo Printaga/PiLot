@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { parseHostMessage, asArray, asString, asNumber, postToHost } from "../messages";
 
   interface MarketplacePackage {
     name: string;
@@ -50,6 +51,13 @@
   let showLoadingOverlay = $state(false);
   let outputText = $state("");
   let disabledPackages = $state(new Set<string>());
+  /** Bumped by fetchMarketplacePackages; a stale batch application (an older
+   *  fan-out resolving after a newer refresh) is dropped instead of clobbering. */
+  let marketplaceFetchSeq = 0;
+  /** Monotonic guard so a lost "loading: false" event can't deadlock the overlay. */
+  let overlaySafetyTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Upper bound on accumulated package-manager output shown in the overlay. */
+  const MAX_OUTPUT_CHARS = 20_000;
 
   // Computed: filtered and sorted marketplace packages
   let filteredPackages = $derived(
@@ -115,7 +123,7 @@
   }
 
   function sendMessage(msg: any) {
-    getVsCodeApi()?.postMessage(msg);
+    postToHost(msg);
   }
 
   function npmUrl(name: string): string {
@@ -140,71 +148,116 @@
     return types.length > 0 ? types : [];
   }
 
+  /** Shape-check one npm search result; null for malformed registry entries. */
+  function toMarketplacePackage(o: any): MarketplacePackage | null {
+    const pkg = o?.package ?? {};
+    if (typeof pkg.name !== "string" || pkg.name.length === 0) return null;
+    return {
+      name: pkg.name,
+      description: asString(pkg.description),
+      version: asString(pkg.version),
+      publisher: asString(pkg.publisher?.username ?? pkg.author?.name),
+      monthlyDownloads: asNumber(o?.downloads?.monthly, 0),
+      flagged: false,
+      types: ["unknown"],
+      updated: asString(pkg.date),
+    };
+  }
+
+  /**
+   * Fetch full manifests for one batch and copy the discovered pi types into
+   * the (shared, mutable) package entries. The npm search API does not include
+   * the pi object — only the full manifest has extensions/skills/prompts/themes.
+   */
+  async function applyBatchTypes(batch: MarketplacePackage[]) {
+    const manifests = await Promise.all(
+      batch.map((pkg) =>
+        fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`)
+          .then((r) => r.json())
+          .catch(() => ({})),
+      ),
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const types = extractPiTypes(manifests[j]);
+      if (types.length > 0) {
+        batch[j].types = types;
+      }
+    }
+    // Trigger reactivity after each batch
+    marketplacePackages = [...marketplacePackages];
+  }
+
   async function fetchMarketplacePackages() {
     marketplaceLoading = true;
     marketplaceError = null;
+    const fetchSeq = ++marketplaceFetchSeq;
     try {
       const res = await fetch(
         "https://registry.npmjs.org/-/v1/search?text=keywords:pi-package&size=250",
       );
       const data = await res.json();
-      const searchResults: any[] = data.objects || [];
+      // Validate each registry entry instead of trusting its shape.
+      const packages = asArray(data.objects)
+        .map(toMarketplacePackage)
+        .filter((p): p is MarketplacePackage => p !== null);
 
-      // Build initial packages with unknown types from search results
-      const packages: MarketplacePackage[] = searchResults.map((o: any) => ({
-        name: o.package.name,
-        description: o.package.description || "",
-        version: o.package.version || "",
-        publisher: o.package.publisher?.username || o.package.author?.name || "",
-        monthlyDownloads: o.downloads?.monthly || 0,
-        flagged: false,
-        types: ["unknown"],
-        updated: o.package.date || "",
-      }));
-
+      if (fetchSeq !== marketplaceFetchSeq) return;
       marketplacePackages = packages;
 
-      // Fetch full manifests in batches to extract actual pi types.
-      // The npm search API does not include the pi object —
-      // only the full package manifest has extensions/skills/prompts/themes.
       const BATCH_SIZE = 20;
       for (let i = 0; i < packages.length; i += BATCH_SIZE) {
-        const batch = packages.slice(i, i + BATCH_SIZE);
-        const manifests = await Promise.all(
-          batch.map((pkg) =>
-            fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`)
-              .then((r) => r.json())
-              .catch(() => ({})),
-          ),
-        );
-        for (let j = 0; j < batch.length; j++) {
-          const types = extractPiTypes(manifests[j]);
-          if (types.length > 0) {
-            batch[j].types = types;
-          }
-        }
-        // Trigger reactivity after each batch
-        marketplacePackages = [...marketplacePackages];
+        if (fetchSeq !== marketplaceFetchSeq) return; // superseded by a newer fetch
+        await applyBatchTypes(packages.slice(i, i + BATCH_SIZE));
+        if (fetchSeq !== marketplaceFetchSeq) return;
       }
     } catch (e) {
+      if (fetchSeq !== marketplaceFetchSeq) return;
       console.error("Failed to fetch marketplace packages:", e);
       marketplaceError = e instanceof Error ? e.message : String(e);
       marketplacePackages = [];
     } finally {
-      marketplaceLoading = false;
+      if (fetchSeq === marketplaceFetchSeq) {
+        marketplaceLoading = false;
+      }
     }
+  }
+
+  function appendOutput(text: string) {
+    // Cap accumulation: a chatty install previously grew `outputText` without
+    // bound for the lifetime of the webview.
+    outputText =
+      outputText.length > MAX_OUTPUT_CHARS
+        ? outputText.slice(outputText.length - MAX_OUTPUT_CHARS) + text
+        : outputText + text;
+  }
+
+  function armOverlaySafetyTimer() {
+    clearTimeout(overlaySafetyTimer);
+    // If the extension host never sends `loading: false` (crash, lost message),
+    // release the modal after a generous timeout so the panel can't deadlock.
+    overlaySafetyTimer = setTimeout(
+      () => {
+        if (showLoadingOverlay) {
+          showLoadingOverlay = false;
+          appendOutput("\n[operation timed out waiting for the package manager]");
+        }
+      },
+      10 * 60 * 1000,
+    );
   }
 
   async function installPackage(pkgName: string) {
     sendMessage({ type: "installPackage", data: { source: `npm:${pkgName}` } });
     showLoadingOverlay = true;
     outputText = `Installing ${pkgName}...\n`;
+    armOverlaySafetyTimer();
   }
 
   async function removePackage(source: string) {
     sendMessage({ type: "uninstallPackage", data: { source } });
     showLoadingOverlay = true;
     outputText = `Removing ${source}...\n`;
+    armOverlaySafetyTimer();
   }
 
   function isPackageEnabled(pkg: InstalledPackage): boolean {
@@ -220,6 +273,7 @@
     sendMessage({ type: "updateResources" });
     showLoadingOverlay = true;
     outputText = "Updating packages...\n";
+    armOverlaySafetyTimer();
   }
 
   async function refreshInstalled() {
@@ -236,23 +290,37 @@
     if (!vscode) return;
 
     function handleMessage(event: MessageEvent) {
-      const { type, data } = event.data;
+      // Validate the envelope before use: a forged message could previously
+      // replace the installed list, toggle arbitrary packages, or throw on a
+      // non-object payload.
+      const msg = parseHostMessage(event);
+      if (!msg) return;
+      const { type, data } = msg;
       if (type === "installed") {
-        installedPackages = data || [];
+        installedPackages = asArray<InstalledPackage>(data.installed).filter(
+          (p): p is InstalledPackage =>
+            !!p && typeof p === "object" && typeof (p as InstalledPackage).source === "string",
+        );
       }
       if (type === "loading") {
-        showLoadingOverlay = data?.loading;
-        if (!data?.loading) {
+        const loading = data.loading === true;
+        showLoadingOverlay = loading;
+        if (!loading) {
+          clearTimeout(overlaySafetyTimer);
           setTimeout(() => {
             refreshInstalled();
           }, 100);
+        } else {
+          armOverlaySafetyTimer();
         }
       }
       if (type === "output") {
-        outputText += data?.text || "";
+        appendOutput(asString(data.text));
       }
       if (type === "resource-toggles-changed") {
-        disabledPackages = new Set(data?.disabledPackages || []);
+        disabledPackages = new Set(
+          asArray<string>(data.disabledPackages, (v): v is string => typeof v === "string"),
+        );
       }
       if (type === "packages-updated") {
         refreshInstalled();
@@ -262,7 +330,10 @@
       }
     }
     window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      clearTimeout(overlaySafetyTimer);
+    };
   });
 
   onMount(() => {
@@ -270,7 +341,7 @@
     vscode?.postMessage({ type: "listPackages" });
     vscode?.postMessage({ type: "getResourceToggles" });
 
-    fetchMarketplacePackages();
+    void fetchMarketplacePackages();
   });
 </script>
 

@@ -22,6 +22,9 @@ export interface AgentSessionMock {
 	events?: any[];
 }
 
+/** Structural view of what subscribe() receives, so handlers are typed instead of `any`. */
+type SessionEventHandler = (event: unknown) => void;
+
 export interface ExtensionRunnerMock {
 	setUIContext: (ctx: unknown) => void;
 	getExtensionPaths?: () => string[];
@@ -64,9 +67,9 @@ export function createSessionMock(options?: {
 		abort: async () => {},
 		compact: async () => ({}),
 		editMessage: async () => {},
-		getContextUsage: () => ({ used: 0, total: 0 }) as any,
-		getSessionStats: () => ({}) as any,
-		_replaceMessageInPlace: async () => ({}) as any,
+		getContextUsage: () => ({ used: 0, total: 0 }),
+		getSessionStats: () => ({}),
+		_replaceMessageInPlace: async () => ({}),
 		sessionManager: {
 			getCwd: () => "/fake/workspace",
 			getBranch: () => [],
@@ -76,11 +79,12 @@ export function createSessionMock(options?: {
 		} as any,
 		events: options?.events ?? [],
 	};
-	mock.subscribe = (handler: any) => {
-		mock.events?.push(handler);
-		if (options?.events) {
-			options.events.push(handler);
-		}
+	// Register the handler exactly once. The previous implementation pushed it
+	// onto both `mock.events` AND `options.events`, but when the caller passed
+	// `options.events` those are the SAME array — double registration, so every
+	// emitted event fired handlers twice and double-counted test expectations.
+	mock.subscribe = (handler: SessionEventHandler) => {
+		(mock.events as SessionEventHandler[]).push(handler);
 	};
 	return mock;
 }
