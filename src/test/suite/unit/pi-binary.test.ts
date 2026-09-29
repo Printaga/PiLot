@@ -258,13 +258,12 @@ suite("pi-binary: resolvePiBinary", () => {
 		});
 	});
 
-	test("returns null when no pi binary is found and spawnSync fails", async () => {
+	test("returns null when no pi binary exists in candidates or on PATH", async () => {
 		const origConfig = vscodeModule.workspace.getConfiguration as any;
-		const shellModule = await import("../../../utils/shell.js");
-		const origExecFileAsync = shellModule.shellInternals.execFileAsync;
-		const origSpawnSync = piBinaryInternals.spawnSync;
 		const origAccessSync = piBinaryInternals.accessSync;
-		// Simulate a machine where none of the well-known candidate paths exist.
+		// Simulate a machine where no pi binary exists anywhere: every candidate
+		// and every PATH entry fails the executable check. The bare-name branch
+		// scans PATH directly (no shell), so accessSync is the only seam needed.
 		piBinaryInternals.accessSync = () => {
 			throw new Error("ENOENT");
 		};
@@ -275,50 +274,49 @@ suite("pi-binary: resolvePiBinary", () => {
 				update: async () => {},
 			}) as any;
 
-		// Mock spawnSync so `command -v "pi"` returns empty (status = 1)
-		(piBinaryInternals as any).spawnSync = (_cmd: string, _args: string[], opts?: any) => ({
-			status: 1,
-			stdout: Buffer.from(""),
-			stderr: Buffer.from(""),
-			...opts,
-		});
-
 		try {
 			const result = resolvePiBinary();
 			assert.strictEqual(result, null);
 		} finally {
 			(vscodeModule.workspace.getConfiguration as any) = origConfig;
-			(piBinaryInternals as any).spawnSync = origSpawnSync;
 			piBinaryInternals.accessSync = origAccessSync;
-			shellModule.shellInternals.execFileAsync = origExecFileAsync;
 		}
 	});
 
-	test("returns null when spawnSync throws an exception", async () => {
-		const origConfig = vscodeModule.workspace.getConfiguration as any;
-		const origSpawnSync = piBinaryInternals.spawnSync;
-		const origAccessSync2 = piBinaryInternals.accessSync;
-		piBinaryInternals.accessSync = () => {
-			throw new Error("ENOENT");
-		};
-		(piBinaryInternals as any).spawnSync = (_cmd: string, _args: string[], _opts?: any) => {
-			throw new Error("spawnSync crashed");
-		};
+	test("resolves a bare name by scanning PATH without spawning a shell", async () => {
+		if (process.platform === "win32") return; // POSIX-only branch
 
-		(vscodeModule.workspace.getConfiguration as any) = (_section?: string) =>
-			({
-				get: (_key: string, defaultValue?: any): any => defaultValue,
-				update: async () => {},
-			}) as any;
+		withTmpDir("pilot-path-scan-", (tmpDir) => {
+			const fakeBin = path.join(tmpDir, "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\necho ok");
+			fs.chmodSync(fakeBin, 0o755);
 
-		try {
-			const result = resolvePiBinary();
-			assert.strictEqual(result, null);
-		} finally {
-			(vscodeModule.workspace.getConfiguration as any) = origConfig;
-			(piBinaryInternals as any).spawnSync = origSpawnSync;
-			piBinaryInternals.accessSync = origAccessSync2;
-		}
+			const origConfig = vscodeModule.workspace.getConfiguration as any;
+			const origPath = process.env.PATH;
+			const origAccessSync = piBinaryInternals.accessSync;
+			(vscodeModule.workspace.getConfiguration as any) = (_section?: string) =>
+				({
+					get: (_key: string, defaultValue?: any): any => defaultValue,
+					update: async () => {},
+				}) as any;
+			process.env.PATH = `${tmpDir}${path.delimiter}${origPath ?? ""}`;
+			// Only the temp-dir binary passes the executable check, so the result
+			// is deterministic even if the host has a real pi installed.
+			piBinaryInternals.accessSync = (p: any, _mode?: any) => {
+				if (p === fakeBin) return;
+				throw new Error("ENOENT");
+			};
+
+			try {
+				const result = resolvePiBinary();
+				assert.strictEqual(result, fakeBin);
+			} finally {
+				(vscodeModule.workspace.getConfiguration as any) = origConfig;
+				if (origPath === undefined) delete process.env.PATH;
+				else process.env.PATH = origPath;
+				piBinaryInternals.accessSync = origAccessSync;
+			}
+		});
 	});
 });
 

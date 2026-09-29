@@ -7,6 +7,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 ### Added
 
 - **System Prompt tab** (new sidebar button, keyboard shortcut 8): shows the full, live system prompt the model receives for the active session — including SYSTEM.md, settings overrides, and per-run extension modifications — with copy-to-clipboard, word wrap, and size metadata. Updates automatically when a new run starts; shows a friendly empty state before a session exists.
+- Added a real-host integration test that boots the shipped `dist/webview` build in a live VS Code webview panel and proves the enforced CSP end-to-end: the ready handshake and packages-panel round trip complete, both npm registry fetches are allowed, and cross-origin fetches are blocked.
 
 ### Security
 
@@ -17,10 +18,15 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Constrained `MOCHA_TEST_FILE` resolution in the test scaffold and sub-path imports in `loader.cjs` against escaping their intended roots.
 - All webview `message` handlers (`ContextIndicator`, `PiPackagesPanel`, `SessionTree`, `VoiceCapture`) now validate `event.data` shape via a shared guard before trusting payloads.
 - `message-serializer.ts` no longer trusts untyped upstream payload shapes (defensive parsing before serialization).
+- The webview CSP in `index.html` is now kept authoritative instead of being stripped by the host: `webview.cspSource` is substituted for `'self'` at load time, restoring the anti-tracking-pixel (`img-src` without a bare `https:`) and registry-only-fetch guarantees in the shipped webview.
+- Added `base-uri 'self'`, `form-action 'self'`, and `object-src 'none'` to the webview CSP — neither `base-uri` nor `form-action` falls back to `default-src`, so injected `<base>`/`<form>` tags in rendered content were previously unrestricted.
+- Documented the residual `img-src data:` risks in the CSP notes: the renderer must cap accepted URI size/content-type and show a placeholder for blocked images.
+- Bumped the `fast-uri` dependency override to 3.1.7 (GHSA-58mr-gqgx-xq4g, host confusion via an unclosed bracket in the URI authority) in `pnpm-workspace.yaml` and refreshed the lockfile.
 
 ### Fixed
 
 - `pi-binary.ts`: bare-name `pi` lookup now resolves again (spawned a shell builtin with `shell: false`); arg-env quoting hardened.
+- `pi-binary.ts`: bare-name resolution now scans `PATH` directly with `accessSync` instead of running `command -v` through `/bin/sh` (CodeQL `js/shell-command-injection-from-environment`), keeping the first-executable-match semantics with no shell in the loop.
 - `loader.cjs`: fixed the `@earendel-works` package-name typo, extracted doc URLs to constants, added timeouts to `which`/`where` probes, hooked `Module._resolveFilename` without leaking a process-wide duplicate hook, and resolved bare imports via the package `exports` map before guessing `dist/index.js`.
 - `shell.ts`: Windows callers can no longer hit cmd.exe `shell: true` interpolation (quoting seam enforced).
 - `verify.mjs` / `fallow-audit.mjs`: signal-terminated and spawn-failed runs are reported distinctly instead of collapsing into a generic exit code; `result.error` is no longer ignored (fail-open CI).
@@ -77,6 +83,19 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 - Webview `index.html`: removed the bare `https:` wildcard from `img-src`.
 - CI: added a concurrency group, pinned pnpm via `package_json_file`, and installed xvfb for integration tests.
 - Repo hygiene: `.editorconfig` webview indentation, `.husky/pre-commit` shebang with `set -e`, `.prettierignore` for generated dirs, and canonical Apache-2.0 LICENSE text.
+- Restored real outline-based focus indicators for buttons and form controls in `global.css` — scoped component overrides (e.g. ChatPanel's borderless textarea and send button) previously left keyboard focus invisible (WCAG 2.4.7).
+- Wrapped the global button `:active` rule in `:where(...)` to match the hover rule's zero specificity, so the pressed state no longer swallows the focus ring or resists component overrides.
+- Replaced `transition: all` with enumerated properties on the global button and input rules so unintended properties (e.g. layout-affecting class toggles) no longer animate.
+- Removed the focus-time `translate(-2px, -2px)` geometry shift on inputs, which could clip against `overflow: hidden` ancestors and desync adjacent labels.
+- Added a global `prefers-reduced-motion` guard in `global.css` for the hover/active/focus transforms and transitions.
+- Documented the app-shell contract in `global.css` that every scrollable region must set its own `overflow`, since page-level scroll is intentionally disabled.
+- Documented that `--radius-full: 0` is an intentional brutalist-theme choice in `global.css` and must not be set to `9999px` without auditing its consumers.
+- Added base anchor styling (primary color, underline, hover) in `global.css` so unclassed links render legibly on-theme instead of UA-default blue/purple.
+- Webview CSP `connect-src` now includes `'self'` and its notes no longer claim PiPackagesPanel makes a "single" registry fetch (it makes two).
+- CSP notes now record the host-injected nonce'd media-globals script and that the CSP meta tag must not be stripped.
+- Fixed the microphone icon's stem rendering as a diagonal line in `VoiceCapture` (missing `x2` on the SVG `<line>`).
+- `VoiceCapture`'s listening pulse animation now respects `prefers-reduced-motion`, matching `ActivityBar`/`SkeletonLoader`.
+- `VoiceCapture`'s button now sets an explicit `type="button"` so it can't trigger form submission if reused inside a form.
 
 ## [2.6.1] - 2026-09-19
 

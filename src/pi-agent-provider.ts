@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
@@ -666,12 +667,27 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 		// webview resource URIs don't return CORS headers, causing scripts/styles to silently fail.
 		html = html.replace(/crossorigin/gi, "");
 
-		// Remove the hardcoded Content-Security-Policy meta tag — VS Code injects its own
-		// CSP that includes the webview's resource origin (cspSource). A hardcoded 'self'-only
-		// CSP would block the webview resource URIs (https://<uuid>.vscode-resource.vscode-cdn.net).
+		// Make the CSP from src/webview/index.html authoritative instead of stripping it:
+		// VS Code's auto-injected default policy permits `img-src ... https:` (rendered
+		// message content could pull tracking pixels from arbitrary hosts) and has no
+		// connect-src allowance, so the npm registry fetch in PiPackagesPanel would be
+		// blocked. Here 'self' is substituted with the webview resource origin and the
+		// script nonce covers the single inline media-globals <script> injected below.
+		const nonce = crypto.randomBytes(16).toString("hex");
 		html = html.replace(
-			/<meta[^>]*http-equiv="Content-Security-Policy"[^>]*content="[^"]*"[^>]*\/?>/gi,
-			"",
+			/(<meta[^>]*http-equiv="Content-Security-Policy"[^>]*content=")([^"]*)("[^>]*>)/i,
+			(_, prefix: string, policy: string, suffix: string) =>
+				prefix + policy.replaceAll("'self'", `'self' ${webview.cspSource}`) + suffix,
+		);
+		// CSP ignores duplicate directives, so the nonce is added to the existing
+		// script-src directive rather than appended as a second one.
+		html = html.replace(
+			/http-equiv="Content-Security-Policy"([^>]*)content="([^"]*)"/i,
+			(_, attrs: string, policy: string) =>
+				`http-equiv="Content-Security-Policy"${attrs}content="${policy.replace(
+					/script-src([^;]*);/,
+					`script-src$1 'nonce-${nonce}';`,
+				)}"`,
 		);
 
 		// Compute webview URIs for media assets and inject them as globals
@@ -681,7 +697,7 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 		const mediaKofiUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.context.extensionUri, "media", "kofi.png"),
 		);
-		const mediaScript = `<script>
+		const mediaScript = `<script nonce="${nonce}">
 window.__MEDIA_ICON__ = "${mediaIconUri}";
 window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 </script>`;

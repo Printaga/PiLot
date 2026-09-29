@@ -58,7 +58,11 @@
   --radius-md: 0px;
   --radius-lg: 0px;
   --radius-xl: 0px;
-  --radius-full: 0px; /* Overriding for brutalist look, but some elements might need it */
+  /* "full" means circle/pill by convention, but it is intentionally zeroed for the
+   * brutalist look. Components consuming this token (toggle knobs, skeleton bars,
+   * badges) are designed square — do not "fix" it to 9999px without auditing every
+   * --radius-full consumer. */
+  --radius-full: 0px;
 
   /* Harsh Shadows */
   --shadow-sm: 4px 4px 0px rgba(0, 0, 0, 1);
@@ -90,6 +94,9 @@ body {
   font-size: var(--text-base);
   color: var(--color-text);
   background: var(--color-bg);
+  /* App shell: page scroll is intentionally disabled — every scrollable region
+   * (message list, panel bodies, …) must set its own overflow, or its content
+   * will be clipped with no fallback. */
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -106,6 +113,15 @@ body {
   background-size: 20px 20px;
 }
 
+a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
 button {
   font-family: var(--font-body);
   text-transform: none;
@@ -115,7 +131,12 @@ button {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
-  transition: all var(--transition-interactive);
+  transition:
+    background-color var(--transition-interactive),
+    border-color var(--transition-interactive),
+    color var(--transition-interactive),
+    box-shadow var(--transition-interactive),
+    transform var(--transition-interactive);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -123,8 +144,12 @@ button {
   outline: none;
 }
 
+/* Outline-based focus indicator: unlike box-shadow, a real outline survives
+   scoped component styles that set their own box-shadow/border/background
+   (e.g. ChatPanel's .send-btn), so keyboard focus stays visible everywhere. */
 button:focus-visible {
-  box-shadow: 4px 4px 0px var(--color-primary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
   border-color: var(--color-primary);
 }
 
@@ -138,7 +163,9 @@ button:focus-visible {
   transform: translate(-2px, -2px);
 }
 
-:where(button):active:not(:disabled) {
+/* Zero-specificity wrapper so component-level pressed styles can win, and so
+   box-shadow: none here can't swallow the focus-visible outline while pressing. */
+:where(button:active:not(:disabled)) {
   transform: translate(2px, 2px);
   box-shadow: none;
 }
@@ -159,17 +186,24 @@ select {
   border: 2px solid var(--color-border);
   border-radius: 0;
   padding: var(--space-3) var(--space-4);
-  transition: all var(--transition-interactive);
+  transition:
+    background-color var(--transition-interactive),
+    border-color var(--transition-interactive),
+    box-shadow var(--transition-interactive);
 }
 
 input:focus,
 textarea:focus,
 select:focus {
-  outline: none;
+  /* Outline-based indicator: survives scoped overrides (ChatPanel zeroes
+   * box-shadow/background on its borderless textarea). Do not revert to
+   * outline: none. No transform: keep the control's geometry stable on focus
+   * so it can't clip against overflow-hidden ancestors. */
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
   border-color: var(--color-primary);
   background: var(--color-surface);
   box-shadow: 4px 4px 0px var(--color-primary);
-  transform: translate(-2px, -2px);
 }
 
 ::-webkit-scrollbar {
@@ -189,4 +223,23 @@ select:focus {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary);
+}
+
+/* Global hover/active/focus rules shift geometry; honor prefers-reduced-motion
+ * app-wide (scoped component animations handle their own media queries). */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  input,
+  textarea,
+  select {
+    transition: none;
+  }
+
+  :where(button:hover:not(:disabled)),
+  :where(button:active:not(:disabled)),
+  input:focus,
+  textarea:focus,
+  select:focus {
+    transform: none;
+  }
 }

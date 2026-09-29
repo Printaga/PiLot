@@ -235,22 +235,23 @@ export function resolvePiBinary(): string | null {
 		} else {
 			// `command -v` is a shell BUILTIN, not an executable: spawning it with
 			// shell: false always failed with ENOENT, so the bare-name branch never
-			// resolved. Run it through /bin/sh instead. `binary` is validated by
+			// resolved. The previous fix ran it through /bin/sh, which CodeQL flags
+			// (js/shell-command-injection-from-environment: a shell command built
+			// from environment-controlled values). Resolve by scanning PATH
+			// directly instead — same `command -v` semantics (first executable
+			// match wins) with no shell in the loop. `binary` is validated by
 			// resolvePiBinaryFromSetting()/isSafeBinaryPath before reaching here.
-			const result = piBinaryInternals.spawnSync(
-				"/bin/sh",
-				["-c", 'command -v "$1"', "sh", binary],
-				{
-					shell: false,
-					timeout: 1000,
-				},
-			);
-			if (result.error) {
-				return null;
-			}
-			if (result.status === 0 && result.stdout) {
-				const resolved = result.stdout.toString().trim();
-				return resolved || null;
+			const pathDirs = (process.env.PATH || "")
+				.split(path.delimiter)
+				.filter((dir) => dir.length > 0);
+			for (const dir of pathDirs) {
+				try {
+					const candidate = path.join(dir, binary);
+					piBinaryInternals.accessSync(candidate, fs.constants.X_OK);
+					return candidate;
+				} catch {
+					continue;
+				}
 			}
 			return null;
 		}

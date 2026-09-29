@@ -4,20 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      CSP notes:
-      - script-src 'self' only: no inline handlers or inline scripts are used
-        (markdown anchors/fragment links get delegated JS listeners instead).
-      - connect-src restricts the single registry fetch PiPackagesPanel makes;
-        without it the directive is absent and falls back to default-src,
-        which blocks the request.
+      CSP notes — this tag is AUTHORITATIVE: the extension host substitutes
+      webview.cspSource for 'self' at load time and must NOT strip this meta.
+      - script-src 'self' (+ host-injected nonce): no inline handlers or inline
+        scripts are used, except the single nonce'd media-globals script the
+        host injects into <head> at load time.
+      - connect-src ('self' + registry.npmjs.org) covers the two registry
+        fetches PiPackagesPanel makes (/latest and /-/v1/search); the panel
+        degrades gracefully when a fetch is blocked (fetch throws TypeError).
+      - base-uri 'self' and form-action 'self' don't fall back to default-src;
+        without them injected <base>/<form> tags in rendered content could
+        hijack relative URLs / exfiltrate data.
       - style-src keeps 'unsafe-inline' because Svelte injects component styles;
         img-src allows data: for inline base64 message images but NOT a bare
         `https:` wildcard — rendered message content could otherwise pull
         tracking pixels from arbitrary hosts and leak that the webview is open.
+        Residual risks (must be handled in the renderer, CSP can't): data: URIs
+        are unbounded — cap accepted size/content-type; blocked remote images
+        fail silently — render a placeholder via the img `error` event.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://registry.npmjs.org; font-src 'self' data:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://registry.npmjs.org; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none';"
     />
     <title>PiLot Studio</title>
   </head>
