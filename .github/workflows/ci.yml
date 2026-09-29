@@ -21,18 +21,18 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 30
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
               with:
                   # Full history so the Fallow audit can diff against the default branch.
                   fetch-depth: 0
 
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@v5
               with:
                   # Read from packageManager in package.json (11.8.0) so the
                   # toolchain can't drift from the lockfile.
                   package_json_file: package.json
 
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v6
               with:
                   node-version: 24
                   cache: pnpm
@@ -49,6 +49,13 @@ jobs:
             - name: Format check
               run: pnpm run format:check
 
+            # The REALHOST webview CSP suite boots the SHIPPED webview
+            # (dist/webview/index.html), so the build must run before the test
+            # stages — the same stage order `pnpm verify:full` uses. The full
+            # build also produces the extension bundle that test:e2e needs.
+            - name: Build
+              run: pnpm run build
+
             - name: Unit tests (plain Node, no VS Code host)
               run: pnpm test:unit
 
@@ -57,9 +64,6 @@ jobs:
 
             - name: Fallow audit
               run: pnpm run fallow:audit
-
-            - name: Build
-              run: pnpm run build
 
             # The VS Code integration suite opens an Electron window; the runner
             # has no display, so xvfb must be installed or the suite cannot start.

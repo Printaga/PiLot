@@ -28,14 +28,17 @@ const STAGES = {
 
 const LEVELS = {
 	verify: ["check", "lint", "format:check", "test:unit", "test:webview", "fallow:audit"],
+	// Build runs BEFORE the test stages: the REALHOST webview CSP suite boots
+	// the shipped webview (dist/webview/index.html) and test:e2e needs the
+	// extension bundle, so the artifacts must exist before the suites load.
 	"verify:full": [
 		"check",
 		"lint",
 		"format:check",
+		"build",
 		"test:unit",
 		"test:webview",
 		"fallow:audit",
-		"build",
 		"test:e2e",
 	],
 };

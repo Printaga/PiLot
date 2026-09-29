@@ -12,12 +12,12 @@ export default defineConfig({
 		emptyOutDir: true,
 		sourcemap: true,
 		rollupOptions: {
-			input: path.resolve(__dirname, "src/webview/index.html"),
+			input: path.resolve(import.meta.dirname, "src/webview/index.html"),
 		},
 	},
 	resolve: {
 		alias: {
-			"@": path.resolve(__dirname, "src/webview"),
+			"@": path.resolve(import.meta.dirname, "src/webview"),
 		},
 	},
 	server: {
