@@ -6,96 +6,28 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Added
 
-- **System Prompt tab** (new sidebar button, keyboard shortcut 8): shows the full, live system prompt the model receives for the active session — including SYSTEM.md, settings overrides, and per-run extension modifications — with copy-to-clipboard, word wrap, and size metadata. Updates automatically when a new run starts; shows a friendly empty state before a session exists.
-- Added a real-host integration test that boots the shipped `dist/webview` build in a live VS Code webview panel and proves the enforced CSP end-to-end: the ready handshake and packages-panel round trip complete, both npm registry fetches are allowed, and cross-origin fetches are blocked.
+- **System Prompt tab** (new sidebar button, keyboard shortcut 8): shows the full, live system prompt the model receives for the active session — including SYSTEM.md, settings overrides, and per-run extension modifications — with copy-to-clipboard, word wrap, and automatic updates when a new run starts.
+- Real-host integration test that boots the shipped `dist/webview` build in a live VS Code panel and proves the enforced CSP end-to-end.
 
 ### Security
 
-- Replaced shell-string `execSync` interpolation with argv-array `execFileSync` / `node:fs` in `postinstall-patch.mjs`, `native-addons.ts`, and the VS Code download/clean-up scripts (command/shell injection).
-- Escaped quotes in `MessageBubble`'s `escapeHtml`, stopped emitting inline `onclick` attributes, and tightened the webview CSP (no `unsafe-inline`, explicit `connect-src`) — closes the attribute-injection XSS vector.
-- Removed the remote Google Fonts `@import` from the webview styles (blocked by CSP anyway; leaked a request per load).
-- Constrained `@mention` file resolution in `session-resources.ts` to the workspace root (path traversal like `@../../etc/passwd`).
-- Constrained `MOCHA_TEST_FILE` resolution in the test scaffold and sub-path imports in `loader.cjs` against escaping their intended roots.
-- All webview `message` handlers (`ContextIndicator`, `PiPackagesPanel`, `SessionTree`, `VoiceCapture`) now validate `event.data` shape via a shared guard before trusting payloads.
-- `message-serializer.ts` no longer trusts untyped upstream payload shapes (defensive parsing before serialization).
-- The webview CSP in `index.html` is now kept authoritative instead of being stripped by the host: `webview.cspSource` is substituted for `'self'` at load time, restoring the anti-tracking-pixel (`img-src` without a bare `https:`) and registry-only-fetch guarantees in the shipped webview.
-- Added `base-uri 'self'`, `form-action 'self'`, and `object-src 'none'` to the webview CSP — neither `base-uri` nor `form-action` falls back to `default-src`, so injected `<base>`/`<form>` tags in rendered content were previously unrestricted.
-- Documented the residual `img-src data:` risks in the CSP notes: the renderer must cap accepted URI size/content-type and show a placeholder for blocked images.
-- Bumped the `fast-uri` dependency override to 3.1.7 (GHSA-58mr-gqgx-xq4g, host confusion via an unclosed bracket in the URI authority) in `pnpm-workspace.yaml` and refreshed the lockfile.
+- Hardened the webview CSP: the policy stays authoritative at load time (cspSource substitution, per-load nonce), with `base-uri 'self'`, `form-action 'self'`, `object-src 'none'`, and no scheme wildcards; `connect-src` allows only self and the npm registry.
+- Closed shell-command-injection vectors in the postinstall/build scripts, `native-addons.ts`, and `pi-binary.ts` (argv-array calls, direct `PATH` scan, quoting seams).
+- Closed the `MessageBubble` attribute-injection XSS vector (escaped quotes, no inline `onclick`) and removed the remote Google Fonts `@import`.
+- Constrained `@mention` file resolution, `MOCHA_TEST_FILE` resolution, and `loader.cjs` imports against escaping their intended roots; webview message handlers and `message-serializer.ts` now validate payload shapes.
+- Bumped `fast-uri` to 3.1.7 (GHSA-58mr-gqgx-xq4g); the CSP test asserts every `webview.cspSource` source as an exact source-list token (VS Code can report cspSource as a multi-source string), closing the last open CodeQL alert (`js/incomplete-url-substring-sanitization`).
 
 ### Fixed
 
-- `pi-binary.ts`: bare-name `pi` lookup now resolves again (spawned a shell builtin with `shell: false`); arg-env quoting hardened.
-- `pi-binary.ts`: bare-name resolution now scans `PATH` directly with `accessSync` instead of running `command -v` through `/bin/sh` (CodeQL `js/shell-command-injection-from-environment`), keeping the first-executable-match semantics with no shell in the loop.
-- `loader.cjs`: fixed the `@earendel-works` package-name typo, extracted doc URLs to constants, added timeouts to `which`/`where` probes, hooked `Module._resolveFilename` without leaking a process-wide duplicate hook, and resolved bare imports via the package `exports` map before guessing `dist/index.js`.
-- `shell.ts`: Windows callers can no longer hit cmd.exe `shell: true` interpolation (quoting seam enforced).
-- `verify.mjs` / `fallow-audit.mjs`: signal-terminated and spawn-failed runs are reported distinctly instead of collapsing into a generic exit code; `result.error` is no longer ignored (fail-open CI).
-- `run-node-tests.mjs`, `runTest.ts`, test scaffold: watchdog/no-result paths now exit non-zero — no more green CI for failed or misconfigured runs; each test file gets a pid-suffixed tmpdir (parallel-safe) and VS Code discovery is cross-platform instead of hardcoded.
-- `dl-tmp.mjs` / `dl-vscode.mjs`: top-level awaits are handled; VS Code version comes from env/config instead of a hardcoded 1.85.0.
-- `run-clean.mjs`: removed the machine-specific `/home/lenovo/...` path; VS Code discovery matches `runTest.ts`.
-- `session-manager.ts`: multi-session delete now settles per item, reporting which sessions failed and why, instead of failing the whole batch.
-- `voice-manager.ts`: temp recording files are cleaned up and stdio listeners detached on stop/dispose.
-- `MermaidDiagram`: render cache is capped with eviction; stale async renders can no longer overwrite a newer diagram.
-- `MessageBubble`: markdown re-render effect no longer loops unboundedly; tool-call state is cleared on stream errors and new sessions in `App.svelte`.
-- `PiPackagesPanel`: registry lookups are batched (no N+1 fan-out), stale responses are discarded, install log is capped, and the installing overlay can no longer deadlock.
-- `Toast` timers are cleared on unmount and the stack is capped; `ContextIndicator` clamps percent to 0–100; `OnboardingTour` guards step bounds.
-- Accessibility: tooltips wired via `aria-describedby`, `role="button"` handles Space, dialogs focusable; `prefers-reduced-motion` respected by `ActivityBar` and `SkeletonLoader` animations.
-- Test mocks: `pi-sdk-mocks` Proxy is overrideable and `disposeCalls` tracks; `session-mock` no longer double-registers handlers or force-casts; `vscode-facade` fires listeners exactly once.
-- Deduplicated `PiAgentConfig`/`ThinkingLevel`/`SessionNode` definitions and the cross-component `sendMessage` helper (shared in `webview/messages.ts`); native-addon ABI scan logic consolidated.
-- `pnpm-workspace.yaml`: removed invalid `allowBuilds`/`minimumReleaseAgeExclude` keys; `.vscodeignore` no longer ships nested `.env`/secret files and keeps shared `.vscode` config; removed redundant tsconfig globs/excludes; removed dead `wrapperEl` in `HelpTooltip`.
-- `App.svelte`: array payloads from the host (e.g. `provider-auth`) are no longer discarded when unwrapping message envelopes, and `models-updated` payloads are array-checked.
-- `ToolsPanel`: manual tool toggles now switch the preset to `custom` so they actually apply, and unknown presets are rejected.
-- `VoiceCapture`: no longer writes to `$props()` — state ownership moved to `App.svelte`, with `aria-label`/`aria-pressed` on the stop button.
-- `global.css`: restored hover styles for enabled buttons (`:where(...)` wrapper had zero specificity).
-- `esbuild.config.mjs`: `copyLoader()` also runs during `--watch` and creates `dist/` if missing.
-- `MessageBubble`: markdown re-render effect keyed on content/thinking/searchQuery so updates can't be missed, fresh regex per search, clipboard errors handled.
-- `ContextIndicator`: progress falls back to loading after 30s without updates; percent and tooltip values are clamped.
-- `OnboardingTour`: keyboard handling no longer double-advances on Enter and no longer swallows app-wide shortcuts.
-- `ProviderSettings`: errors are attributed to the right provider, API-key saves wait for host confirmation instead of optimistically succeeding, and each blocks are keyed.
-- `PromptTemplates`: stored templates are validated before use and the editor is focused on mount.
-- `PiPackagesPanel`: exact `npm:` source matching for installed checks, capped install log, safety-timer cleanup, `noopener,noreferrer` links, normalized install payloads.
-- `SkeletonLoader`: skeleton count clamped to 0–50.
-- `Toast`: NaN durations normalized, duplicate mounts guarded, timers cleaned up on teardown.
-- `SessionTree`: select-all only selects visible sessions, selection is pruned when sessions change, the list refreshes after deletes, and the hover pointer resets.
-- `ModelSelector`: favorites use a Set and stale provider state resets when the provider changes.
-- `ChatPanel`: Enter is no longer swallowed when autocomplete is open with an empty filtered list.
-- `HelpTooltip`: rewritten so the tooltip element always exists for `aria-describedby`; click/Enter/Space toggle it and Escape closes it.
-- `ExportDialog`: close timer is cleared and exports time out after 30s instead of hanging forever.
-- `StatusLine`: unknown envelope shapes are guarded and status text is sanitized.
-- Image attachments: 10MB per-file and 6-image limits with read-error handling.
-- `footer-manager`: home-prefix truncation only happens at path boundaries, poll interval is a constant, and git-branch errors are caught.
-- `message-handler`: missing message payloads default to `{}`, `navigateTree` errors are reported, and `deleteSessions` payloads are validated.
-- `binary-service`: failed PI binary resolution is no longer cached, startup errors are reported once, and the CLI version is read from stdout only.
-- `message-serializer`: NaN timestamps are dropped and text/image extraction is shared between user and tool-result messages.
-- `model-registry-handler`: favorites are defensively copied, failed CLI-model lookups aren't memoized, favorites sync errors are caught, and `cycleModel` handles empty model lists.
-- `package-manager`: Windows shell calls quote arguments and captured output is capped at 8KB.
-- `pi-agent-provider`: config refresh always resolves, model-fetch URLs are validated as http(s), and login prompts are registered before use.
-- `update-checker`: the correct auto-update command is used per update kind, `LAST_CHECK` is persisted only after checks complete, and semver prereleases compare correctly.
-- `session-resources`: 10MB file-read guard, byte-length-aware truncation, and `@mention` removal by index.
-- `voice-manager`: non-200 responses unblock the stream, voice stop has a 2s kill timer, and starting voice capture is re-entrancy guarded.
-- `loader.cjs`: double-hook guard, sub-path imports can't escape the package root, `.`/`..` segments are rejected, and `globalPaths` is deduped.
-- `git-extension`: repo path normalization case-folds drive/home prefixes and resolves symlinks.
-- `commands/`: user-facing commands report errors via toast instead of failing silently.
-- `diagnostics`: log is capped at 2000 lines (FIFO) and JSON stringify has a safe fallback.
-- `messages.ts` / `main.ts`: numeric bounds are validated and a missing `#app` element is checked.
-- `native-addons.ts`: ABI probe output is bounded with anchored matching, and v11→v12 upgrades rename broken directories to `.bak-v11` instead of failing.
-- `test/suite/index.ts`: uncaught errors fail the run (exit code 1) and the report summary is appended, not overwritten.
-- Webview `index.html`: removed the bare `https:` wildcard from `img-src`.
-- CI: added a concurrency group, pinned pnpm via `package_json_file`, and installed xvfb for integration tests.
-- Repo hygiene: `.editorconfig` webview indentation, `.husky/pre-commit` shebang with `set -e`, `.prettierignore` for generated dirs, and canonical Apache-2.0 LICENSE text.
-- Restored real outline-based focus indicators for buttons and form controls in `global.css` — scoped component overrides (e.g. ChatPanel's borderless textarea and send button) previously left keyboard focus invisible (WCAG 2.4.7).
-- Wrapped the global button `:active` rule in `:where(...)` to match the hover rule's zero specificity, so the pressed state no longer swallows the focus ring or resists component overrides.
-- Replaced `transition: all` with enumerated properties on the global button and input rules so unintended properties (e.g. layout-affecting class toggles) no longer animate.
-- Removed the focus-time `translate(-2px, -2px)` geometry shift on inputs, which could clip against `overflow: hidden` ancestors and desync adjacent labels.
-- Added a global `prefers-reduced-motion` guard in `global.css` for the hover/active/focus transforms and transitions.
-- Documented the app-shell contract in `global.css` that every scrollable region must set its own `overflow`, since page-level scroll is intentionally disabled.
-- Documented that `--radius-full: 0` is an intentional brutalist-theme choice in `global.css` and must not be set to `9999px` without auditing its consumers.
-- Added base anchor styling (primary color, underline, hover) in `global.css` so unclassed links render legibly on-theme instead of UA-default blue/purple.
-- Webview CSP `connect-src` now includes `'self'` and its notes no longer claim PiPackagesPanel makes a "single" registry fetch (it makes two).
-- CSP notes now record the host-injected nonce'd media-globals script and that the CSP meta tag must not be stripped.
-- Fixed the microphone icon's stem rendering as a diagonal line in `VoiceCapture` (missing `x2` on the SVG `<line>`).
-- `VoiceCapture`'s listening pulse animation now respects `prefers-reduced-motion`, matching `ActivityBar`/`SkeletonLoader`.
-- `VoiceCapture`'s button now sets an explicit `type="button"` so it can't trigger form submission if reused inside a form.
+- `pi-binary.ts`: bare-name `pi` lookup resolves again; PATH resolution runs without a shell.
+- `loader.cjs`: package-name typo, probe timeouts, double-hook guard, and bare imports resolved via the package `exports` map.
+- Test/CI scaffolding (`verify.mjs`, `run-node-tests.mjs`, `runTest.ts`, `dl-tmp.mjs`, `run-clean.mjs`): failed or misconfigured runs exit non-zero; VS Code discovery and paths are cross-platform and machine-independent.
+- Host services (`message-handler`, `session-manager`, `binary-service`, `model-registry-handler`, `package-manager`, `pi-agent-provider`, `update-checker`, `footer-manager`, `git-extension`, `commands/`): payload validation, per-item session-delete failures, toast error reporting, capped logs and output, correct Windows quoting, and semver prerelease comparison.
+- Webview components: fixed stale or looping renders and panel deadlocks (`MessageBubble`, `MermaidDiagram`, `PiPackagesPanel`, `ExportDialog`, `App.svelte`), timer/value guards (`Toast`, `ContextIndicator`, `SkeletonLoader`), input and keyboard handling (`ChatPanel`, `OnboardingTour`, `ToolsPanel`), provider error attribution (`ProviderSettings`), favorites and session-list behavior (`ModelSelector`, `SessionTree`), and sanitized status text (`StatusLine`, `HelpTooltip`, `PromptTemplates`).
+- Accessibility: real outline-based focus indicators, keyboard-operable tooltips and dialogs, `prefers-reduced-motion` respected, and `VoiceCapture` icon/state fixes.
+- Resource limits: 10MB file-read guard and byte-accurate truncation in `session-resources`; image attachments capped at 10MB per file / 6 files; diagnostics log capped at 2000 lines.
+- Repo hygiene: `.vscodeignore` no longer ships nested `.env`/secret files; deduplicated shared types and helpers; CI gained a concurrency group, pinned pnpm, and xvfb for integration tests.
+- Multiple minor robustness and cleanup fixes across components and services.
 
 ## [2.6.1] - 2026-09-19
 

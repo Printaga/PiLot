@@ -423,14 +423,28 @@ suite("REALHOST webview boots under the enforced CSP", () => {
 			"served page must carry the authoritative CSP meta",
 		);
 		// The real cspSource must appear in the served policy — the transform
-		// used the panel's own origin, not a stale or fake one.
+		// used the panel's own origin, not a stale or fake one. A bare substring
+		// probe would match the origin embedded anywhere (path, query, another
+		// directive's argument — CodeQL js/incomplete-url-substring-sanitization),
+		// so assert on the token level instead. cspSource may itself be a
+		// multi-source string (e.g. "'self' https://*.vscode-cdn.net"): require
+		// EVERY source it names to appear as an exact, standalone source-list
+		// token. The host substitutes `'self' ${cspSource}`, so a cspSource that
+		// already carries 'self' yields a duplicated-but-valid 'self' token.
 		const activeCspSource = panel ? panel.webview.cspSource : FAKE_CSP_SOURCE;
 		const servedPolicy = realServedHtml.match(
 			/http-equiv="Content-Security-Policy"[^>]*content="([^"]*)"/i,
 		)![1];
+		const cspTokens = (p: string) =>
+			p
+				.split(";")
+				.flatMap((directive) => directive.trim().split(/\s+/))
+				.filter(Boolean);
+		const servedTokens = cspTokens(servedPolicy);
+		const cspSourceSources = activeCspSource.trim().split(/\s+/).filter(Boolean);
 		assert.ok(
-			servedPolicy.includes(activeCspSource),
-			`served policy must embed the webview's real cspSource; got: ${servedPolicy}`,
+			cspSourceSources.every((source) => servedTokens.includes(source)),
+			`served policy must embed every source of the webview's real cspSource (${activeCspSource}); got: ${servedPolicy}`,
 		);
 		// The mock-webview emission and the real emission differ only in the
 		// URI scheme of rewritten assets (passthrough file:// vs webview CDN);
