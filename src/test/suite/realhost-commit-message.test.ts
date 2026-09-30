@@ -18,6 +18,7 @@
 // Under the plain-Node lane the facade reports no extensions, so the lookups
 // still take their unavailable path and the host-only checks call `this.skip()`.
 
+import { execFileSync } from "node:child_process";
 import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -126,42 +127,33 @@ suite("REALHOST commit message wiring", () => {
 		gitCommitMessageInternals.execFileWithStdin = async () =>
 			piStub ? piStub() : { code: 0, stdout: "chore: canned draft\n", stderr: "" };
 
-		const candidate = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-cm-repo-"));
-		await git(candidate, ["init", "--initial-branch=main"]);
-		await git(candidate, ["config", "user.email", "test@example.com"]);
-		await git(candidate, ["config", "user.name", "Pipeline"]);
-		fs.writeFileSync(path.join(candidate, "tracked.txt"), "first\n");
-		await git(candidate, ["add", "tracked.txt"]);
-		await git(candidate, ["commit", "-m", "initial"]);
-		repoDir = candidate;
-		stubState.cwd = candidate;
-
-		// The facade has no workspace-folder API, so the folder is only added in the
-		// real host. The host-only tests skip in the other lane anyway.
-		//
-		// DIAGNOSTIC: on CI the git API reported repositories=[] forever, so this
-		// block now proves whether the folder actually entered the workspace.
-		// updateWorkspaceFolders returns false when the workbench refuses the
-		// update (e.g. called before startup finished) — suspected on the slow
-		// CI runner — so retry until the folder is really present.
-		if (!isFacadeLane()) {
-			const folderUri = vscode.Uri.file(candidate);
-			const foldersNow = () =>
-				(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-			console.log(`[diag] workspace folders before add: ${JSON.stringify(foldersNow())}`);
-			for (let attempt = 1; attempt <= 20; attempt++) {
-				if (foldersNow().includes(candidate)) break;
-				const accepted = vscode.workspace.updateWorkspaceFolders(0, null, {
-					uri: folderUri,
-					name: "commit-message-repo",
-				});
-				console.log(
-					`[diag] updateWorkspaceFolders attempt ${attempt} returned ${accepted}; folders now: ${JSON.stringify(foldersNow())}`,
-				);
-				if (foldersNow().includes(candidate)) break;
-				await new Promise((resolve) => setTimeout(resolve, 250));
-			}
+		// The runner opens this suite's window on an empty workspace that it has
+		// already `git init`ed and names via PILOT_TEST_WORKSPACE (see runTest.ts),
+		// so the repository is discovered through the standard open-folder path
+		// instead of a runtime folder add — the runtime add races the workbench on
+		// slow CI runners and was silently lost (git repositories stayed empty for
+		// the whole run). The path comes from the runner's env contract rather
+		// than the workspaceFolders API: the in-suite facade snapshots that array
+		// at install time, and the git API's discovery must not be a setup-time
+		// dependency of the suite that tests it. The facade lane has no runner
+		// workspace, so the host-only tests skip there.
+		const opened = process.env.PILOT_TEST_WORKSPACE;
+		if (isFacadeLane() && !opened) {
+			return; // plain-Node lane: no runner workspace, every host-only test skips
 		}
+		if (!opened || !fs.existsSync(opened)) {
+			throw new Error(
+				`runner contract violated: PILOT_TEST_WORKSPACE must name the opened workspace, got ${String(opened)}`,
+			);
+		}
+		await git(opened, ["config", "user.email", "test@example.com"]);
+		await git(opened, ["config", "user.name", "Pipeline"]);
+		fs.writeFileSync(path.join(opened, "tracked.txt"), "first\n");
+		await git(opened, ["add", "tracked.txt"]);
+		await git(opened, ["commit", "-m", "initial"]);
+		repoDir = opened;
+		stubState.cwd = opened;
+		console.log(`[realhost] commit-message suite using opened workspace ${opened}`);
 
 		// Register the real command handlers once. If the extension under
 		// development owns them already, leave its registration in place and let
@@ -177,14 +169,22 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	suiteTeardown(function () {
-		this.timeout(120_000); // DIAGNOSTIC: folder-removal rescan once took minutes on CI
+		this.timeout(60_000); // git reset can rescan; never mask the run with a teardown timeout
 		for (const [name, value] of Object.entries(saved)) {
 			(vscode.window as any)[name] = value;
 		}
 		gitCommitMessageInternals.execFileWithStdin = savedExecFileWithStdin;
 		if (repoDir) {
-			if (!isFacadeLane()) vscode.workspace.updateWorkspaceFolders(0, 1);
-			fs.rmSync(repoDir, { recursive: true, force: true });
+			// The workspace folder is OWNED by the runner (fresh per run, removed
+			// by its cleanup) — it must not be removed here. Only restore the
+			// repo state the suite changed: unstage tracked.txt and drop the
+			// probe file the input-box assertion writes.
+			try {
+				fs.rmSync(path.join(repoDir, "untracked.txt"), { force: true });
+			} catch {
+				/* nothing to clean */
+			}
+			execFileSync("git", ["reset", "--hard", "HEAD"], { cwd: repoDir, stdio: "ignore" });
 		}
 	});
 
@@ -202,56 +202,22 @@ suite("REALHOST commit message wiring", () => {
 	 * Poll until the git extension publishes our repository. The extension scans
 	 * asynchronously and has no "rescan now" entry point.
 	 *
-	 * DIAGNOSTIC BRANCH (do not merge as-is): on CI every test calling this hit
-	 * mocha's 10s default timeout while the same suite passes locally in <1s.
-	 * Log discovery state while polling and dump the git API's repository list
-	 * when discovery never succeeds, so the CI log distinguishes a slow scan
-	 * from a repository that never appears.
+	 * Throws on exhaustion (rather than returning null) so a failed wait names
+	 * the git API's own explanation in the test output — a bare timeout on CI
+	 * once hid the difference between "extension not active" and "repository
+	 * never published".
 	 */
 	async function waitForRepository(repoRoot: string, timeoutMs = 20_000) {
-		const startedAt = Date.now();
-		const deadline = startedAt + timeoutMs;
-		for (let poll = 0; ; poll++) {
+		const deadline = Date.now() + timeoutMs;
+		for (;;) {
 			const lookup = await findGitRepository(repoRoot);
-			if (lookup.status === "found") {
-				logDiscovered(poll, startedAt);
-				return lookup.repository;
-			}
+			if (lookup.status === "found") return lookup.repository;
 			if (Date.now() > deadline) {
-				console.log(
-					`[diag] repository NOT discovered within ${timeoutMs}ms. Last lookup said: ${lookup.message}`,
+				throw new Error(
+					`git extension did not publish ${repoRoot} within ${timeoutMs}ms: ${lookup.message}`,
 				);
-				console.log(`[diag] ${await gitApiRepositoryRoots()}`);
-				return null;
 			}
-			if (poll % 8 === 0)
-				console.log(
-					`[diag] waiting for repository (poll ${poll}, ${Date.now() - startedAt}ms): ${lookup.message}`,
-				);
 			await new Promise((resolve) => setTimeout(resolve, 250));
-		}
-	}
-
-	/** DIAGNOSTIC: one discovery-timing line, kept out of waitForRepository for complexity. */
-	function logDiscovered(poll: number, startedAt: number): void {
-		if (poll > 0)
-			console.log(
-				`[diag] repository discovered after ${poll} poll(s), ${Date.now() - startedAt}ms`,
-			);
-	}
-
-	/** DIAGNOSTIC: describe what the git API currently reports as open repositories. */
-	async function gitApiRepositoryRoots(): Promise<string> {
-		try {
-			const gitExt = vscode.extensions.getExtension<any>("vscode.git");
-			const api = gitExt
-				? (gitExt.isActive ? gitExt.exports : await gitExt.activate())?.getAPI?.(1)
-				: undefined;
-			const roots = (api?.repositories ?? []).map((r: any) => r.rootUri?.fsPath);
-			const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-			return `git API repository roots: ${JSON.stringify(roots)}; workspace folders: ${JSON.stringify(folders)}`;
-		} catch (error) {
-			return `git API dump failed: ${String(error)}`;
 		}
 	}
 
@@ -274,7 +240,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("writes into the real SCM input box without staging, committing, or pushing", async function () {
-		this.timeout(90_000); // DIAGNOSTIC: let the full 20s discovery budget + retries run on slow CI
+		this.timeout(30_000); // discovery on a slow CI runner can take seconds
 		if (isFacadeLane()) this.skip(); // host-only: needs the real git extension
 		assert.ok(repoDir, "suite setup must have created the repository");
 
@@ -302,7 +268,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("the real command drafts into the box and reports truncation and untracked files", async function () {
-		this.timeout(90_000); // DIAGNOSTIC
+		this.timeout(30_000); // discovery on a slow CI runner can take seconds
 		if (isFacadeLane()) this.skip(); // host-only: needs a dispatching command registry
 		if (!wiringReady) this.skip(); // the extension owns the command in this host
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -358,7 +324,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a failing model call surfaces the underlying output and leaves the box alone", async function () {
-		this.timeout(90_000); // DIAGNOSTIC
+		this.timeout(30_000); // discovery on a slow CI runner can take seconds
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -384,7 +350,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a missing pi binary is reported instead of attempting a draft", async function () {
-		this.timeout(90_000); // DIAGNOSTIC
+		this.timeout(30_000); // discovery on a slow CI runner can take seconds
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -411,7 +377,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a workspace outside any repository is reported without throwing", async function () {
-		this.timeout(90_000); // DIAGNOSTIC
+		this.timeout(30_000); // discovery on a slow CI runner can take seconds
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 

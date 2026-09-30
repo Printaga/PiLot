@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -143,6 +144,23 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 	// visible to the window opened on this folder.
 	rmSync(testWorkspace, { recursive: true, force: true });
 	mkdirSync(testWorkspace, { recursive: true });
+	// Pre-init the workspace as a git repository BEFORE the window opens. The
+	// REALHOST commit-message suite needs an open repository; a repo that exists
+	// from before launch is discovered by the built-in git extension through its
+	// standard open-folder path (deterministic), whereas adding a folder to the
+	// workspace at runtime from an early suiteSetup races the workbench's
+	// startup and is silently lost on some CI runs (repositories stayed empty
+	// for the whole run). Suites that do not care about git are unaffected: the
+	// opened folder just happens to be a repository. Non-fatal when git is
+	// unavailable — the suite then takes its unavailable-lookup paths.
+	const gitInit = spawnSync("git", ["init", "--initial-branch=main", testWorkspace], {
+		encoding: "utf8",
+	});
+	if (gitInit.status !== 0) {
+		console.warn(
+			`[runTest] git init for the test workspace failed (continuing): ${gitInit.stderr?.trim()}`,
+		);
+	}
 	const folderUri = pathToFileURL(testWorkspace).toString();
 
 	// Fresh, minimal user-data dir per file (stale storage accumulates watchers
@@ -194,6 +212,12 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 				...process.env,
 				// Scaffold loads only this file (path relative to the suite dir).
 				MOCHA_TEST_FILE: testFile,
+				// The opened workspace, by contract from the runner: suites that
+				// need the test repository read this instead of probing
+				// workspaceFolders (whose facade snapshot is not live) or the
+				// git API (whose discovery is exactly what must not be a
+				// setup-time dependency).
+				PILOT_TEST_WORKSPACE: testWorkspace,
 			},
 			launchArgs: [
 				"--disable-extensions",
