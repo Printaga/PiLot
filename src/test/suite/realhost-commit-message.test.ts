@@ -196,26 +196,14 @@ suite("REALHOST commit message wiring", () => {
 		for (let poll = 0; ; poll++) {
 			const lookup = await findGitRepository(repoRoot);
 			if (lookup.status === "found") {
-				if (poll > 0)
-					console.log(
-						`[diag] repository discovered after ${poll} poll(s), ${Date.now() - startedAt}ms`,
-					);
+				logDiscovered(poll, startedAt);
 				return lookup.repository;
 			}
 			if (Date.now() > deadline) {
 				console.log(
 					`[diag] repository NOT discovered within ${timeoutMs}ms. Last lookup said: ${lookup.message}`,
 				);
-				try {
-					const gitExt = vscode.extensions.getExtension<any>("vscode.git");
-					const api = gitExt
-						? (gitExt.isActive ? gitExt.exports : await gitExt.activate())?.getAPI?.(1)
-						: undefined;
-					const roots = (api?.repositories ?? []).map((r: any) => r.rootUri?.fsPath);
-					console.log(`[diag] git API repository roots: ${JSON.stringify(roots)}`);
-				} catch (error) {
-					console.log(`[diag] git API dump failed: ${String(error)}`);
-				}
+				console.log(`[diag] ${await gitApiRepositoryRoots()}`);
 				return null;
 			}
 			if (poll % 8 === 0)
@@ -223,6 +211,28 @@ suite("REALHOST commit message wiring", () => {
 					`[diag] waiting for repository (poll ${poll}, ${Date.now() - startedAt}ms): ${lookup.message}`,
 				);
 			await new Promise((resolve) => setTimeout(resolve, 250));
+		}
+	}
+
+	/** DIAGNOSTIC: one discovery-timing line, kept out of waitForRepository for complexity. */
+	function logDiscovered(poll: number, startedAt: number): void {
+		if (poll > 0)
+			console.log(
+				`[diag] repository discovered after ${poll} poll(s), ${Date.now() - startedAt}ms`,
+			);
+	}
+
+	/** DIAGNOSTIC: describe what the git API currently reports as open repositories. */
+	async function gitApiRepositoryRoots(): Promise<string> {
+		try {
+			const gitExt = vscode.extensions.getExtension<any>("vscode.git");
+			const api = gitExt
+				? (gitExt.isActive ? gitExt.exports : await gitExt.activate())?.getAPI?.(1)
+				: undefined;
+			const roots = (api?.repositories ?? []).map((r: any) => r.rootUri?.fsPath);
+			return `git API repository roots: ${JSON.stringify(roots)}`;
+		} catch (error) {
+			return `git API dump failed: ${String(error)}`;
 		}
 	}
 
