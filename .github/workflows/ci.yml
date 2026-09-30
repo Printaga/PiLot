@@ -83,3 +83,23 @@ jobs:
 
             - name: E2E tests (VS Code integration suite)
               run: pnpm test:e2e
+
+            # DIAGNOSTIC (E2E hang investigation): keep the per-run VS Code logs
+            # and upload them when the suite fails, so the extension host's own
+            # view of workspace-folder adds and git-extension discovery can be
+            # read post-mortem instead of guessed at.
+            - name: Collect VS Code logs on failure
+              if: failure()
+              run: |
+                  mkdir -p vscode-logs
+                  find /tmp -maxdepth 1 -name 'pilot-test-userdata-*' -type d -mmin -30 \
+                      -exec cp -r {} vscode-logs/ \;
+                  ls -la vscode-logs/ || true
+
+            - name: Upload VS Code logs
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vscode-logs-${{ github.run_id }}
+                  path: vscode-logs/
+                  retention-days: 5

@@ -202,6 +202,9 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 				"--file-watcher-polling",
 				`--user-data-dir=${testUserDataDir}`,
 				`--folder-uri=${folderUri}`,
+				// Diagnostic mode (PILOT_KEEP_VSCODE_LOGS=1): workbench +
+				// extension host verbose logging for post-mortem analysis.
+				...(process.env.PILOT_KEEP_VSCODE_LOGS === "1" ? ["--verbose"] : []),
 			],
 			vscodeExecutablePath: getVscodeExecutablePath(),
 		});
@@ -222,11 +225,20 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 		// file, so removal can never race a concurrent run). Each removal is
 		// guarded: a locked dir (Windows AV, open handle) must never mask the
 		// original run outcome out of a finally block.
-		for (const dir of [testWorkspace, testUserDataDir]) {
-			try {
-				rmSync(dir, { recursive: true, force: true });
-			} catch {
-				/* best effort */
+		//
+		// PILOT_KEEP_VSCODE_LOGS=1 skips the user-data-dir removal so the
+		// workbench/extension-host logs (User/logs/...) survive for post-mortem
+		// when a suite hangs in an environment that cannot be reproduced
+		// locally. The dirs are pid- and file-suffixed, so nothing collides.
+		if (process.env.PILOT_KEEP_VSCODE_LOGS === "1") {
+			console.log(`[runTest] kept for post-mortem: ${testUserDataDir}`);
+		} else {
+			for (const dir of [testWorkspace, testUserDataDir]) {
+				try {
+					rmSync(dir, { recursive: true, force: true });
+				} catch {
+					/* best effort */
+				}
 			}
 		}
 	}
