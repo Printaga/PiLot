@@ -81,9 +81,13 @@ jobs:
                       *) echo "Unsupported runner arch: $(uname -m)" >&2; exit 1 ;;
                   esac
                   base="https://github.com/google/osv-scanner/releases/download/${version}"
-                  curl -fsSL --retry 3 -o osv-scanner "${base}/${asset}"
+                  # Download under the asset's canonical name: sha256sum -c
+                  # checks the filename recorded in SHA256SUMS, so the file
+                  # must be named exactly that before verification.
+                  curl -fsSL --retry 3 -o "${asset}" "${base}/${asset}"
                   curl -fsSL --retry 3 -o SHA256SUMS "${base}/osv-scanner_SHA256SUMS"
                   grep " ${asset}\$" SHA256SUMS | sha256sum -c -
+                  mv "${asset}" osv-scanner
                   chmod +x osv-scanner
 
             # Scans only pnpm-lock.yaml — the exact resolved tree Dependabot
