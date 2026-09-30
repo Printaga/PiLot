@@ -2,7 +2,7 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
-## [2.7.0] - Unreleased
+## [2.7.0] - 2026-09-30
 
 ### Added
 
