@@ -326,12 +326,23 @@
       // non-object payload.
       const msg = parseHostMessage(event);
       if (!msg) return;
-      const { type, data } = msg;
+      const { type } = msg;
+      // Legacy host builds posted this message's list payload as a bare array;
+      // collapse that shape so every read below sees a record. The per-field
+      // guards below remain the real validation boundary.
+      const data = Array.isArray(msg.data) ? ({} as Record<string, unknown>) : msg.data;
       if (type === "installed") {
+        // The payload is `{ installed: [...] }`; a bare array is also accepted
+        // (older host builds sent that shape) so the list can never blank out.
         // Normalize every entry: the template dereferences pkg.types/skills/
         // extensions/prompts as arrays and pkg.source.toLowerCase() as a
         // string, so a forged/partial payload must not break rendering.
-        installedPackages = asArray<unknown>(data.installed).flatMap((raw): InstalledPackage[] => {
+        const rawList = Array.isArray(msg.data)
+          ? msg.data
+          : Array.isArray(data.installed)
+            ? data.installed
+            : [];
+        installedPackages = asArray<unknown>(rawList).flatMap((raw): InstalledPackage[] => {
           if (!raw || typeof raw !== "object") return [];
           const p = raw as Partial<InstalledPackage>;
           if (typeof p.source !== "string") return [];

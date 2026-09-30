@@ -21,6 +21,9 @@
   function handleMessage(event: MessageEvent) {
     const msg = parseHostMessage(event);
     if (!msg || msg.type !== "exportResult") return;
+    // This message always carries an object payload; an array can only be
+    // hostile/malformed and falls through to the unknown-error branch below.
+    if (Array.isArray(msg.data)) return;
     clearTimeout(exportTimeoutTimer);
     if (msg.data.success === true) {
       exportStatus = "done";

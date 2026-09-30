@@ -1008,9 +1008,12 @@ export class MessageHandler {
 	}
 
 	private sendSessionsList(data: any) {
+		// Payload is wrapped in `{ sessions: [...] }`: the webview's
+		// parseHostMessage normalizes non-object payloads to {}, so a bare array
+		// would silently render as an empty list.
 		this.provider.webview?.postMessage({
 			type: "sessions-list",
-			data,
+			data: { sessions: data },
 		});
 	}
 
@@ -1056,9 +1059,12 @@ export class MessageHandler {
 			"[MessageHandler] sendPackagesList called with:",
 			JSON.stringify(data),
 		);
+		// Payload is wrapped in `{ installed: [...] }`: the webview's
+		// parseHostMessage normalizes non-object payloads to {}, so a bare array
+		// would silently render as "No packages installed".
 		this.provider.webview?.postMessage({
 			type: "installed",
-			data: data,
+			data: { installed: data },
 		});
 	}
 

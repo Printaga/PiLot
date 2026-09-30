@@ -56,9 +56,17 @@
     // overwrite the whole session list or crash the handler on non-object data.
     const msg = parseHostMessage(event);
     if (!msg) return;
-    const { type, data } = msg;
+    const { type } = msg;
+    // Legacy host builds posted sessions-list's payload as a bare array;
+    // collapse that shape so every read below sees a record. The per-field
+    // guards below remain the real validation boundary.
+    const data = Array.isArray(msg.data) ? ({} as Record<string, unknown>) : msg.data;
     if (type === "sessions-list") {
-      sessions = asSessionList(data.sessions);
+      // The payload is `{ sessions: [...] }`; a bare array is also accepted
+      // (older host builds sent that shape) so the list can never blank out.
+      sessions = asSessionList(
+        Array.isArray(msg.data) ? msg.data : Array.isArray(data.sessions) ? data.sessions : [],
+      );
       loading = false;
     } else if (type === "ready" && Array.isArray(data.sessions)) {
       sessions = asSessionList(data.sessions);

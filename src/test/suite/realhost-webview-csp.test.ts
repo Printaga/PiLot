@@ -514,15 +514,18 @@ suite("REALHOST webview boots under the enforced CSP", () => {
 			inbox.some((m) => m.type === "getResourceToggles"),
 		);
 		// The host must answer: sendPackagesList broadcasts type "installed",
-		// and the stub seam's entry proves it carried real provider data.
+		// and the stub seam's entry proves it carried real provider data. The
+		// payload is wrapped — `{ installed: [...] }` — because the webview's
+		// parseHostMessage collapses non-object payloads to {} and a bare array
+		// used to render as "No packages installed".
 		await waitFor("the 'installed' packages-list broadcast", () =>
 			outbox.some((m) => m.type === "installed"),
 		);
 		const installed = outbox.find((m) => m.type === "installed")!;
 		assert.ok(
-			Array.isArray(installed.data) &&
-				installed.data.some((p: any) => p?.source === "npm:stub-pkg"),
-			`'installed' broadcast must carry the package list; got: ${JSON.stringify(installed.data)}`,
+			Array.isArray(installed.data?.installed) &&
+				installed.data.installed.some((p: any) => p?.source === "npm:stub-pkg"),
+			`'installed' broadcast must carry the wrapped package list; got: ${JSON.stringify(installed.data)}`,
 		);
 	});
 

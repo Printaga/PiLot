@@ -46,6 +46,9 @@
     function handleMessage(event: MessageEvent) {
       const msg = parseHostMessage(event);
       if (!msg || msg.type !== "system-prompt") return;
+      // This message always carries an object payload; a hostile/legacy array
+      // simply lacks `prompt` and degrades to an empty prompt below.
+      if (Array.isArray(msg.data)) return;
       // Drop replies that belong to a superseded request.
       if (requestId !== latestRequestId) return;
       systemPrompt = asString(msg.data.prompt);

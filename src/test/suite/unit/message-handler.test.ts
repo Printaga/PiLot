@@ -567,6 +567,26 @@ suite("MessageHandler", () => {
 			webviewMessages.some((m: any) => m.type === "installed"),
 			"expected packages list refresh",
 		);
+		// Wrapped payload: PiPackagesPanel reads `data.installed`, and the
+		// webview's parseHostMessage collapses a bare array to {} (which used to
+		// render as "No packages installed" despite packages being installed).
+		const installedMsg = webviewMessages.find((m: any) => m.type === "installed");
+		assert.deepStrictEqual(installedMsg.data, { installed: [{ source: "skill-a" }] });
+	});
+
+	test("listPackages - sends wrapped installed list", async () => {
+		provider.listPackages = () =>
+			Promise.resolve([
+				{ source: "npm:pi-lean-ctx", path: "/p", description: "", version: "", types: [] },
+			]);
+		await handler.handle({ type: "listPackages", data: {} });
+		const msg = webviewMessages.find((m: any) => m.type === "installed");
+		assert.ok(msg, "expected installed broadcast");
+		assert.ok(
+			Array.isArray(msg.data.installed),
+			"payload must be wrapped as { installed: [...] }",
+		);
+		assert.strictEqual(msg.data.installed[0].source, "npm:pi-lean-ctx");
 	});
 
 	test("installPackage error - posts error and re-throws", async () => {
@@ -676,7 +696,9 @@ suite("MessageHandler", () => {
 		assert.deepStrictEqual(result, [{ id: "s1", label: "S1" }]);
 		const msg = webviewMessages.find((m: any) => m.type === "sessions-list");
 		assert.ok(msg);
-		assert.strictEqual(msg.data.length, 1);
+		// Wrapped payload: SessionTree reads `data.sessions`, and the webview's
+		// parseHostMessage collapses a bare array to {} (which blanked the list).
+		assert.deepStrictEqual(msg.data, { sessions: [{ id: "s1", label: "S1" }] });
 	});
 
 	test("getSessions is not a supported type (sessions come from listSessions)", async () => {

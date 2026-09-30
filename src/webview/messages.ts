@@ -16,12 +16,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Runtime shape guard for messages posted from the extension host.
  * Returns a normalized `{ type, data }` view, or null when the event is not a
- * well-formed host message (wrong envelope, non-object payload, or a payload
- * that is not an object when present).
+ * well-formed host message (wrong envelope or a primitive payload).
+ *
+ * `data` may be an object or an array — some host broadcasts (e.g. `installed`,
+ * `sessions-list`) have historically carried a bare list, and collapsing an
+ * array to {} silently blanked those lists in the UI. Consumers must still
+ * shape-check every field they read; this guard only rejects envelopes that
+ * cannot carry a payload at all.
  */
 export function parseHostMessage(
   event: MessageEvent,
-): { type: string; data: Record<string, unknown> } | null {
+): { type: string; data: Record<string, unknown> | unknown[] } | null {
   const envelope: unknown = event.data;
   // Defense-in-depth against forged events: reject anything not dispatched by
   // this window itself (the host bridge posts with the webview window as
@@ -29,7 +34,7 @@ export function parseHostMessage(
   if (typeof event.source !== "undefined" && event.source !== window) return null;
   if (!isRecord(envelope) || typeof envelope.type !== "string") return null;
   const data: unknown = envelope.data;
-  return { type: envelope.type, data: isRecord(data) ? data : {} };
+  return { type: envelope.type, data: isRecord(data) || Array.isArray(data) ? data : {} };
 }
 
 /** Coerce an unknown value to a string with a fallback (hostile/missing fields never crash a handler). */

@@ -641,7 +641,10 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 		if (!this.view) return;
 
 		const packages = await this.packageManager.listPackages();
-		this.notifyWebview({ type: "installed", data: packages });
+		// Wrapped in `{ installed: [...] }` to match PiPackagesPanel: the webview's
+		// parseHostMessage normalizes non-object payloads to {}, so a bare array
+		// would silently render as "No packages installed".
+		this.notifyWebview({ type: "installed", data: { installed: packages } });
 	}
 
 	private async getWebviewContent(webview: vscode.Webview): Promise<string> {

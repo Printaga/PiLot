@@ -322,9 +322,12 @@ export class SessionListManager {
 
 	async refreshSessionList(forceRefresh = false): Promise<void> {
 		await this.listSessions(forceRefresh);
+		// Wrapped in `{ sessions: [...] }` to match SessionTree: the webview's
+		// parseHostMessage normalizes non-object payloads to {}, so a bare array
+		// would silently render as an empty list.
 		this.deps.notifyWebview({
 			type: "sessions-list",
-			data: this._sessionListCache,
+			data: { sessions: this._sessionListCache },
 		});
 	}
 

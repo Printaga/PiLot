@@ -231,8 +231,10 @@ suite("SessionListManager", () => {
 				sentMessages.some((m) => m.type === "sessions-list"),
 				"expected sessions-list notification",
 			);
+			// The payload is wrapped — `{ sessions: [...] }` — to match what
+			// SessionTree reads (parseHostMessage collapses a bare array to {}).
 			assert.deepStrictEqual(
-				(mgr as any)._sessionListCache,
+				{ sessions: (mgr as any)._sessionListCache },
 				sentMessages.find((m) => m.type === "sessions-list").data,
 			);
 		});
