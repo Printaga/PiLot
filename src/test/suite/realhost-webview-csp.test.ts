@@ -30,7 +30,11 @@ import {
 //      handshake (script-src must allow the bundle + the nonce'd script),
 //   3. the packages panel mounts and speaks (switchTab → listPackages /
 //      getResourceToggles → "installed" broadcast),
-//   4. CSP verdicts are observed live from inside the page: the two npm
+//   4. those host replies are actually accepted by the PAGE (an injected probe
+//      reports what it received and what the panels rendered — the blind spot
+//      that hid the "No packages installed" sender-guard regression: the host
+//      posted, the page received, and nothing rendered),
+//   5. CSP verdicts are observed live from inside the page: the two npm
 //      registry fetches the panel relies on are allowed, 'self' (a real
 //      webview asset URL) is allowed, and a cross-origin negative control is
 //      blocked.
@@ -526,6 +530,139 @@ suite("REALHOST webview boots under the enforced CSP", () => {
 			Array.isArray(installed.data?.installed) &&
 				installed.data.installed.some((p: any) => p?.source === "npm:stub-pkg"),
 			`'installed' broadcast must carry the wrapped package list; got: ${JSON.stringify(installed.data)}`,
+		);
+	});
+
+	test("delivered host messages reach the page and the panels render them", async function () {
+		if (isFacadeLane()) this.skip(); // needs a real Chromium renderer
+
+		this.timeout(60_000);
+		// Everything above proves the HOST posted its replies; none of it proves
+		// the PAGE accepted them. That blind spot hid a real regression: the
+		// sender guard in src/webview/messages.ts trusted only
+		// `event.source === window`, while VS Code forwards host messages from
+		// the PARENT frame — so the packages, sessions, and system-prompt panels
+		// rendered their empty states while the host answered correctly. The
+		// probe below runs inside the real page and reports what it received,
+		// from whom, and what the panels rendered.
+		const nonce = realServedHtml.match(/'nonce-([0-9a-f]{32})'/)?.[1];
+		assert.ok(nonce, "served policy must carry a nonce to reuse for the probe");
+
+		// The probe wraps acquireVsCodeApi before the app bundle runs (module
+		// scripts are deferred, so this classic script wins that race) so it can
+		// report home through the page's single permitted API object.
+		const probeScript = `<script nonce="${nonce}">
+(function () {
+  var api = null;
+  var acquire = window.acquireVsCodeApi;
+  if (typeof acquire === "function") {
+    window.acquireVsCodeApi = function () {
+      var got = acquire.apply(this, arguments);
+      if (!api) api = got;
+      return got;
+    };
+  }
+  function post(kind, data) {
+    if (!api) return;
+    try { api.postMessage({ type: "deliveryProbe", data: Object.assign({ kind: kind }, data) }); }
+    catch (e) { /* renderer torn down */ }
+  }
+  var handshake = setInterval(function () {
+    if (!api) return;
+    clearInterval(handshake);
+    post("ready", { framed: window.parent !== window });
+  }, 20);
+  function sourceKind(e) {
+    try {
+      if (e.source === null) return "null";
+      if (e.source === window) return "window";
+      if (e.source === window.parent) return "parent";
+      return "other";
+    } catch (err) { return "unreadable"; }
+  }
+  window.addEventListener("message", function (e) {
+    var d = (e.data && typeof e.data === "object") ? e.data : {};
+    post("received", {
+      hostType: typeof d.type === "string" ? d.type : null,
+      sourceKind: sourceKind(e),
+    });
+    if (d.type === "installed") {
+      window.setTimeout(function () {
+        var status = document.querySelector(".status");
+        post("packagesDom", {
+          cards: document.querySelectorAll(".package-card").length,
+          status: status ? status.textContent : null,
+          names: Array.prototype.map.call(
+            document.querySelectorAll(".package-name"),
+            function (n) { return n.textContent; },
+          ),
+        });
+      }, 500);
+    }
+  });
+})();
+</script>`;
+		const augmented = realServedHtml.replace("</body>", `${probeScript}</body>`);
+		assert.notStrictEqual(
+			augmented,
+			realServedHtml,
+			"the probe must be injected into the served page",
+		);
+		panel!.webview.html = augmented;
+
+		await waitFor("the page probe's handshake", () =>
+			inbox.some((m) => m.type === "deliveryProbe" && m.data?.kind === "ready"),
+		);
+		const probeHandshake = inbox.find(
+			(m) => m.type === "deliveryProbe" && m.data?.kind === "ready",
+		)!.data;
+		console.log("[deliveryProbe] handshake:", JSON.stringify(probeHandshake));
+
+		// ── packages: switch tab → the panel requests, the host replies,
+		// the page must render the delivered list.
+		panel!.webview.postMessage({ type: "switchTab", data: { tab: "packages" } });
+		await waitFor("the page probe's packagesDom report", () =>
+			inbox.some((m) => m.type === "deliveryProbe" && m.data?.kind === "packagesDom"),
+		);
+		const receipts = () =>
+			inbox.filter((m) => m.type === "deliveryProbe" && m.data?.kind === "received");
+		console.log("[deliveryProbe] receipts:", JSON.stringify(receipts().map((m) => m.data)));
+		const dom = inbox.find(
+			(m) => m.type === "deliveryProbe" && m.data?.kind === "packagesDom",
+		)!.data;
+		assert.ok(
+			dom.cards > 0,
+			`the packages panel must render the delivered list (status="${dom.status}", names=${JSON.stringify(dom.names)})`,
+		);
+		assert.ok(
+			Array.isArray(dom.names) && dom.names.some((n: string) => n.includes("stub-pkg")),
+			`the rendered card must be the stubbed package; names=${JSON.stringify(dom.names)}`,
+		);
+
+		// Receipts are diagnostic only: they record which frame VS Code posts
+		// from (`sourceKind`), which is exactly the fact a sender allowlist got
+		// wrong twice. The assertion is the rendered outcome above.
+		assert.ok(
+			receipts().some((m) => m.data.hostType === "installed"),
+			"the page must have received 'installed'",
+		);
+
+		// ── sessions (history): the panel asks; the host's reply must reach the page.
+		panel!.webview.postMessage({ type: "switchTab", data: { tab: "sessions" } });
+		await waitFor("the sessions panel's listSessions request", () =>
+			inbox.some((m) => m.type === "listSessions"),
+		);
+		await waitFor("the page to receive 'sessions-list'", () =>
+			receipts().some((m) => m.data.hostType === "sessions-list"),
+		);
+
+		// ── system prompt: the panel asks; the host always answers now.
+		panel!.webview.postMessage({ type: "switchTab", data: { tab: "prompt" } });
+		await waitFor("the prompt panel's getSystemPrompt request", () =>
+			inbox.some((m) => m.type === "getSystemPrompt"),
+		);
+		await waitFor("the page to receive 'system-prompt'", () =>
+			receipts().some((m) => m.data.hostType === "system-prompt"),
 		);
 	});
 

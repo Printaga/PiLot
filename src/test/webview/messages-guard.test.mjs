@@ -1,13 +1,13 @@
 // Focused tests for the shared host-message guard (src/webview/messages.ts).
 //
-// Regression target: the guard used to reject any event whose `source` was not
-// the webview's own window. VS Code's host page forwards every host message
-// into the content iframe with `contentWindow.postMessage(...)`, so real
-// messages carry `source === window.parent` and were ALL dropped — the
-// packages, sessions, and system-prompt panels kept rendering their empty
-// states while the host was answering correctly. These tests pin the senders
-// that must be accepted, the one that must be rejected, and the payload
-// normalization every consumer relies on.
+// Regression target: the guard used to reject events by sender identity — first
+// everything but the webview's own window, then everything but
+// `window`/`window.parent`/null. Both allowlists dropped EVERY real host message
+// (VS Code's sender is none of those; see the real-host probe in
+// src/test/suite/realhost-webview-csp.test.ts), so the packages, sessions, and
+// system-prompt panels rendered their empty states while the host was answering
+// correctly. There must be no sender check — only envelope and payload
+// validation — and these tests pin exactly that.
 
 import * as assert from "node:assert";
 import { domWindow, hostMessageSource } from "./test-dom-setup.mjs";
@@ -20,29 +20,17 @@ function from(source, data) {
 	return new domWindow.MessageEvent("message", { data, source });
 }
 
-const FOREIGN_FRAME = { name: "unrelated-frame" };
-
-suite("parseHostMessage sender and payload guard", () => {
-	test("accepts host messages forwarded by the parent frame", () => {
-		// Real VS Code: the sender is the webview host page, NOT this window.
-		const msg = parseHostMessage(
-			from(hostMessageSource, { type: "installed", data: { installed: [] } }),
-		);
-		assert.ok(msg, "a parent-frame message must be accepted");
-		assert.strictEqual(msg.type, "installed");
-	});
-
-	test("accepts same-window and in-process dispatches", () => {
-		assert.ok(parseHostMessage(from(domWindow, { type: "ready", data: {} })));
-		assert.ok(parseHostMessage(from(null, { type: "ready", data: {} })));
-	});
-
-	test("rejects messages from an unrelated frame", () => {
-		assert.strictEqual(
-			parseHostMessage(from(FOREIGN_FRAME, { type: "installed", data: { installed: [] } })),
-			null,
-			"a sibling/opener frame is not a trusted sender",
-		);
+suite("parseHostMessage envelope and payload guard", () => {
+	test("accepts host messages regardless of the sending frame", () => {
+		// Real VS Code posts from a window that is neither this one nor its
+		// parent, so a sender allowlist blanks the UI. Only the envelope counts.
+		for (const source of [hostMessageSource, domWindow, null, { name: "unrelated-frame" }]) {
+			const msg = parseHostMessage(
+				from(source, { type: "installed", data: { installed: [] } }),
+			);
+			assert.ok(msg, `a well-formed envelope must be accepted (sender: ${source})`);
+			assert.strictEqual(msg.type, "installed");
+		}
 	});
 
 	test("passes array payloads through instead of collapsing them", () => {

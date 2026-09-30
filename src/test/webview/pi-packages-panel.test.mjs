@@ -6,10 +6,10 @@
 // panel reads `data.installed` through parseHostMessage — which (before the fix
 // allowed arrays through) collapsed the older bare-array payload to {}. The
 // panel then rendered "No packages installed" even though packages WERE
-// installed. A sender guard that trusted only the webview's own window broke
-// the same list again (VS Code forwards host messages from the PARENT frame),
-// so the delivery helper below posts from the host page and a test pins that an
-// unrelated frame cannot blank the list.
+// installed. Sender-identity guards broke the same list twice more (VS Code's
+// real sender is neither the page window nor its parent), so the delivery
+// helper below posts from a stand-in host page and a test pins that only a
+// well-formed host envelope may change the list.
 
 import * as assert from "node:assert";
 import { domWindow, hostMessageSource } from "./test-dom-setup.mjs";
@@ -101,17 +101,23 @@ suite("PiPackagesPanel installed-list contract", () => {
 		assert.ok(names[0].textContent.includes("pi-lean-ctx"));
 	});
 
-	test("a message from an unrelated frame cannot replace the installed list", async () => {
+	test("an envelope-less message cannot replace the installed list", async () => {
 		const mounted = render(PiPackagesPanel, {});
 		pushInstalled({ installed: [PKG] });
 		await flush();
 
-		pushInstalled({ installed: [] }, { name: "unrelated-frame" });
+		// No string `type` — not a host envelope, so the list must survive.
+		globalThis.window.dispatchEvent(
+			new domWindow.MessageEvent("message", {
+				data: { installed: [] },
+				source: hostMessageSource,
+			}),
+		);
 		await flush();
 
 		assert.ok(
 			mounted.container.querySelector(".package-name")?.textContent.includes("pi-lean-ctx"),
-			"only the host page may change the visible package list",
+			"only a valid host envelope may change the visible package list",
 		);
 	});
 });

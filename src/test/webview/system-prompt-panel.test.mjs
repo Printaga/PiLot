@@ -83,15 +83,22 @@ suite("SystemPromptPanel", () => {
 		assert.strictEqual(pre.textContent, PROMPT);
 	});
 
-	test("a message from an unrelated frame cannot fake a prompt", async () => {
+	test("an envelope-less message cannot fake a prompt", async () => {
 		const mounted = render(SystemPromptPanel, {});
-		pushSystemPrompt("forged", { name: "unrelated-frame" });
+		// A `prompt` payload without a string envelope `type` is not a host
+		// message; the panel must ignore it.
+		globalThis.window.dispatchEvent(
+			new domWindow.MessageEvent("message", {
+				data: { data: { prompt: "forged" } },
+				source: hostMessageSource,
+			}),
+		);
 		await flush();
 
 		assert.strictEqual(
 			mounted.container.querySelector(".prompt-view"),
 			null,
-			"only the host page may supply the system prompt",
+			"only a valid host envelope may supply the system prompt",
 		);
 	});
 

@@ -7,8 +7,7 @@
 // which an earlier sender guard made reject every real host message — the
 // panel sat on "Loading sessions..." forever. These tests pin the wrapped
 // shape, the legacy bare-array tolerance, hostile-entry filtering, and the
-// sender check, and they deliver messages from the parent frame exactly as
-// VS Code does.
+// envelope requirement, delivering messages from a stand-in host page.
 
 import * as assert from "node:assert";
 import { domWindow, hostMessageSource } from "./test-dom-setup.mjs";
@@ -72,18 +71,24 @@ suite("SessionTree sessions-list contract", () => {
 		assert.deepStrictEqual(labels(mounted), ["First session"]);
 	});
 
-	test("a message from an unrelated frame cannot replace the list", async () => {
+	test("an envelope-less message cannot replace the list", async () => {
 		const mounted = render(SessionTree, {});
 		pushSessionsList({ sessions: SESSIONS });
 		await flush();
 
-		pushSessionsList({ sessions: [] }, { name: "unrelated-frame" });
+		// No string `type` — not a host envelope, so the history must survive.
+		globalThis.window.dispatchEvent(
+			new domWindow.MessageEvent("message", {
+				data: { sessions: [] },
+				source: hostMessageSource,
+			}),
+		);
 		await flush();
 
 		assert.deepStrictEqual(
 			labels(mounted),
 			["First session", "Second session"],
-			"only the host page may change the visible history",
+			"only a valid host envelope may change the visible history",
 		);
 	});
 });

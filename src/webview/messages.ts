@@ -14,33 +14,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * True for the senders a host message may legitimately come from.
- *
- * VS Code delivers host messages through the PARENT frame, never this window:
- * the webview host page owns an inner `#active-frame` iframe (this window) and
- * forwards every host message into it with
- * `contentWindow.postMessage(message, origin)`, so the `message` event carries
- * `source === window.parent`. A source of `window` only happens for same-window
- * dispatches (tests, other scripts in this document) and `null` for events
- * constructed in-process.
- *
- * An earlier hardening pass rejected everything but `window`, which silently
- * dropped EVERY real host message: the packages, sessions, and system-prompt
- * panels all kept rendering their empty state while the host was answering
- * correctly. Only a genuinely foreign sender (a sibling/opener frame) is
- * rejected here; the per-field guards in each consumer stay the real
- * validation boundary.
- */
-function isTrustedMessageSource(source: MessageEvent["source"]): boolean {
-  if (!source) return true;
-  if (source === window) return true;
-  return source === window.parent;
-}
-
-/**
  * Runtime shape guard for messages posted from the extension host.
  * Returns a normalized `{ type, data }` view, or null when the event is not a
- * well-formed host message (foreign sender, wrong envelope, primitive payload).
+ * well-formed host message (wrong envelope or primitive payload).
+ *
+ * There is deliberately NO sender allowlist here. Two attempts at one shipped
+ * and silently dropped EVERY host message, because VS Code's real delivery
+ * shape is not expressible as a frame identity check: the real-host probe in
+ * src/test/suite/realhost-webview-csp.test.ts measures the shipped page
+ * running unframed (`window.parent === window`) while every host message
+ * arrives with a `source` that is neither `window`, `window.parent`, nor null.
+ * The result was the "No packages installed" regression — plus empty sessions
+ * and system-prompt panels — even though the host had answered correctly and
+ * the page had received the reply. The check also never protected anything: a
+ * script running in the page can dispatch a MessageEvent with any `source` it
+ * can reach. The envelope validation below, each consumer's per-field guards,
+ * and the CSP are the actual boundary.
  *
  * `data` may be an object or an array — some host broadcasts (e.g. `installed`,
  * `sessions-list`) have historically carried a bare list, and collapsing an
@@ -51,7 +40,6 @@ function isTrustedMessageSource(source: MessageEvent["source"]): boolean {
 export function parseHostMessage(
   event: MessageEvent,
 ): { type: string; data: Record<string, unknown> | unknown[] } | null {
-  if (!isTrustedMessageSource(event.source)) return null;
   const envelope: unknown = event.data;
   if (!isRecord(envelope) || typeof envelope.type !== "string") return null;
   const data: unknown = envelope.data;
