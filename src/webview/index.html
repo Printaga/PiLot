@@ -19,10 +19,20 @@
         img-src allows data: for inline base64 message images but NOT a bare
         `https:` wildcard — rendered message content could otherwise pull
         tracking pixels from arbitrary hosts and leak that the webview is open.
-        Residual risks (must be handled in the renderer, CSP can't): data: URIs
-        are unbounded — cap accepted size/content-type; blocked remote images
-        fail silently — render a placeholder via the img `error` event.
+        Residual risks (currently UNMITIGATED in the renderer, CSP can't help):
+        data: URIs are unbounded — no size/content-type cap is applied to host-
+        provided images today, and blocked remote images render a broken-image
+        icon with no placeholder (no <img> error handler exists).
     -->
+    <!-- FORMAT CONTRACT (host-side rewrite is regex-based and silently no-ops
+         on a mismatch — see getWebviewContent in src/pi-agent-provider.ts):
+         1. `http-equiv` must appear BEFORE `content` in this tag.
+         2. Origin placeholders must be the literal quoted token 'self'.
+         3. `script-src` must stay a single directive ending with `;` (the host
+            injects the nonce into the first script-src occurrence).
+         A reformat that breaks any of these ships a webview with no nonce and
+         no cspSource: the media-globals script is blocked and icons silently
+         disappear. realhost-webview-csp.test.ts guards the built output. -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://registry.npmjs.org; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none';"

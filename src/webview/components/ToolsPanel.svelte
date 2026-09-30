@@ -12,9 +12,14 @@
   // Props
   interface Props {
     toolPreset?: string | null;
+    customTools?: string[] | null;
     lightMode?: boolean;
   }
-  let { toolPreset: propPreset = null, lightMode = false }: Props = $props();
+  let {
+    toolPreset: propPreset = null,
+    customTools: propCustomTools = null,
+    lightMode = false,
+  }: Props = $props();
 
   // Default tools available in PI
   const defaultTools: ToolDef[] = [
@@ -46,6 +51,10 @@
   let activeTab = $state<"tools" | "presets">("tools");
   let toolPreset = $state<string>("default");
   let customToolsInput = $state("");
+  let customToolError = $state("");
+  // Last prop-driven preset we applied; guards the sync effect below against
+  // reacting to local toolPreset changes (which are also tracked deps).
+  let lastAppliedPropPreset = $state<string | null>(null);
 
   // Light Mode restricts the runtime to the core tools (default preset).
   // Show the EFFECTIVE state and block edits so the UI can't promise tools
@@ -58,44 +67,82 @@
   // Derive sync state from prop presence — no effect, no write, no re-render cycle.
   const isSynced = $derived(propPreset !== null);
 
+  // Restore the persisted tool list (the panel is mounted/unmounted by tab
+  // switches, so a custom preset must not re-default to built-ins only).
+  $effect(() => {
+    if (propCustomTools === null) return;
+    const knownBuiltin = new Set(defaultTools.map((t) => t.name));
+    const storedCustom = propCustomTools.filter((name) => !knownBuiltin.has(name));
+    const currentCustom = tools.filter((t) => t.category !== "builtin").map((t) => t.name);
+    if (
+      storedCustom.length === currentCustom.length &&
+      storedCustom.every((n) => currentCustom.includes(n))
+    ) {
+      return;
+    }
+    tools = [
+      ...tools.filter((t) => t.category === "builtin"),
+      ...storedCustom.map((name): ToolDef => ({
+        name,
+        description: `Custom tool: ${name}`,
+        enabled: true,
+        category: "custom",
+      })),
+    ];
+  });
+
   // Request initial settings on mount if parent hasn't passed a preset yet.
   onMount(() => {
     if (propPreset === null) {
-      const vscode = (window as any).vscode;
+      const vscode = getVsCodeApi();
       if (vscode?.postMessage) {
         vscode.postMessage({ type: "getSettings" });
       }
     }
   });
 
-  // Apply external preset changes. Only runs when propPreset actually differs
-  // from local toolPreset, so we never thrash on parent rerenders.
+  // Apply external preset changes. Compare against the previously applied
+  // prop value instead of local toolPreset: reading toolPreset here would make
+  // local edits re-run this effect and wipe just-applied state while the
+  // host's settings-response is still in flight.
   $effect(() => {
     if (propPreset === null) return;
-    if (propPreset === toolPreset) return;
+    if (propPreset === lastAppliedPropPreset) return;
+    lastAppliedPropPreset = propPreset;
     applyPreset(propPreset, false);
   });
 
-  function sendToolUpdate(msg: any) {
-    const vscode = (window as any).vscode;
-    if (vscode?.postMessage) {
-      vscode.postMessage(msg);
+  async function sendToolUpdate(msg: any) {
+    const vscode = getVsCodeApi();
+    if (!vscode?.postMessage) return;
+    try {
+      await vscode.postMessage(msg);
+    } catch (err) {
+      // Re-sync from the host so the panel cannot drift from persisted state.
+      console.error("setToolConfig failed", err);
+      vscode.postMessage({ type: "getSettings" });
     }
   }
 
-  function toggleTool(index: number) {
-    if (lightMode) return;
-    tools = tools.map((t, i) => (i === index ? { ...t, enabled: !t.enabled } : t));
-    notifyToolChange();
+  function getVsCodeApi() {
+    return (window as any).vscode;
   }
 
-  function notifyToolChange() {
+  function toggleToolByName(name: string) {
+    if (lightMode) return;
+    tools = tools.map((t) => (t.name === name ? { ...t, enabled: !t.enabled } : t));
+    // A manual per-tool toggle demotes the session to the custom preset.
+    notifyToolChange(true);
+  }
+
+  function notifyToolChange(forceCustomPreset: boolean) {
     if (lightMode) return;
     const enabledTools = tools.filter((t) => t.enabled).map((t) => t.name);
-    // The runtime only honors `customTools` when `toolPreset === "custom"`, so
-    // switch to the custom preset whenever the user edits individual tools —
-    // otherwise toggles update the UI but the session keeps its preset set.
-    if (toolPreset !== "custom") toolPreset = "custom";
+    // Only a manual per-tool edit demotes the session to the custom preset
+    // (the runtime only honors `customTools` when `toolPreset === "custom"`);
+    // an explicit preset selection must keep its own name or the other preset
+    // cards become unreachable from the UI.
+    if (forceCustomPreset && toolPreset !== "custom") toolPreset = "custom";
     sendToolUpdate({
       type: "setToolConfig",
       data: { toolPreset, customTools: enabledTools },
@@ -106,19 +153,26 @@
     // Validate before mutating: an unrecognized/stale preset from config would
     // otherwise be persisted while leaving the tool state unchanged.
     if (!["default", "none", "review", "custom"].includes(preset)) return;
+    // Preserve user-added custom tools across preset switches — a preset only
+    // governs the built-ins, and dropping custom entries here would persist
+    // their deletion into `pi-agent.customTools`.
+    const custom = tools.filter((t) => t.category !== "builtin");
     toolPreset = preset;
     switch (preset) {
       case "default":
-        tools = defaultTools.map((t) => ({ ...t, enabled: true }));
+        tools = [...defaultTools.map((t) => ({ ...t, enabled: true })), ...custom];
         break;
       case "none":
-        tools = defaultTools.map((t) => ({ ...t, enabled: false }));
+        tools = [...defaultTools.map((t) => ({ ...t, enabled: false })), ...custom];
         break;
       case "review":
-        tools = defaultTools.map((t) => ({
-          ...t,
-          enabled: ["read", "grep", "find", "ls"].includes(t.name),
-        }));
+        tools = [
+          ...defaultTools.map((t) => ({
+            ...t,
+            enabled: ["read", "grep", "find", "ls"].includes(t.name),
+          })),
+          ...custom,
+        ];
         break;
       case "custom":
         // Keep current state; force reactivity for downstream consumers
@@ -126,14 +180,24 @@
         break;
     }
     if (notify) {
-      notifyToolChange();
+      notifyToolChange(false);
     }
   }
 
   function addCustomTool() {
     if (lightMode) return;
     const name = customToolsInput.trim().toLowerCase();
-    if (!name || tools.some((t) => t.name === name)) return;
+    // Constrain the identifier: it is persisted verbatim into the user's
+    // global `pi-agent.customTools` setting and handed to the runtime.
+    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name)) {
+      customToolError = "Use 1-32 chars: a-z, 0-9, '-' or '_', starting with a letter.";
+      return;
+    }
+    if (tools.some((t) => t.name === name)) {
+      customToolError = `"${name}" is already in the list.`;
+      return;
+    }
+    customToolError = "";
     tools = [
       ...tools,
       {
@@ -144,14 +208,14 @@
       },
     ];
     customToolsInput = "";
-    notifyToolChange();
+    notifyToolChange(true);
   }
 
   function removeCustomTool(index: number) {
     if (lightMode) return;
     if (tools[index].category === "builtin") return;
     tools = tools.filter((_, i) => i !== index);
-    notifyToolChange();
+    notifyToolChange(true);
   }
 
   const builtinTools = $derived(tools.filter((t) => t.category === "builtin"));
@@ -183,8 +247,13 @@
 
   {#if lightMode}
     <div class="light-mode-banner">
-      <strong>Light Mode is on.</strong> Only read, bash, edit and write are active — tool settings apply
-      again when Light Mode is off. Turn it off in Settings.
+      {#if lightRestrictsTools}
+        <strong>Light Mode is on.</strong> Only read, bash, edit and write are active — tool settings
+        apply again when Light Mode is off. Turn it off in Settings.
+      {:else}
+        <strong>Light Mode is on.</strong> Discovery is disabled, but the active
+        <strong>{toolPreset}</strong> preset still governs tools. Turn Light Mode off in Settings.
+      {/if}
     </div>
   {/if}
 
@@ -211,7 +280,7 @@
         <p class="section-description">Control which tools PI can use in the current session</p>
 
         <div class="tools-list">
-          {#each builtinTools as tool, index (tool.name)}
+          {#each builtinTools as tool (tool.name)}
             <div class="tool-item">
               <div class="tool-info">
                 <span class="tool-name">{tool.name}</span>
@@ -221,7 +290,7 @@
                 <input
                   type="checkbox"
                   checked={isEffectiveEnabled(tool.name, tool.enabled)}
-                  onchange={() => toggleTool(index)}
+                  onchange={() => toggleToolByName(tool.name)}
                   disabled={lightMode}
                 />
                 <span class="toggle-slider"></span>
@@ -245,10 +314,7 @@
                       type="checkbox"
                       checked={isEffectiveEnabled(tool.name, tool.enabled)}
                       disabled={lightMode}
-                      onchange={() => {
-                        const idx = tools.findIndex((t) => t.name === tool.name);
-                        if (idx >= 0) toggleTool(idx);
-                      }}
+                      onchange={() => toggleToolByName(tool.name)}
                     />
                     <span class="toggle-slider"></span>
                   </label>
@@ -293,6 +359,9 @@
             Add
           </button>
         </div>
+        {#if customToolError}
+          <p class="custom-tool-error" role="alert">{customToolError}</p>
+        {/if}
       </section>
     {:else if activeTab === "presets"}
       <section class="tools-section">

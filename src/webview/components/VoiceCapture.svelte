@@ -17,7 +17,7 @@
   class:listening={isListening}
   onclick={onToggle}
   title={isListening ? "Stop dictation" : "Start dictation (Ctrl+Shift+;)"}
-  aria-label={isListening ? "Stop dictation" : "Start dictation"}
+  aria-label="Dictation"
   aria-pressed={isListening}
 >
   <svg

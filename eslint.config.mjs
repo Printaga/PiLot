@@ -88,7 +88,10 @@ export default [
 			globals: {
 				suite: "readonly",
 				test: "readonly",
+				setup: "readonly",
+				suiteSetup: "readonly",
 				teardown: "readonly",
+				suiteTeardown: "readonly",
 			},
 		},
 	},

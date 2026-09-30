@@ -1,5 +1,19 @@
 #!/bin/sh
 # Fail loudly when the toolchain is missing: a silent no-op pre-commit hook
 # lets unformatted/unlinted code through without anyone noticing.
-set -e
+# Note: files matched by no lint-staged glob (e.g. *.mts, svelte.config.js before
+# the js glob was added) are skipped silently by lint-staged itself; keep
+# .lintstagedrc.json globs in sync with the file types this repo tracks.
+set -eu
+
+if ! command -v pnpm >/dev/null 2>&1; then
+	echo "pre-commit: pnpm not found (expected pnpm@11.8.0 per package.json packageManager)" >&2
+	exit 1
+fi
+
+if [ ! -x node_modules/.bin/lint-staged ]; then
+	echo "pre-commit: local lint-staged not installed - run 'pnpm install' first" >&2
+	exit 1
+fi
+
 pnpm exec lint-staged

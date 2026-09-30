@@ -1,26 +1,44 @@
 import * as vscode from "vscode";
 import { PiAgentProvider, validateThinkingLevel } from "./pi-agent-provider.js";
+import { disposeDiagnosticsChannel } from "./commands/diagnostics.js";
 import { registerCommands } from "./commands/index.js";
 import { startUpdateChecker } from "./update-checker.js";
+
+/**
+ * Read the `pi-agent.*` provider options from a configuration section.
+ * Single source for activate() and the config-change listener — the mapping
+ * (and its hardcoded defaults) previously lived in both places verbatim.
+ */
+function readPiAgentConfig(section: ReturnType<typeof vscode.workspace.getConfiguration>) {
+	return {
+		defaultModel: section.get<string>("defaultModel", "anthropic/claude-sonnet-4-5"),
+		defaultProvider: section.get<string>("defaultProvider", "anthropic"),
+		autoContext: section.get<boolean>("context.autoAttach", true),
+		maxTokens: section.get<number>("maxTokens", 8192),
+		thinkingLevel: validateThinkingLevel(section.get("thinkingLevel")),
+		sessionDir: section.get<string>("sessionDir", ""),
+	};
+}
+
+/**
+ * pi's SDK reads the agent directory only from PI_CODING_AGENT_DIR, so bridge
+ * the setting into the environment. An empty setting must DELETE the variable:
+ * a stale value from the parent process would otherwise keep applying.
+ */
+function applyAgentDirEnv(agentDir: string): void {
+	if (agentDir) {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+	} else {
+		delete process.env.PI_CODING_AGENT_DIR;
+	}
+}
 
 export async function activate(context: vscode.ExtensionContext) {
 	const config = vscode.workspace.getConfiguration("pi-agent");
 
-	// pi's SDK reads the agent directory only from PI_CODING_AGENT_DIR, so
-	// bridge the setting into it (applied at activation; reload to apply).
-	const agentDir = config.get<string>("agentDir", "").trim();
-	if (agentDir) {
-		process.env.PI_CODING_AGENT_DIR = agentDir;
-	}
+	applyAgentDirEnv(config.get<string>("agentDir", "").trim());
 
-	const provider = new PiAgentProvider(context, {
-		defaultModel: config.get("defaultModel", "anthropic/claude-sonnet-4-5"),
-		defaultProvider: config.get("defaultProvider", "anthropic"),
-		autoContext: config.get("context.autoAttach", true),
-		maxTokens: config.get("maxTokens", 8192),
-		thinkingLevel: validateThinkingLevel(config.get("thinkingLevel")),
-		sessionDir: config.get("sessionDir", ""),
-	});
+	const provider = new PiAgentProvider(context, readPiAgentConfig(config));
 
 	context.subscriptions.push(provider);
 
@@ -37,10 +55,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.openPanel", async (sessionId?: string) => {
 			await vscode.commands.executeCommand("piAgentChat.focus");
-			if (sessionId) {
-				await provider.switchSession(sessionId);
-			} else if (!provider.hasSession) {
-				await provider.newSession();
+			try {
+				if (sessionId) {
+					await provider.switchSession(sessionId);
+				} else if (!provider.hasSession) {
+					await provider.newSession();
+				}
+			} catch (err) {
+				// createSession() can reject (binary/session creation failure):
+				// without this the user just clicks and nothing happens.
+				provider.logDebug("[PI] Failed to open panel:", err);
+				void vscode.window.showErrorMessage(
+					`PiLot Studio: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 		}),
 	);
@@ -48,7 +75,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.newSession", async () => {
 			await vscode.commands.executeCommand("piAgentChat.focus");
-			await provider.newSession();
+			try {
+				await provider.newSession();
+			} catch (err) {
+				provider.logDebug("[PI] Failed to create session:", err);
+				void vscode.window.showErrorMessage(
+					`PiLot Studio: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 		}),
 	);
 
@@ -70,8 +104,6 @@ const resourceConfigKeys = [
 	"extraPromptTemplates",
 	"systemPrompt",
 	"appendSystemPrompts",
-	"disabledSkills",
-	"disabledPackages",
 ];
 
 /**
@@ -91,14 +123,14 @@ export function installConfigListener(
 	return vscode.workspace.onDidChangeConfiguration((e) => {
 		if (e.affectsConfiguration("pi-agent")) {
 			const newConfig = vscode.workspace.getConfiguration("pi-agent");
-			provider.updateConfig({
-				defaultModel: newConfig.get("defaultModel", "anthropic/claude-sonnet-4-5"),
-				defaultProvider: newConfig.get("defaultProvider", "anthropic"),
-				autoContext: newConfig.get("context.autoAttach", true),
-				maxTokens: newConfig.get("maxTokens", 8192),
-				thinkingLevel: validateThinkingLevel(newConfig.get("thinkingLevel")),
-				sessionDir: newConfig.get("sessionDir", ""),
-			});
+			provider.updateConfig(readPiAgentConfig(newConfig));
+
+			// The SDK reads the agent directory from the environment at session
+			// creation, so a changed agentDir must be re-bridged (and requires a
+			// rebuild — handled by the lightMode branch below when combined).
+			if (e.affectsConfiguration("pi-agent.agentDir")) {
+				applyAgentDirEnv(newConfig.get<string>("agentDir", "").trim());
+			}
 
 			if (
 				e.affectsConfiguration("pi-agent.lightMode") ||
@@ -123,4 +155,8 @@ export function installConfigListener(
 	});
 }
 
-export function deactivate() {}
+export function deactivate() {
+	// The diagnostics output channel is created lazily; dispose it so it does
+	// not leak across extension-host reloads.
+	disposeDiagnosticsChannel();
+}

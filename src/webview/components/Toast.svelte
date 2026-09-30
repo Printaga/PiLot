@@ -17,21 +17,25 @@
   /** Upper bound on simultaneously visible toasts — a runaway loop previously
    *  stacked unbounded DOM nodes; the oldest are dropped beyond the cap. */
   const MAX_TOASTS = 5;
+  const DEFAULT_DURATION_MS = 30000;
 
   export function showToast(opts: Omit<Toast, "id">) {
     const id = `toast-${++toastIdCounter}`;
     const toast: Toast = { ...opts, id };
     toasts = [...toasts, toast];
-    if (toasts.length > MAX_TOASTS) {
-      const oldest = toasts[0];
-      dismissToast(oldest.id);
+    // Evict the oldest *auto-dismissing* toast first: a persistent toast was
+    // explicitly marked as "must stay", so the cap must not drop it silently.
+    while (toasts.length > MAX_TOASTS) {
+      const victim = toasts.find((t) => !t.persistent) ?? toasts[0];
+      dismissToast(victim.id);
     }
 
-    // Normalize: NaN/Infinity/undefined-with-no-default all mean "no auto
-    // dismiss" here — treat them explicitly instead of letting NaN silently
-    // disable auto-dismiss while looking like a numeric duration.
+    // Normalize: an explicit finite duration > 0 is honoured; anything else
+    // (undefined, NaN, Infinity, 0, negative) falls back to the default —
+    // `persistent: true` is the only way to get a sticky toast.
     const rawDuration = typeof opts.duration === "number" ? opts.duration : NaN;
-    const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 30000;
+    const duration =
+      Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : DEFAULT_DURATION_MS;
     if (!opts.persistent) {
       const timer = setTimeout(() => {
         timers.delete(id);
@@ -57,20 +61,21 @@
     toasts = [];
   }
 
-  // Expose globally for other components to use. Mounted once at app startup;
-  // the guard keeps a re-mount (HMR) from orphaning timers registered against
-  // the previous instance's timers Map.
-  if (typeof window !== "undefined" && !(window as any).__toast) {
-    (window as any).__toast = { showToast, dismissToast, clearToasts };
+  // Expose globally for other components to use. ALWAYS (re)register: a stale
+  // global from a previous instance (HMR remount) points at discarded $state
+  // and would silently swallow every toast; the cleanup below only deletes the
+  // global when it still points at this instance.
+  if (typeof window !== "undefined") {
+    window.__toast = { showToast, dismissToast, clearToasts };
   }
 
   // Release timers/state when the component is torn down so a destroyed
   // instance's pending timeouts can't fire against discarded module state.
   $effect(() => {
     return () => {
-      if ((window as any).__toast?.showToast === showToast) {
+      if (window.__toast?.showToast === showToast) {
         clearToasts();
-        delete (window as any).__toast;
+        delete window.__toast;
       }
     };
   });
@@ -92,10 +97,13 @@
 {#if toasts.length > 0}
   <div class="toast-container" role="status" aria-live="polite" aria-atomic="false">
     {#each toasts as toast (toast.id)}
-      <div class="toast toast-{toast.type}" role="alert" aria-labelledby="{toast.id}-title">
+      <!-- Keep a single polite live region and let the content be read: an
+           assertive role="alert" plus aria-labelledby dropped the message text
+           and double-announced the title. -->
+      <div class="toast toast-{toast.type}">
         <div class="toast-icon">{getTypeIcon(toast.type)}</div>
         <div class="toast-body">
-          <div class="toast-title" id="{toast.id}-title">{toast.title}</div>
+          <div class="toast-title">{toast.title}</div>
           {#if toast.message}
             <div class="toast-message">{toast.message}</div>
           {/if}

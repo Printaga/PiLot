@@ -12,12 +12,16 @@ import { runTests } from "@vscode/test-electron";
 const WIN32_VSCODE_ROOT_VARS = ["LOCALAPPDATA", "ProgramFiles"] as const;
 
 function win32VscodeCandidates(): string[] {
-	return WIN32_VSCODE_ROOT_VARS.flatMap((rootVar) =>
-		[
+	return WIN32_VSCODE_ROOT_VARS.flatMap((rootVar) => {
+		// An unset/empty root var would make path.join produce a CWD-relative
+		// candidate that probes files inside the project; skip it entirely.
+		const root = process.env[rootVar];
+		if (!root) return [];
+		return [
 			["Programs", "Microsoft VS Code", "Code.exe"],
 			["Microsoft VS Code", "Code.exe"],
-		].map((segments) => path.join(process.env[rootVar] || "", ...segments)),
-	);
+		].map((segments) => path.join(root, ...segments));
+	});
 }
 
 /**
@@ -99,7 +103,11 @@ function isGreenReport(reportPath: string, startedAt: Date): boolean {
 	try {
 		if (!existsSync(reportPath)) return false;
 		if (statSync(reportPath).mtimeMs <= startedAt.getTime()) return false;
-		const match = /^PASS: \d+\s+FAIL: (\d+)$/m.exec(readFileSync(reportPath, "utf8"));
+		const content = readFileSync(reportPath, "utf8");
+		// A crash marker anywhere in the report means the run was not clean, even
+		// if a "FAIL: 0" summary line is present next to it.
+		if (/^(UNCAUGHT|UNHANDLED):/m.test(content)) return false;
+		const match = /^PASS: \d+\s+FAIL: (\d+)$/m.exec(content);
 		return match !== null && Number(match[1]) === 0;
 	} catch {
 		return false;
@@ -131,6 +139,9 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 	// and exhaust the per-user inotify instance limit (often 128), causing
 	// EMFILE and a host crash (exit 7) on Linux.
 	const testWorkspace = path.join(os.tmpdir(), `pilot-test-workspace-${tmpSuffix}`);
+	// Reset before use: a crashed/killed run with the same pid could leave files
+	// visible to the window opened on this folder.
+	rmSync(testWorkspace, { recursive: true, force: true });
 	mkdirSync(testWorkspace, { recursive: true });
 	const folderUri = pathToFileURL(testWorkspace).toString();
 
@@ -208,9 +219,16 @@ async function runOneFile(testFile: string, reportPath: string): Promise<void> {
 		throw err;
 	} finally {
 		// Best-effort cleanup of this file's per-run temp dirs (unique per pid +
-		// file, so removal can never race a concurrent run).
-		rmSync(testWorkspace, { recursive: true, force: true });
-		rmSync(testUserDataDir, { recursive: true, force: true });
+		// file, so removal can never race a concurrent run). Each removal is
+		// guarded: a locked dir (Windows AV, open handle) must never mask the
+		// original run outcome out of a finally block.
+		for (const dir of [testWorkspace, testUserDataDir]) {
+			try {
+				rmSync(dir, { recursive: true, force: true });
+			} catch {
+				/* best effort */
+			}
+		}
 	}
 }
 
@@ -221,6 +239,14 @@ const reportPath = path.resolve(suiteRoot, "test-results.log");
 const testFiles = process.env.MOCHA_TEST_FILE
 	? [process.env.MOCHA_TEST_FILE]
 	: (await glob("**/*.test.js", { cwd: suiteRoot })).sort();
+// Validate BEFORE any setup work: an empty file list must fail immediately
+// instead of reporting an empty green run after spawning hosts.
+if (testFiles.length === 0) {
+	console.error(
+		"[runTest] no test files found — the suite is misconfigured (or dist-tsc is stale); failing instead of reporting an empty green run.",
+	);
+	process.exit(1);
+}
 const failed: string[] = [];
 for (const file of testFiles) {
 	process.stdout.write(`\n=== [runTest] ${file} ===\n`);
@@ -250,12 +276,6 @@ for (const file of testFiles) {
 		}
 	}
 	if (!green) break;
-}
-if (testFiles.length === 0) {
-	console.error(
-		"[runTest] no test files found — the suite is misconfigured (or dist-tsc is stale); failing instead of reporting an empty green run.",
-	);
-	process.exit(1);
 }
 if (failed.length > 0) {
 	console.error(`Failed test files: ${failed.join(", ")}`);

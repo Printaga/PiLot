@@ -2,32 +2,61 @@
   import { onMount } from "svelte";
   import { parseHostMessage, asString, postToHost } from "../messages";
 
-  let { sessionResources = null }: { sessionResources?: any } = $props();
+  type Props = { sessionResources?: { sessionId?: string } | null };
+  let { sessionResources = null }: Props = $props();
 
   let systemPrompt = $state("");
   let hasPrompt = $state(false);
   let isLoading = $state(true);
   let copyState = $state<"idle" | "ok" | "fail">("idle");
   let wordWrap = $state(false);
+  // Panel-local request counter: drops out-of-order/stale replies during a
+  // session switch so the previous session's prompt can never overwrite the
+  // current one (postMessage preserves host-side ordering).
+  let latestRequestId = 0;
+  let requestId = 0;
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   // Request the prompt on mount and whenever the session resources refresh
   // (which follows session switches/restarts, so the panel follows the active
   // session without needing its own event subscription).
   $effect(() => {
-    void sessionResources;
+    const res = sessionResources;
+    // No session => the host never answers (`sendSystemPrompt` returns early);
+    // show the empty state instead of spinning forever.
+    isLoading = res != null;
+    if (res == null) {
+      systemPrompt = "";
+      hasPrompt = false;
+      return;
+    }
+    requestId = ++latestRequestId;
     postToHost({ type: "getSystemPrompt" });
+  });
+
+  // Backstop: bound the wait so a dropped reply cannot strand the panel in the
+  // loading state (the host has several silent no-answer paths).
+  $effect(() => {
+    if (!isLoading) return;
+    const timer = setTimeout(() => (isLoading = false), 3000);
+    return () => clearTimeout(timer);
   });
 
   onMount(() => {
     function handleMessage(event: MessageEvent) {
       const msg = parseHostMessage(event);
       if (!msg || msg.type !== "system-prompt") return;
+      // Drop replies that belong to a superseded request.
+      if (requestId !== latestRequestId) return;
       systemPrompt = asString(msg.data.prompt);
       hasPrompt = systemPrompt.length > 0;
       isLoading = false;
     }
     window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      if (copyTimer) clearTimeout(copyTimer);
+    };
   });
 
   let charCount = $derived(systemPrompt.length);
@@ -45,7 +74,10 @@
     } catch {
       copyState = "fail";
     }
-    setTimeout(() => {
+    // Track + reset the handle: stacked timers previously reset the feedback
+    // early, and an untracked timer survived teardown.
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => {
       copyState = "idle";
     }, 2000);
   }
@@ -70,8 +102,9 @@
       <button
         class="action-btn"
         class:active={wordWrap}
+        aria-pressed={wordWrap}
         onclick={() => (wordWrap = !wordWrap)}
-        title="Toggle word wrap"
+        title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
       >
         Wrap
       </button>

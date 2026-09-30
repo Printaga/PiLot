@@ -244,13 +244,31 @@
 
   // Extension-host bridge: `pi-agent.searchChat` / `pi-agent.focusInput`.
   // A prop counter (not a bare window message) survives tab switches where
-  // ChatPanel mounts after the message was posted.
+  // ChatPanel mounts after the message was posted. Compare against the last
+  // handled tick: this component is mounted/unmounted per chat tab, and a
+  // stale non-zero counter would re-open the search bar on every remount.
+  // handledTick holds the last-applied bridge tick, so it must START at the
+  // mount-time counter: the host may have sent the command before this tab
+  // mounted, and replaying it would re-open search / steal focus on every
+  // remount. Capturing the initial value is the whole point — only later
+  // changes (an increment) should trigger the effects below.
+  // svelte-ignore state_referenced_locally
+  let handledSearchTick = $state(searchRequestTick);
+  // svelte-ignore state_referenced_locally
+  let handledFocusTick = $state(focusInputRequestTick);
+
   $effect(() => {
-    if (searchRequestTick > 0) openSearch();
+    if (searchRequestTick > 0 && searchRequestTick !== handledSearchTick) {
+      handledSearchTick = searchRequestTick;
+      openSearch();
+    }
   });
 
   $effect(() => {
-    if (focusInputRequestTick > 0) focusChatInput();
+    if (focusInputRequestTick > 0 && focusInputRequestTick !== handledFocusTick) {
+      handledFocusTick = focusInputRequestTick;
+      focusChatInput();
+    }
   });
 
   // Message editing state (Feature 7)
@@ -338,7 +356,10 @@
     const searching = showSearch;
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (!searching && (isNearBottom || (!userScrolledUp && messages.length > 0))) {
-      el.scrollTop = el.scrollHeight;
+      // Instant scroll: `.messages` declares `scroll-behavior: smooth`, which
+      // would turn every streamed token into a queued smooth animation so the
+      // transcript visibly lags the stream.
+      el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
     }
     showScrollBtn = !isNearBottom && el.scrollHeight > el.clientHeight + 80;
   });
@@ -357,20 +378,34 @@
     showScrollBtn = !isNearBottom && el.scrollHeight > el.clientHeight + 80;
   }
 
-  // Handle messages from extension
+  // Handle messages from extension. The payload is untrusted: shape-validate
+  // everything so a malformed/hostile message is dropped instead of crashing
+  // the panel (a null event.data previously threw on destructure).
   $effect(() => {
     function handleMessage(event: MessageEvent) {
-      const { type, data } = event.data;
-      if (type === "add-file-to-chat") addPathToInput(data.path);
-      if (type === "workspace-files") files = data.files || [];
+      const payload: unknown = event.data;
+      if (!payload || typeof payload !== "object") return;
+      const { type } = payload as { type?: string };
+      const data = ((payload as { data?: unknown }).data ?? {}) as Record<string, unknown>;
+      if (type === "add-file-to-chat" && typeof data.path === "string") {
+        addPathToInput(data.path);
+      }
+      if (type === "workspace-files") {
+        files = Array.isArray(data.files)
+          ? data.files.filter((f): f is string => typeof f === "string")
+          : [];
+      }
       if (type === "focus-search") openSearch();
       if (type === "focus-input") focusChatInput();
       if (type === "files-attached") {
-        if (data?.paths && data.paths.length > 0) {
+        const paths = Array.isArray(data.paths)
+          ? data.paths.filter((p): p is string => typeof p === "string")
+          : [];
+        if (paths.length > 0) {
           const cursorPos = textareaEl?.selectionStart || inputText.length;
           const textBeforeCursor = inputText.slice(0, cursorPos);
           const textAfterCursor = inputText.slice(cursorPos);
-          const fileMentions = data.paths.map((p: string) => "@" + p).join(" ");
+          const fileMentions = paths.map((p) => "@" + p).join(" ");
           inputText =
             textBeforeCursor + (textBeforeCursor ? " " : "") + fileMentions + " " + textAfterCursor;
         }
@@ -430,6 +465,9 @@
 
     const imagesToSend = hasImages ? [...inputImages] : undefined;
     inputImages = [];
+    // The Send button can submit while a dropdown is open (Enter is blocked,
+    // the button is not): clear the stale query/rows with the input text.
+    closeAllAutocompletes();
     onSend(text, imagesToSend);
     inputText = "";
     visibleMessageCount = transcriptWindowSize;
@@ -480,15 +518,20 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // An open autocomplete swallows Enter even when its filtered list is
-      // empty — submitting would send the literal "@query" text as a message.
-      if (showSlashAutocomplete || showAutocomplete) return;
-      if (showSlashAutocomplete && filteredSlashCommands.length > 0) {
-        applySlashCommand(filteredSlashCommands[selectedSlashIndex]);
+      // An open autocomplete consumes Enter: accept the highlighted row, or
+      // swallow it when the filtered list is empty (submitting would send the
+      // literal "@query" / "/query" text as a message). The early return below
+      // previously made both selection branches unreachable.
+      if (showSlashAutocomplete) {
+        if (filteredSlashCommands.length > 0) {
+          applySlashCommand(filteredSlashCommands[selectedSlashIndex]);
+        }
         return;
       }
-      if (showAutocomplete && filteredFiles.length > 0) {
-        selectFile(filteredFiles[selectedIndex]);
+      if (showAutocomplete) {
+        if (filteredFiles.length > 0) {
+          selectFile(filteredFiles[selectedIndex]);
+        }
         return;
       }
       handleSubmit();
@@ -550,6 +593,7 @@
       }
       toggleSearch();
     }
+    if (e.defaultPrevented) return; // already handled by a child (e.g. search input F3)
     // F3 navigates matches when search is open (Shift+F3 = previous).
     if (showSearch && e.key === "F3") {
       e.preventDefault();
@@ -590,6 +634,13 @@
       : -1,
   );
 
+  // Clamped position for display: `currentSearchIdx` can drift past the end of
+  // `searchResults` when the set shrinks (e.g. a message edit truncates the
+  // transcript while a query is active) — the raw counter would render "6/2".
+  const currentMatchPosition = $derived(
+    searchResults.length === 0 ? 0 : Math.min(currentSearchIdx, searchResults.length - 1) + 1,
+  );
+
   // Reset search nav index when query changes
   $effect(() => {
     void searchQuery; // track the query so the nav index resets when it changes
@@ -610,7 +661,10 @@
       scrollToMatch(searchResults[0].index);
       return;
     }
-    currentSearchIdx = (currentSearchIdx + 1) % searchResults.length;
+    // Clamp before stepping: currentSearchIdx may sit past the end after the
+    // result set shrank.
+    const start = Math.min(currentSearchIdx, searchResults.length - 1);
+    currentSearchIdx = (start + 1) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
   }
 
@@ -620,7 +674,8 @@
       scrollToMatch(searchResults[0].index);
       return;
     }
-    currentSearchIdx = (currentSearchIdx - 1 + searchResults.length) % searchResults.length;
+    const start = Math.min(currentSearchIdx, searchResults.length - 1);
+    currentSearchIdx = (start - 1 + searchResults.length) % searchResults.length;
     scrollToMatch(searchResults[currentSearchIdx].index);
   }
 
@@ -761,22 +816,22 @@
       item.source === "builtin" && item.name.endsWith(" ") ? item.name : `${item.name} `;
 
     if (match && match.index !== undefined) {
-      const replacement = match[0].startsWith(insertName) ? `${match[0]} ` : insertName;
-      inputText = inputText.slice(0, match.index) + replacement + textAfterCursor;
+      inputText = inputText.slice(0, match.index) + insertName + textAfterCursor;
     } else {
-      inputText =
-        (textBeforeCursor ? textBeforeCursor + (textBeforeCursor.endsWith(" ") ? "" : " ") : "") +
-        insertName +
-        textAfterCursor;
+      const prefix = textBeforeCursor && !textBeforeCursor.endsWith(" ") ? " " : "";
+      inputText = textBeforeCursor + prefix + insertName + textAfterCursor;
     }
     closeSlashAutocomplete();
     requestAnimationFrame(() => {
       textareaEl?.focus();
-      // Position cursor after the inserted command + trailing space.
-      const newPos =
+      // Position cursor after the inserted command + trailing space. In the
+      // fallback branch the separator space must be counted, or the caret lands
+      // one character short.
+      const insertStart =
         match && match.index !== undefined
-          ? match.index + insertName.length
-          : textBeforeCursor.length + insertName.length;
+          ? match.index
+          : textBeforeCursor.length + (textBeforeCursor && !textBeforeCursor.endsWith(" ") ? 1 : 0);
+      const newPos = insertStart + insertName.length;
       textareaEl?.setSelectionRange(newPos, newPos);
     });
   }
@@ -840,9 +895,13 @@
       const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
       if (base64Match) {
         // Append to the CURRENT value (not a stale closure capture): two
-        // concurrent reads otherwise overwrote each other's attachment.
+        // concurrent reads otherwise overwrote each other's attachment. Re-check
+        // the cap here too: N files dropped in one gesture all pass the
+        // synchronous check while `inputImages` is still empty.
+        const current = $state.snapshot(inputImages);
+        if (current.length >= MAX_IMAGES) return;
         inputImages = [
-          ...$state.snapshot(inputImages),
+          ...current,
           {
             type: "image",
             data: base64Match[2],
@@ -1012,7 +1071,7 @@
               stroke-width="3"><polyline points="15 18 9 12 15 6" /></svg
             >
           </button>
-          <span class="search-count">{currentSearchIdx + 1}/{searchResults.length}</span>
+          <span class="search-count">{currentMatchPosition}/{searchResults.length}</span>
           <button
             class="search-nav"
             onclick={goToNextMatch}
@@ -1215,11 +1274,12 @@
         </button>
       {/if}
 
-      {#each visibleMessages as message, i (messages.length - visibleMessages.length + i)}
+      {@const firstVisibleIndex = messages.length - visibleMessages.length}
+      {#each visibleMessages as message, i (message.entryId ?? `msg-${firstVisibleIndex + i}`)}
         <div
           class="message-wrapper"
-          class:search-current={messages.length - visibleMessages.length + i === currentMatchIndex}
-          data-msg-index={messages.length - visibleMessages.length + i}
+          class:search-current={firstVisibleIndex + i === currentMatchIndex}
+          data-msg-index={firstVisibleIndex + i}
         >
           <MessageBubble {message} searchQuery={showSearch ? searchQuery : ""} {onForkMessage} />
         </div>
@@ -1406,7 +1466,12 @@
             userResizedTextarea = true;
           }
 
-          const maxHeight = 320;
+          // Read the effective cap from CSS: the stylesheet clamps the
+          // textarea with max-height:40vh, and using a hard-coded 320px here
+          // made the resize heuristic treat the CSS clamp as a user resize
+          // (locking the composer grow-only) whenever 40vh < 320px.
+          const cssMax = parseFloat(getComputedStyle(el).maxHeight);
+          const maxHeight = Number.isFinite(cssMax) && cssMax > 0 ? cssMax : 320;
           if (userResizedTextarea) {
             const desired = Math.min(el.scrollHeight, maxHeight);
             if (desired > currentHeight + 1) {

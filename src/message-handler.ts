@@ -5,6 +5,14 @@ import * as fs from "node:fs";
 import { type ProviderApi, type ConfigFileKey } from "./protocol/types.js";
 import { canPassModelArg } from "./git-commit-message.js";
 
+/** How long a diff-preview temp file is kept before cleanup. */
+const DIFF_PREVIEW_RETENTION_MS = 60 * 60 * 1000;
+
+/** Normalize an unknown thrown value into a user-presentable message. */
+function toErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** Keys openConfigFile accepts; must mirror ConfigFileKey. */
 const OPEN_CONFIG_FILES: readonly string[] = [
 	"auth",
@@ -28,7 +36,7 @@ export class MessageHandler {
 			this.provider.webview?.postMessage({
 				type: "error",
 				data: {
-					message: error instanceof Error ? error.message : String(error),
+					message: toErrorMessage(error),
 					timestamp: Date.now(),
 					...(requestId ? { requestId } : {}),
 				},
@@ -65,12 +73,15 @@ export class MessageHandler {
 				case "exportSession": {
 					try {
 						const format = message.data?.format ?? "html";
-						const cmd =
-							format === "jsonl"
-								? `/export .jsonl`
-								: format === "markdown"
-									? `/export .md`
-									: `/export .html`;
+						let cmd = "/export .html";
+						switch (format) {
+							case "jsonl":
+								cmd = "/export .jsonl";
+								break;
+							case "markdown":
+								cmd = "/export .md";
+								break;
+						}
 						// Reuse the new slash-command path so /export goes through
 						// session.exportToHtml()/exportToJsonl() instead of being
 						// sent as a prompt (which the SDK doesn't actually handle).
@@ -83,13 +94,13 @@ export class MessageHandler {
 					} catch (error) {
 						result = {
 							success: false,
-							error: error instanceof Error ? error.message : String(error),
+							error: toErrorMessage(error),
 						};
 						this.provider.webview?.postMessage({
 							type: "exportResult",
 							data: {
 								success: false,
-								error: error instanceof Error ? error.message : String(error),
+								error: toErrorMessage(error),
 							},
 						});
 					}
@@ -174,12 +185,28 @@ export class MessageHandler {
 					break;
 
 				case "setApiKey":
-					await this.provider.setApiKey(payload.provider, payload.apiKey);
+					// Credential-mutating calls take untrusted webview input: refuse
+					// malformed payloads instead of persisting garbage into the
+					// secret store.
+					if (
+						typeof payload.provider !== "string" ||
+						typeof payload.apiKey !== "string"
+					) {
+						result = { error: "setApiKey requires provider and apiKey" };
+						break;
+					}
+					await this.withErrorReporting(() =>
+						this.provider.setApiKey(payload.provider, payload.apiKey),
+					);
 					result = { success: true };
 					break;
 
 				case "removeAuth":
-					await this.provider.removeAuth(payload.provider);
+					if (typeof payload.provider !== "string") {
+						result = { error: "removeAuth requires a provider" };
+						break;
+					}
+					await this.withErrorReporting(() => this.provider.removeAuth(payload.provider));
 					result = { success: true };
 					break;
 
@@ -199,7 +226,7 @@ export class MessageHandler {
 							data: {
 								provider: providerId,
 								success: false,
-								error: error instanceof Error ? error.message : String(error),
+								error: toErrorMessage(error),
 							},
 						});
 					});
@@ -239,7 +266,18 @@ export class MessageHandler {
 				case "openLoginUrl": {
 					const url = message.data?.url;
 					if (typeof url === "string" && /^https?:\/\//i.test(url)) {
-						void this.provider.openExternalUrl(url);
+						// The fire-and-forget open can still reject (no browser, invalid
+						// URL): report it instead of leaking an unhandled rejection.
+						void this.provider.openExternalUrl(url).catch((error: unknown) => {
+							this.provider.logError(
+								"[MessageHandler] openExternalUrl failed:",
+								error,
+							);
+							this.provider.webview?.postMessage({
+								type: "error",
+								data: { message: toErrorMessage(error), timestamp: Date.now() },
+							});
+						});
 						result = { success: true };
 					} else {
 						result = { error: "openLoginUrl requires an http(s) URL" };
@@ -251,13 +289,13 @@ export class MessageHandler {
 					await this.withErrorReporting(
 						() =>
 							this.provider.addProvider({
-								provider: message.data.provider,
-								name: message.data.name,
-								baseUrl: message.data.baseUrl,
-								apiKey: message.data.apiKey,
-								api: message.data.api,
-								headers: message.data.headers,
-								models: message.data.models,
+								provider: payload.provider,
+								name: payload.name,
+								baseUrl: payload.baseUrl,
+								apiKey: payload.apiKey,
+								api: payload.api,
+								headers: payload.headers,
+								models: payload.models,
 							}),
 						message.id,
 					);
@@ -265,14 +303,14 @@ export class MessageHandler {
 					// when THIS request finishes (new or update-existing), not before.
 					this.provider.webview?.postMessage({
 						type: "provider-added",
-						data: { provider: message.data.provider, requestId: message.id },
+						data: { provider: payload.provider, requestId: message.id },
 					});
 					result = { success: true };
 					break;
 
 				case "removeProvider":
 					await this.withErrorReporting(
-						() => this.provider.removeProvider(message.data.provider),
+						() => this.provider.removeProvider(payload.provider),
 						message.id,
 					);
 					result = { success: true };
@@ -282,9 +320,9 @@ export class MessageHandler {
 					const models = await this.withErrorReporting(
 						() =>
 							this.provider.fetchProviderModels({
-								baseUrl: message.data.baseUrl,
-								api: message.data.api,
-								apiKey: message.data.apiKey,
+								baseUrl: payload.baseUrl,
+								api: payload.api,
+								apiKey: payload.apiKey,
 							}),
 						message.id,
 					);
@@ -333,10 +371,6 @@ export class MessageHandler {
 					this.sendSessionsList(result);
 					break;
 
-				case "getSessions":
-					result = [];
-					break;
-
 				case "compact":
 					result = await this.withErrorReporting(() => this.provider.compact());
 					break;
@@ -355,15 +389,15 @@ export class MessageHandler {
 					break;
 
 				case "getSessionResources":
-					await this.provider.sendSessionResources();
+					await this.withErrorReporting(() => this.provider.sendSessionResources());
 					break;
 
 				case "getSkills":
-					await this.provider.sendSkillsList();
+					await this.withErrorReporting(() => this.provider.sendSkillsList());
 					break;
 
 				case "getSystemPrompt":
-					this.provider.sendSystemPrompt();
+					await this.withErrorReporting(async () => this.provider.sendSystemPrompt());
 					result = undefined;
 					break;
 
@@ -546,7 +580,9 @@ export class MessageHandler {
 					break;
 
 				case "checkForUpdates":
-					await vscode.commands.executeCommand("pi-agent.checkForUpdates");
+					await this.withErrorReporting(async () => {
+						await vscode.commands.executeCommand("pi-agent.checkForUpdates");
+					});
 					result = { success: true };
 					break;
 
@@ -670,13 +706,21 @@ export class MessageHandler {
 						}
 						const selection = editor.selection;
 						const hasSelection = !selection.isEmpty;
-						await editor.edit((editBuilder) => {
+						const applied = await editor.edit((editBuilder) => {
 							if (hasSelection) {
 								editBuilder.replace(selection, applyCode);
 							} else {
 								editBuilder.insert(selection.active, applyCode);
 							}
 						});
+						// editor.edit resolves to false when the edit is rejected
+						// (read-only file, concurrent modification): report that instead
+						// of claiming success.
+						if (applied === false) {
+							vscode.window.showWarningMessage("Could not apply code to the editor.");
+							result = { success: false, error: "Editor rejected the edit" };
+							break;
+						}
 						vscode.window.showInformationMessage(
 							hasSelection ? "Code replaced selection." : "Code inserted at cursor.",
 						);
@@ -715,6 +759,26 @@ export class MessageHandler {
 						}
 						const tempDir = path.join(os.tmpdir(), "pilot-diff-preview");
 						await vscode.workspace.fs.createDirectory(vscode.Uri.file(tempDir));
+						// Bound the temp-dir growth: drop previews left by earlier sessions
+						// instead of relying on a short-lived timer that can delete a file
+						// the user is still diffing.
+						try {
+							for (const entry of fs.readdirSync(tempDir)) {
+								const entryPath = path.join(tempDir, entry);
+								try {
+									if (
+										Date.now() - fs.statSync(entryPath).mtimeMs >
+										DIFF_PREVIEW_RETENTION_MS
+									) {
+										fs.unlinkSync(entryPath);
+									}
+								} catch {
+									/* ignore per-entry cleanup errors */
+								}
+							}
+						} catch {
+							/* ignore sweep errors */
+						}
 						const baseName = path.basename(doc.fileName);
 						const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 						const modifiedUri = vscode.Uri.file(
@@ -731,7 +795,8 @@ export class MessageHandler {
 							`Preview: ${baseName}`,
 						);
 						result = { success: true };
-						// Clean up temp file after brief delay
+						// A hardcoded few-second timer deleted the file while the diff
+						// editor was still open; keep it for the retention window instead.
 						setTimeout(() => {
 							try {
 								fs.unlinkSync(modifiedUri.fsPath);
@@ -742,13 +807,13 @@ export class MessageHandler {
 							} catch {
 								/* ignore cleanup errors */
 							}
-						}, 5000);
+						}, DIFF_PREVIEW_RETENTION_MS);
 					}
 					break;
 
 				case "forkSession":
 					result = await this.withErrorReporting(() =>
-						this.provider.forkSession(message.data.entryId ?? message.data.fromNodeId),
+						this.provider.forkSession(payload.entryId ?? payload.fromNodeId),
 					);
 					break;
 
@@ -759,10 +824,10 @@ export class MessageHandler {
 
 				case "setToolConfig":
 					result = await this.withErrorReporting(async () => {
-						await this.provider.setToolConfig(message.data);
+						await this.provider.setToolConfig(payload);
 						this.sendSettingsResponse({
-							toolPreset: message.data.toolPreset,
-							customTools: message.data.customTools,
+							toolPreset: payload.toolPreset,
+							customTools: payload.customTools,
 						});
 					});
 					break;
@@ -779,7 +844,7 @@ export class MessageHandler {
 
 				case "setPiUISetting":
 					result = await this.withErrorReporting(async () => {
-						const data = message.data as {
+						const data = payload as {
 							key?: "showCacheMissNotices";
 							value?: boolean;
 						};
@@ -803,7 +868,7 @@ export class MessageHandler {
 		} catch (error) {
 			this.provider.logError("Message handler error:", error);
 			const errorResult = {
-				error: error instanceof Error ? error.message : String(error),
+				error: toErrorMessage(error),
 			};
 
 			if (message.id) {
@@ -824,7 +889,7 @@ export class MessageHandler {
 		const favoriteModels = this.provider.getFavorites();
 		const thinkingLevel = this.provider.getThinkingLevel();
 		const sessionId = this.provider.hasSession
-			? (this.provider as any).session?.sessionId
+			? (this.provider as any).session?.sessionId // SDK session shape, not part of ProviderApi
 			: undefined;
 
 		// Re-send session resources now that webview is ready to receive
@@ -855,12 +920,15 @@ export class MessageHandler {
 			try {
 				const rl = session.resourceLoader;
 				if (rl) {
-					contextFiles = rl.getAgentsFiles?.().agentsFiles || [];
-					skills = rl.getSkills().skills || [];
-					extensions = rl.getExtensions().extensions || [];
-					prompts = rl.getPrompts().prompts || [];
+					contextFiles = rl.getAgentsFiles?.()?.agentsFiles || [];
+					skills = rl.getSkills?.()?.skills || [];
+					extensions = rl.getExtensions?.()?.extensions || [];
+					prompts = rl.getPrompts?.()?.prompts || [];
 				}
-			} catch {
+			} catch (e) {
+				// A resource-loader version mismatch must not blank out the other
+				// lists silently.
+				this.provider.logError("getSessionInfo resource loading failed:", e);
 				contextFiles = [];
 				skills = [];
 				extensions = [];
@@ -924,7 +992,10 @@ export class MessageHandler {
 				version: pkg.version || "Unknown",
 				description: pkg.description || "",
 			};
-		} catch {
+		} catch (e) {
+			// A broken/unreadable package.json must be distinguishable from a
+			// project without one.
+			this.provider.logError("getProjectContext failed:", e);
 			return { root, name: "Unknown", version: "Unknown" };
 		}
 	}
@@ -1054,7 +1125,11 @@ export class MessageHandler {
 		});
 
 		if (uris && uris.length > 0) {
-			const paths = uris.map((uri) => vscode.workspace.asRelativePath(uri)).filter(Boolean);
+			// includeWorkspaceFolder=false keeps these paths consistent with
+			// getWorkspaceFiles(), so the webview can match them in its file list.
+			const paths = uris
+				.map((uri) => vscode.workspace.asRelativePath(uri, false))
+				.filter(Boolean);
 			return paths;
 		}
 

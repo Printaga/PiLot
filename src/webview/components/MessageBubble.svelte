@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ImageContent, Message, ToolCallMessage } from "../types/index";
+  import { asString } from "../messages";
   import MermaidDiagram from "./MermaidDiagram.svelte";
 
   interface CodeBlock {
@@ -83,15 +84,16 @@
   function copyCode(code: string) {
     // Only flag success after the clipboard write actually resolves; an
     // unhandled rejection would surface as a console error and the UI would
-    // still show "copied".
+    // still show "copied". Optional-chained: `navigator.clipboard` is undefined
+    // in non-secure contexts and throws synchronously before .catch attaches.
     navigator.clipboard
-      .writeText(code)
-      .then(() => {
+      ?.writeText(code)
+      ?.then(() => {
         copiedCode = true;
         clearTimeout(copyCodeTimer);
         copyCodeTimer = setTimeout(() => (copiedCode = false), 1500);
       })
-      .catch(() => {});
+      ?.catch(() => {});
   }
 
   function applyCode(code: string) {
@@ -110,13 +112,13 @@
 
   function copyMessage() {
     navigator.clipboard
-      .writeText(message.content)
-      .then(() => {
+      ?.writeText(message.content)
+      ?.then(() => {
         copiedMessage = true;
         clearTimeout(copyMessageTimer);
         copyMessageTimer = setTimeout(() => (copiedMessage = false), 1500);
       })
-      .catch(() => {});
+      ?.catch(() => {});
   }
 
   function openInEditor(code: string, language: string) {
@@ -206,6 +208,12 @@
     }
   });
 
+  // Memoized content parts: parseContent/renderMarkdown run multiple regexes
+  // plus a full escapeHtml over the message — deriving keeps that work off
+  // every unrelated state change (copy clicks, timestamp toggle, streamed
+  // thinking tokens).
+  let contentParts = $derived(parseContent(message.content));
+
   function parseContent(content: string): Array<string | CodeBlock> {
     const parts: Array<string | CodeBlock> = [];
     let lastIndex = 0;
@@ -281,8 +289,12 @@
   function renderMarkdown(md: string, searchRegex?: RegExp): string {
     // Split out fenced code blocks first (they must not be processed)
     const codeBlocks: string[] = [];
+    // Scrub NUL from the input first: escapeHtml does not strip it, so user
+    // content containing \u0000CODE0\u0000 could otherwise forge a sentinel and
+    // duplicate/substitute code blocks at arbitrary positions.
+    const mdScrubbed = md.replace(/\0/g, "");
     // Match full info strings (same pattern as parseContent)
-    let processed = md.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
+    let processed = mdScrubbed.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, _lang, code) => {
       codeBlocks.push(
         `<pre class="md-code"><code>${highlightEscapedText(escapeHtml(code.trimEnd()))}</code></pre>`,
       );
@@ -334,20 +346,36 @@
 
       // Unordered list
       if (/^[-*+]\s/.test(trimmed)) {
-        const items = trimmed
-          .split("\n")
-          .filter((l) => /^[-*+]\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`);
+        // Keep non-marker lines as continuation of the previous item instead of
+        // silently dropping wrapped/indented paragraphs from the message.
+        const items: string[] = [];
+        for (const line of trimmed.split("\n")) {
+          if (/^[-*+]\s/.test(line)) {
+            items.push(`<li>${renderInline(line.replace(/^[-*+]\s+/, ""), searchRegex)}</li>`);
+          } else if (items.length > 0) {
+            items[items.length - 1] = items[items.length - 1].replace(
+              /<\/li>$/,
+              `<br>${renderInline(line.trim(), searchRegex)}</li>`,
+            );
+          }
+        }
         htmlParts.push(`<ul class="md-ul">${items.join("")}</ul>`);
         continue;
       }
 
       // Ordered list
       if (/^\d+\.\s/.test(trimmed)) {
-        const items = trimmed
-          .split("\n")
-          .filter((l) => /^\d+\.\s/.test(l))
-          .map((l) => `<li>${renderInline(l.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`);
+        const items: string[] = [];
+        for (const line of trimmed.split("\n")) {
+          if (/^\d+\.\s/.test(line)) {
+            items.push(`<li>${renderInline(line.replace(/^\d+\.\s+/, ""), searchRegex)}</li>`);
+          } else if (items.length > 0) {
+            items[items.length - 1] = items[items.length - 1].replace(
+              /<\/li>$/,
+              `<br>${renderInline(line.trim(), searchRegex)}</li>`,
+            );
+          }
+        }
         htmlParts.push(`<ol class="md-ol">${items.join("")}</ol>`);
         continue;
       }
@@ -385,10 +413,11 @@
     }
 
     let html = htmlParts.join("");
-    // Restore code blocks. NUL sentinels are internal placeholders that never
-    // appear in user input.
+    // Restore code blocks. Safe because renderMarkdown() scrubs NUL from `md`
+    // before extracting blocks, so user content can never forge a sentinel;
+    // an out-of-range index still renders as "" via `??`.
     /* eslint-disable no-control-regex -- NUL sentinels are internal placeholders, never user input */
-    html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i)] || "");
+    html = html.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)] ?? "");
     /* eslint-enable no-control-regex */
     return html;
   }
@@ -409,20 +438,21 @@
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     // Italic
     html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    // Links [text](url). href is attribute-escaped with escapeHtml (which now
-    // covers quotes), and javascript:/data: URLs are refused outright so a
-    // crafted link cannot execute script in the webview.
+    // Links [text](url). javascript:/data: URLs are refused outright so a
+    // crafted link cannot execute script in the webview. `text`/`rawUrl` are
+    // substrings of the already-escaped `html`, so they are attribute-safe;
+    // escaping them again would double-encode entities (`&amp;amp;`).
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
       const rawUrl = String(url);
       if (rawUrl.startsWith("#")) {
         // Fragment link — scroll to matching header inside this message bubble.
         const slug = rawUrl.slice(1);
-        return `<a class="md-link md-fragment-link" href="${escapeHtml(rawUrl)}" data-fragment-target="${escapeHtml(slug)}" rel="noopener">${escapeHtml(text)}</a>`;
+        return `<a class="md-link md-fragment-link" href="${rawUrl}" data-fragment-target="${slug}" rel="noopener">${text}</a>`;
       }
       if (!isSafeLinkUrl(rawUrl)) {
-        return `<span class="md-link md-link-blocked" title="Link blocked for safety">${escapeHtml(text)}</span>`;
+        return `<span class="md-link md-link-blocked" title="Link blocked for safety">${text}</span>`;
       }
-      return `<a class="md-link" href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+      return `<a class="md-link" href="${rawUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     });
     // Line breaks (single newlines within paragraphs)
     html = html.replace(/\n/g, "<br>");
@@ -433,38 +463,56 @@
    *  (javascript:, data:, vbscript:, file:, …) is refused in rendered markdown. */
   function isSafeLinkUrl(url: string): boolean {
     const trimmed = url.trim().toLowerCase();
-    return /^https:\/\//.test(trimmed) || /^mailto:/.test(trimmed);
+    return /^https?:\/\//.test(trimmed) || /^mailto:/.test(trimmed);
   }
 
   /** Attach the click handlers for header anchors and fragment links after the
-   *  markdown HTML lands in the DOM. Replaces the previous inline onclick
-   *  attributes, which forced `script-src 'unsafe-inline'` in the webview CSP. */
-  function attachMarkdownHandlers(root: HTMLElement): void {
+   *  markdown HTML lands in the DOM. Returns a teardown that removes the
+   *  listeners and clears the toast timer. Replaces the previous inline
+   *  onclick attributes, which forced `script-src 'unsafe-inline'` in the
+   *  webview CSP. */
+  function attachMarkdownHandlers(root: HTMLElement): () => void {
+    const cleanups: Array<() => void> = [];
+    const toastTimers: Array<ReturnType<typeof setTimeout>> = [];
     for (const anchor of root.querySelectorAll<HTMLAnchorElement>(".md-header-anchor")) {
-      anchor.addEventListener("click", (event) => {
+      const handler = (event: Event) => {
         event.preventDefault();
         const slug = anchor.dataset.anchorSlug || "";
         navigator.clipboard
-          .writeText(location.href.replace(/#.*/, "") + "#" + slug)
-          .then(() => {
+          ?.writeText(location.href.replace(/#.*/, "") + "#" + slug)
+          ?.then(() => {
             const toast = anchor.nextElementSibling;
             if (toast?.classList.contains("anchor-copy-toast")) {
               toast.classList.add("anchor-copied");
-              setTimeout(() => toast.classList.remove("anchor-copied"), 1500);
+              toastTimers.push(setTimeout(() => toast.classList.remove("anchor-copied"), 1500));
             }
           })
-          .catch(() => {});
-      });
+          ?.catch(() => {});
+      };
+      anchor.addEventListener("click", handler);
+      cleanups.push(() => anchor.removeEventListener("click", handler));
     }
     for (const link of root.querySelectorAll<HTMLAnchorElement>(".md-fragment-link")) {
-      link.addEventListener("click", (event) => {
+      const handler = (event: Event) => {
         event.preventDefault();
         const slug = link.dataset.fragmentTarget || "";
         const target = root.querySelector(`[id="${CSS.escape(slug)}"]`);
         target?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      };
+      link.addEventListener("click", handler);
+      cleanups.push(() => link.removeEventListener("click", handler));
     }
+    return () => {
+      for (const fn of cleanups) fn();
+      for (const t of toastTimers) clearTimeout(t);
+    };
   }
+
+  // Tear down the previous run's handlers before re-attaching: the effect
+  // re-runs on every streamed token / search keystroke, and {@html} only
+  // replaces the DOM when the string changes — so unchanged anchors would
+  // otherwise stack listeners (N clicks → N clipboard writes).
+  let detachMarkdownHandlers: (() => void) | undefined;
 
   // Wire the delegated handlers after each render of markdown-bearing HTML.
   // Read the message content so the effect re-runs whenever streamed tokens,
@@ -476,22 +524,28 @@
     void message.thinking;
     void searchQuery;
     const root = markdownRoot;
+    detachMarkdownHandlers?.();
+    detachMarkdownHandlers = undefined;
     if (!root) return;
-    attachMarkdownHandlers(root);
+    detachMarkdownHandlers = attachMarkdownHandlers(root);
   });
 
   function renderToolResult(toolCall: ToolCallMessage): string {
     const details = toolCall.result?.details;
     const content = toolCall.result?.content || "";
 
+    // details is untrusted host data: every loop below re-coerces fields via
+    // asString so an entry of the wrong shape renders empty instead of throwing.
+
     // Read tool results
     if (toolCall.toolName === "read") {
       if (details?.entries && details.entries.length > 0) {
         let html = '<div class="read-tool">';
         for (const entry of details.entries) {
+          const e = (entry ?? {}) as Record<string, unknown>;
           html += `<div class="read-entry">`;
-          html += `<div class="read-header"><span class="read-file">${escapeHtml(entry.filePath || "")}</span></div>`;
-          html += `<pre class="read-content">${escapeHtml(entry.content || "")}</pre>`;
+          html += `<div class="read-header"><span class="read-file">${escapeHtml(asString(e.filePath))}</span></div>`;
+          html += `<pre class="read-content">${escapeHtml(asString(e.content))}</pre>`;
           html += `</div>`;
         }
         html += "</div>";
@@ -503,11 +557,13 @@
     if (toolCall.toolName === "edit" && details?.edits && details.edits.length > 0) {
       let html = '<div class="edit-tool">';
       for (const edit of details.edits) {
+        const ed = (edit ?? {}) as Record<string, unknown>;
         html += `<div class="edit-entry">`;
-        html += `<span class="edit-file">${escapeHtml(edit.file || "")}</span>`;
-        if (edit.lines) html += `: <span class="edit-lines">${edit.lines}</span>`;
-        if (edit.diff) {
-          html += `<pre class="edit-diff">${escapeHtml(edit.diff)}</pre>`;
+        html += `<span class="edit-file">${escapeHtml(asString(ed.file))}</span>`;
+        if (ed.lines !== undefined && ed.lines !== null)
+          html += `: <span class="edit-lines">${escapeHtml(String(ed.lines))}</span>`;
+        if (ed.diff) {
+          html += `<pre class="edit-diff">${escapeHtml(asString(ed.diff))}</pre>`;
         }
         html += `</div>`;
       }
@@ -518,7 +574,7 @@
     // Bash tool results
     if (toolCall.toolName === "bash") {
       if (details?.output) {
-        return `<div class="bash-tool"><pre class="bash-output ${details.exitCode !== 0 ? "bash-error" : ""}">${escapeHtml(details.output)}</pre></div>`;
+        return `<div class="bash-tool"><pre class="bash-output ${details.exitCode !== 0 ? "bash-error" : ""}">${escapeHtml(asString(details.output))}</pre></div>`;
       }
       // Try to get output from content
       return `<div class="bash-tool"><pre class="bash-output">${escapeHtml(content)}</pre></div>`;
@@ -528,9 +584,10 @@
     if (toolCall.toolName === "grep" && details?.matches) {
       let html = '<div class="grep-tool">';
       for (const match of details.matches) {
+        const m = (match ?? {}) as Record<string, unknown>;
         html += `<div class="grep-entry">`;
-        html += `<span class="grep-file">${escapeHtml(match.filePath || "")}</span>`;
-        html += `<pre class="grep-line">${escapeHtml(match.line || "")}</pre>`;
+        html += `<span class="grep-file">${escapeHtml(asString(m.filePath))}</span>`;
+        html += `<pre class="grep-line">${escapeHtml(asString(m.line))}</pre>`;
         html += `</div>`;
       }
       html += "</div>";
@@ -541,7 +598,7 @@
     if (toolCall.toolName === "find" && details?.files) {
       let html = '<div class="find-tool">';
       for (const file of details.files) {
-        html += `<div class="find-file">${escapeHtml(file)}</div>`;
+        html += `<div class="find-file">${escapeHtml(asString(file))}</div>`;
       }
       html += "</div>";
       return html;
@@ -551,7 +608,8 @@
     if (toolCall.toolName === "ls" && details?.files) {
       let html = '<div class="ls-tool">';
       for (const file of details.files) {
-        html += `<div class="ls-file">${escapeHtml(file.path || file)}</div>`;
+        const f = (file ?? {}) as Record<string, unknown>;
+        html += `<div class="ls-file">${escapeHtml(asString(f.path) || asString(file))}</div>`;
       }
       html += "</div>";
       return html;
@@ -560,7 +618,9 @@
     // Write tool results
     if (toolCall.toolName === "write") {
       if (details?.bytes !== undefined) {
-        return `<div class="write-tool"><span class="write-status">Wrote ${details.bytes} bytes to ${escapeHtml(details.path || "")}</span></div>`;
+        // Both interpolations come from the untyped tool payload and reach the
+        // {@html} sink: escape them like every neighbouring field.
+        return `<div class="write-tool"><span class="write-status">Wrote ${escapeHtml(String(details.bytes))} bytes to ${escapeHtml(String(details.path || ""))}</span></div>`;
       }
     }
 
@@ -872,7 +932,7 @@
               {/each}
             </div>
           {/if}
-          {#each parseContent(message.content) as part, i (i)}
+          {#each contentParts as part, i (i)}
             {#if typeof part === "string"}
               {@html renderMarkdown(part, searchRegex)}
             {:else if part.isMermaid}

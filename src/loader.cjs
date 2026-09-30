@@ -113,22 +113,24 @@ function findPiSdkAtPath(nodeModulesPath) {
 
 	// Also check .mise subdirectory (aube-bin-shim layout:
 	// node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules/)
-	const entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true });
+	// Guarded: an unreadable/looping directory must be skipped, not break load().
+	let entries;
+	try {
+		entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true });
+	} catch (e) {
+		return null; // unreadable node_modules — treat as "not a PI install"
+	}
 	for (const entry of entries) {
 		if (entry.name.startsWith(".pi-coding-agent-") && entry.isSymbolicLink()) {
 			try {
 				const linkTarget = fs.realpathSync(path.join(nodeModulesPath, entry.name));
-				// The real path points to the actual package in pnpm store
-				const sdkNodeModules = path.join(
-					linkTarget,
-					"..",
-					"..",
-					"..",
-					"..",
-					"..",
-					"node_modules",
+				// Same derivation used everywhere else: take the outermost
+				// /node_modules/ segment of a plausible CLI path inside the package,
+				// instead of a hard-coded and fragile multi-level ".." walk-up.
+				const sdkNodeModules = extractNodeModulesPath(
+					path.join(linkTarget, "dist", "cli.js"),
 				);
-				if (fs.existsSync(sdkNodeModules)) {
+				if (sdkNodeModules && fs.existsSync(sdkNodeModules)) {
 					const targetSdkPath = path.join(
 						sdkNodeModules,
 						"@earendil-works",
@@ -148,24 +150,82 @@ function findPiSdkAtPath(nodeModulesPath) {
 }
 
 /**
+ * Collect the node_modules directories of pnpm's versioned global installs
+ * (shared by the Linux/macOS and Windows pnpm layouts, which are identical
+ * apart from their base directory).
+ */
+function collectPnpmGlobalNodeModules(pnpmGlobalBase, possiblePaths) {
+	if (!fs.existsSync(pnpmGlobalBase)) return;
+	let versionDirs;
+	try {
+		versionDirs = fs
+			.readdirSync(pnpmGlobalBase)
+			.filter((name) => name.startsWith("v") || /^\d+$/.test(name));
+	} catch (e) {
+		return; // unreadable pnpm global dir — skip it
+	}
+	for (const versionDir of versionDirs) {
+		const versionedPath = path.join(pnpmGlobalBase, versionDir);
+		let hashDirs;
+		try {
+			hashDirs = fs
+				.readdirSync(versionedPath)
+				.filter((name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."));
+		} catch (e) {
+			continue; // unreadable version dir — try the next one
+		}
+		for (const hashDir of hashDirs) {
+			const nodeModulesPath = path.join(versionedPath, hashDir, "node_modules");
+			if (fs.existsSync(nodeModulesPath)) {
+				possiblePaths.push(nodeModulesPath);
+			}
+		}
+	}
+}
+
+/**
+ * Blocking global-root probes (`which pi`, `npm root -g`, `pnpm root -g`).
+ * Each spawnSync freezes the extension host for up to PATH_PROBE_TIMEOUT_MS,
+ * so they must only run when the cheap filesystem candidates all missed.
+ */
+function runGlobalRootProbes() {
+	const probed = [];
+
+	const piSdkPath = findPiSdkFromCommand();
+	if (piSdkPath) {
+		probed.push(piSdkPath);
+	}
+
+	// Check global npm installation
+	try {
+		const npmProbe = runProbeSync("npm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
+		if (npmProbe.ok && npmProbe.stdout && fs.existsSync(npmProbe.stdout)) {
+			probed.push(npmProbe.stdout);
+		}
+	} catch (e) {
+		// npm not available or command failed, skip
+	}
+
+	// Check pnpm global root as fallback
+	try {
+		const pnpmProbe = runProbeSync("pnpm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
+		if (pnpmProbe.ok && pnpmProbe.stdout && fs.existsSync(pnpmProbe.stdout)) {
+			probed.push(pnpmProbe.stdout);
+		}
+	} catch (e) {
+		// pnpm not available, skip
+	}
+
+	return probed;
+}
+
+/**
  * Find the global PI installation directory
  * Checks multiple possible locations across different platforms and installation methods
  */
 function findGlobalPiInstallation() {
 	const homeDir = getHomeDir();
 	const possiblePaths = [];
-
-	// First, try to find via user-configured binary path setting (highest priority)
-	const settingSdkPath = findPiSdkFromSetting();
-	if (settingSdkPath) {
-		possiblePaths.unshift(settingSdkPath);
-	}
-
-	// Then, try to find via 'pi' command in PATH
-	const piSdkPath = findPiSdkFromCommand();
-	if (piSdkPath) {
-		possiblePaths.unshift(piSdkPath);
-	}
 
 	if (homeDir) {
 		// Standard PI installation locations
@@ -175,25 +235,10 @@ function findGlobalPiInstallation() {
 		);
 
 		// pnpm global installations - check multiple versions
-		const pnpmGlobalBase = path.join(homeDir, ".local", "share", "pnpm", "global");
-		if (fs.existsSync(pnpmGlobalBase)) {
-			// pnpm v9+ uses v11 subdirectories with hashed folder names
-			const pnpmVersionDirs = fs
-				.readdirSync(pnpmGlobalBase)
-				.filter((name) => name.startsWith("v") || /^\d+$/.test(name));
-			for (const versionDir of pnpmVersionDirs) {
-				const versionedPath = path.join(pnpmGlobalBase, versionDir);
-				const entries = fs
-					.readdirSync(versionedPath)
-					.filter((name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."));
-				for (const hashDir of entries) {
-					const nodeModulesPath = path.join(versionedPath, hashDir, "node_modules");
-					if (fs.existsSync(nodeModulesPath)) {
-						possiblePaths.push(nodeModulesPath);
-					}
-				}
-			}
-		}
+		collectPnpmGlobalNodeModules(
+			path.join(homeDir, ".local", "share", "pnpm", "global"),
+			possiblePaths,
+		);
 
 		// bun global installation
 		const bunGlobalPath = path.join(homeDir, ".bun", "install", "global", "node_modules");
@@ -208,65 +253,18 @@ function findGlobalPiInstallation() {
 		);
 
 		// Windows pnpm global installations (versioned dirs like Linux)
-		const pnpmWinBase = path.join(homeDir, "AppData", "Local", "pnpm", "global");
-		if (fs.existsSync(pnpmWinBase)) {
-			const pnpmVersionDirs = fs
-				.readdirSync(pnpmWinBase)
-				.filter((name) => name.startsWith("v") || /^\d+$/.test(name));
-			for (const versionDir of pnpmVersionDirs) {
-				const versionedPath = path.join(pnpmWinBase, versionDir);
-				const entries = fs
-					.readdirSync(versionedPath)
-					.filter((name) => name !== "pnpm-workspace.yaml" && !name.startsWith("."));
-				for (const hashDir of entries) {
-					const nodeModulesPath = path.join(versionedPath, hashDir, "node_modules");
-					if (fs.existsSync(nodeModulesPath)) {
-						possiblePaths.push(nodeModulesPath);
-					}
-				}
-			}
-		}
+		collectPnpmGlobalNodeModules(
+			path.join(homeDir, "AppData", "Local", "pnpm", "global"),
+			possiblePaths,
+		);
 
 		// Windows Roaming pnpm (less common, flat structure)
 		possiblePaths.push(
 			path.join(homeDir, "AppData", "Roaming", "pnpm", "global", "node_modules"),
 		);
-	}
 
-	// Check environment variable overrides
-	if (process.env.PI_AGENT_DIR) {
-		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"));
-		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "node_modules"));
-	}
-
-	if (process.env.PI_HOME) {
-		possiblePaths.unshift(path.join(process.env.PI_HOME, "agent", "npm", "node_modules"));
-		possiblePaths.unshift(path.join(process.env.PI_HOME, "node_modules"));
-	}
-
-	// Check global npm installation
-	try {
-		const npmProbe = runProbeSync("npm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
-		if (npmProbe.ok && npmProbe.stdout && fs.existsSync(npmProbe.stdout)) {
-			possiblePaths.push(npmProbe.stdout);
-		}
-	} catch (e) {
-		// npm not available or command failed, skip
-	}
-
-	// Check pnpm global root as fallback
-	try {
-		const pnpmProbe = runProbeSync("pnpm", ["root", "-g"], PATH_PROBE_TIMEOUT_MS);
-		if (pnpmProbe.ok && pnpmProbe.stdout && fs.existsSync(pnpmProbe.stdout)) {
-			possiblePaths.push(pnpmProbe.stdout);
-		}
-	} catch (e) {
-		// pnpm not available, skip
-	}
-
-	// Check mise installations (covers installs where the 'pi' binary is not on
-	// PATH seen by VS Code, e.g. launched from desktop dock instead of terminal)
-	if (homeDir) {
+		// Check mise installations (covers installs where the 'pi' binary is not on
+		// PATH seen by VS Code, e.g. launched from desktop dock instead of terminal)
 		const miseInstallsBase = path.join(homeDir, ".local", "share", "mise", "installs");
 		if (fs.existsSync(miseInstallsBase)) {
 			try {
@@ -276,7 +274,13 @@ function findGlobalPiInstallation() {
 					// the tool name, so the filter must be on the category, not the entry.
 					if (!category.includes("pi-coding-agent")) continue;
 					const categoryPath = path.join(miseInstallsBase, category);
-					if (!fs.statSync(categoryPath).isDirectory()) continue;
+					// statSync must be INSIDE a per-category guard: a single broken
+					// symlink or unreadable entry must not abort the whole scan.
+					try {
+						if (!fs.statSync(categoryPath).isDirectory()) continue;
+					} catch (_e) {
+						continue; // unreadable category — try the next one
+					}
 
 					// Each entry (e.g. "0.85.1", "latest") IS a version directory.
 					// node_modules/ is a direct child of the version dir, not nested.
@@ -320,22 +324,62 @@ function findGlobalPiInstallation() {
 		}
 	}
 
-	// Try each possible path
-	const attemptedPaths = [];
-	for (const piNodeModules of possiblePaths) {
-		const found = findPiSdkAtPath(piNodeModules);
-		if (found) {
-			return found;
-		}
-		attemptedPaths.push(piNodeModules);
+	// Check environment variable overrides (below the user setting, above the
+	// generic filesystem candidates).
+	if (process.env.PI_AGENT_DIR) {
+		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"));
+		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "node_modules"));
 	}
 
-	console.error("[PiLot] PI SDK not found. Tried the following paths:");
-	for (const p of attemptedPaths) {
-		console.error("  - " + p);
+	if (process.env.PI_HOME) {
+		possiblePaths.unshift(path.join(process.env.PI_HOME, "agent", "npm", "node_modules"));
+		possiblePaths.unshift(path.join(process.env.PI_HOME, "node_modules"));
 	}
-	console.error("[PiLot] VS Code process PATH: " + (process.env.PATH || "(empty)"));
-	return null;
+
+	// Try each possible path. The user-configured binaryPath setting is resolved
+	// last and unshifted, so it ends up at index 0 (highest priority).
+	const settingSdkPath = findPiSdkFromSetting();
+	if (settingSdkPath) {
+		possiblePaths.unshift(settingSdkPath);
+	}
+
+	const attemptedPaths = [];
+	const tryPaths = (paths) => {
+		for (const piNodeModules of paths) {
+			// A broken candidate (EACCES, ELOOP, ENOTDIR...) must only skip that
+			// candidate, never abort the whole search with a raw stack trace.
+			let found;
+			try {
+				found = findPiSdkAtPath(piNodeModules);
+			} catch (_e) {
+				found = null;
+			}
+			if (found) {
+				return found;
+			}
+			attemptedPaths.push(piNodeModules);
+		}
+		return null;
+	};
+
+	let found = tryPaths(possiblePaths);
+
+	// The probes below spawn subprocesses and block the extension host for up
+	// to 3 × PATH_PROBE_TIMEOUT_MS, so they only run when every cheap
+	// filesystem candidate missed.
+	if (!found) {
+		found = tryPaths(runGlobalRootProbes());
+	}
+
+	if (!found) {
+		console.error("[PiLot] PI SDK not found. Tried the following paths:");
+		for (const p of attemptedPaths) {
+			console.error("  - " + p);
+		}
+		console.error("[PiLot] VS Code process PATH: " + (process.env.PATH || "(empty)"));
+		return null;
+	}
+	return found;
 }
 
 /**
@@ -550,6 +594,7 @@ function deriveSdkPathFromBinary(piPath) {
  * Output: ~/.local/share/pnpm/global/v11/.../node_modules
  */
 function extractNodeModulesPath(cliPath) {
+	if (!cliPath) return null;
 	// Find the position of /node_modules/ or \node_modules\ (Windows)
 	const normalized = cliPath.replace(/\\/g, "/");
 	// Use lastIndexOf to handle nested node_modules structures (e.g., mise
@@ -580,13 +625,19 @@ function hookModuleResolution(piNodeModules) {
 	// Guard against double-hooking: the extension host can reload this module
 	// (hot restart), and re-capturing our own wrapper would build an unbounded
 	// chain of resolvers that slows every require() in the host.
-	if (Module._resolveFilename.__pillotHooked) return;
+	if (Module._resolveFilename.__pillotHooked) {
+		// Already hooked: just re-point the existing hook at the SDK found this
+		// time, otherwise a stale install path stays pinned in the old closure
+		// after a reload picks up a different install.
+		Module._resolveFilename.__pillotSdkRoot = piNodeModules;
+		return;
+	}
 	const originalResolveFilename = Module._resolveFilename;
 
 	const hooked = function (request, parent, isMain, options) {
 		// Intercept @earendil-works/* packages, resolve from global PI install.
 		if (request.startsWith("@earendil-works/")) {
-			const resolved = resolveSdkRequest(piNodeModules, request);
+			const resolved = resolveSdkRequest(hooked.__pillotSdkRoot, request);
 			if (resolved) {
 				return resolved;
 			}
@@ -596,6 +647,7 @@ function hookModuleResolution(piNodeModules) {
 		return originalResolveFilename.call(this, request, parent, isMain, options);
 	};
 	hooked.__pillotHooked = true;
+	hooked.__pillotSdkRoot = piNodeModules;
 	Module._resolveFilename = hooked;
 }
 
@@ -604,7 +656,13 @@ function hookModuleResolution(piNodeModules) {
  * for a bare `@earendil-works/*` import: exports map ("." entry, then its
  * require/import/default conditions), then "main", then the historical
  * dist/index.js guess. Returns an empty array when the manifest is unreadable.
+ *
+ * Results are memoized per package directory: every intercepted require()
+ * would otherwise re-read and re-parse the same manifest for the lifetime
+ * of the process, even though the result never changes.
  */
+const bareImportCache = new Map();
+
 function exportsDotEntryTargets(dotEntry) {
 	if (typeof dotEntry === "string") return [dotEntry];
 	if (dotEntry && typeof dotEntry === "object") {
@@ -624,15 +682,20 @@ function exportsMapTargets(exportsMap) {
 }
 
 function bareImportCandidates(pkgDir) {
+	const cached = bareImportCache.get(pkgDir);
+	if (cached) return cached;
+	let candidates = [];
 	try {
 		const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8"));
 		const targets = exportsMapTargets(pkgJson.exports);
 		if (typeof pkgJson.main === "string") targets.push(pkgJson.main);
 		targets.push("dist/index.js");
-		return targets;
+		candidates = targets;
 	} catch (_e) {
-		return [];
+		// Unreadable/broken package.json: fall through with the empty list.
 	}
+	bareImportCache.set(pkgDir, candidates);
+	return candidates;
 }
 
 /**
@@ -650,7 +713,8 @@ function resolveBareImport(pkgDir) {
 /**
  * Resolve a sub-path import (`@earendil-works/pkg/sub`) inside pkgDir.
  * Refuses traversal: a request like `pkg/../../x` returns null instead of a
- * path outside the package directory.
+ * path outside the package directory — including when a symlink inside the
+ * package directory points elsewhere (pnpm/mise installs are symlink farms).
  */
 function resolveSubPathImport(pkgDir, subPath) {
 	const resolvedPath = path.resolve(pkgDir, subPath);
@@ -663,7 +727,23 @@ function resolveSubPathImport(pkgDir, subPath) {
 	if (fs.existsSync(resolvedPath)) {
 		if (fs.statSync(resolvedPath).isDirectory()) {
 			const indexPath = path.join(resolvedPath, "index.js");
-			if (fs.existsSync(indexPath)) return indexPath;
+			// A directory without index.js must fail resolution cleanly, not come
+			// back as a directory path that Module._load reads as a file (EISDIR).
+			return fs.existsSync(indexPath) ? indexPath : null;
+		}
+		// Validate containment on the REAL path: the lexical check above passes
+		// for a symlink inside pkgDir whose target is outside it.
+		let realTarget;
+		let realRoot;
+		try {
+			realTarget = fs.realpathSync(resolvedPath);
+			realRoot = fs.realpathSync(pkgDir);
+		} catch (_e) {
+			return null; // cannot prove containment
+		}
+		const realRel = path.relative(realRoot, realTarget);
+		if (realRel === ".." || realRel.startsWith(".." + path.sep) || path.isAbsolute(realRel)) {
+			return null; // traversal attempt via symlink
 		}
 		return resolvedPath;
 	}
@@ -677,6 +757,7 @@ function resolveSubPathImport(pkgDir, subPath) {
  * from this install (caller falls back to Node's normal resolution).
  */
 function resolveSdkRequest(piNodeModules, request) {
+	if (!piNodeModules) return null;
 	const parts = request.split("/");
 	if (parts.length < 2) return null;
 	// Reject traversal at parse time (defense-in-depth): `@earendil-works/../../etc`
@@ -690,6 +771,25 @@ function resolveSdkRequest(piNodeModules, request) {
 		return resolveBareImport(pkgDir);
 	}
 	return resolveSubPathImport(pkgDir, parts.slice(2).join("/"));
+}
+
+/**
+ * Loading the bundle pulls in the PI SDK's ESM entry via require(esm), which
+ * only works on Node.js >= 22.12. Detect the capability up front so the user
+ * gets an actionable error instead of a bare ERR_REQUIRE_ESM from deep inside
+ * the require() below.
+ */
+function assertRequireEsmSupported() {
+	if ((process.features && process.features.require_module) === true) return;
+	const nodeVersion = process.versions.node || "0.0.0";
+	const [major, minor] = nodeVersion.split(".").map(Number);
+	if (major > 22 || (major === 22 && minor >= 12)) return;
+	throw new Error(
+		"PiLot Studio requires an extension host with Node.js 22.12+ (require(ESM) support). " +
+			"Running Node.js " +
+			nodeVersion +
+			". Please update VS Code.",
+	);
 }
 
 /**
@@ -722,7 +822,9 @@ function load() {
 					"or set pi-agent.binaryPath in VS Code settings to the full path from 'which pi'.\n\n" +
 					"Or visit the documentation for alternative installation methods.";
 
-				vscode.window
+				// void + catch: a rejected dialog promise (host shutting down) must
+				// not surface as an unhandled rejection.
+				void vscode.window
 					.showErrorMessage(message, "Open Documentation", "Copy Install Command")
 					.then(function (selection) {
 						if (selection === "Open Documentation") {
@@ -733,6 +835,9 @@ function load() {
 								"Install command copied to clipboard!",
 							);
 						}
+					})
+					.catch(function () {
+						/* dialog unavailable */
 					});
 
 				console.error("[PiLot] PI SDK not found. Searched locations:");
@@ -766,6 +871,9 @@ function load() {
 
 	// Hook module resolution to bypass ESM-only exports map
 	hookModuleResolution(piNodeModules);
+
+	// The bundled extension requires the PI SDK's ESM entry via require(esm).
+	assertRequireEsmSupported();
 
 	// Load the CJS extension bundle
 	try {

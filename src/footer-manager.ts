@@ -1,3 +1,5 @@
+import * as path from "node:path";
+
 export interface FooterData {
 	cwd: string;
 	gitBranch: string | null;
@@ -26,6 +28,7 @@ export class FooterManager {
 			resolveGitBranch(cwd: string): string | null;
 		},
 		private readonly notifyWebview: (message: { type: string; data: FooterData }) => void,
+		private readonly logError?: (msg: string, ...details: unknown[]) => void,
 	) {}
 
 	start(session: SessionCwd | null | undefined): void {
@@ -42,28 +45,53 @@ export class FooterManager {
 			clearInterval(this.gitBranchPoller);
 			this.gitBranchPoller = undefined;
 		}
+		// Drop the (possibly torn-down) session and the dedupe snapshot: without
+		// this, sends after stop() still emit using a disposed session, and a
+		// restart with an identical cwd/branch/name suppressed its first update.
+		this.session = undefined;
+		this.resetCache();
+	}
+
+	/** Forget the last pushed snapshot so the next send always re-emits it. */
+	resetCache(): void {
+		this.footerCwd = "";
+		this.footerGitBranch = null;
+		this.footerSessionName = null;
 	}
 
 	sendFooterData(session?: SessionCwd | null | undefined): void {
-		const current = session !== undefined ? session : this.session;
+		// Adopt the argument, not just read it: the provider passes a fresh
+		// object on session-name changes, and without adopting it the next poll
+		// tick re-read the stale snapshot and flickered the old name back.
+		if (session !== undefined) {
+			this.session = session;
+		}
+		const current = this.session;
 		if (!current) return;
-		const rawCwd = current.getCwd();
-		const sessionName = current.sessionName ?? null;
+
+		// Guard the WHOLE tick body: getCwd() is a closure over session-manager
+		// state the provider disposes during teardown, and notifyWebview() can
+		// throw too — a throw here previously escaped the interval callback.
+		let rawCwd: string;
+		let sessionName: string | null;
+		try {
+			rawCwd = current.getCwd();
+			sessionName = current.sessionName ?? null;
+		} catch {
+			return;
+		}
+
 		// resolveGitBranch does sync fs I/O; a throw must not escape the interval
 		// callback and kill the whole footer update tick.
 		let gitBranch: string | null;
 		try {
 			gitBranch = this.binaryService.resolveGitBranch(rawCwd);
-		} catch {
+		} catch (err) {
+			this.logError?.("[PI] resolveGitBranch failed for", rawCwd, err);
 			gitBranch = null;
 		}
 
-		const home = process.env.HOME || process.env.USERPROFILE || "";
-		let cwd = rawCwd;
-		if (home && (rawCwd === home || rawCwd.startsWith(home + "/"))) {
-			const rest = rawCwd.slice(home.length);
-			cwd = rest === "" ? "~" : `~${rest.startsWith("/") ? "" : "/"}${rest}`;
-		}
+		const cwd = this.shortenHome(rawCwd);
 
 		if (
 			cwd === this.footerCwd &&
@@ -81,6 +109,25 @@ export class FooterManager {
 			type: "footer-data",
 			data: { cwd, gitBranch, sessionName },
 		});
+	}
+
+	/** Shorten an absolute cwd under the user's home directory to `~/…`.
+	 *  Uses path semantics so Windows paths (`C:\\Users\\me\\…`) and trailing
+	 *  separators in HOME are handled correctly — the old string slicing with
+	 *  a hardcoded "/" silently failed on Windows. */
+	private shortenHome(rawCwd: string): string {
+		const home = process.env.HOME || process.env.USERPROFILE || "";
+		if (!home) return rawCwd;
+		const relative = path.relative(home, rawCwd);
+		if (relative === "") {
+			// cwd IS the home directory: shorten to the bare `~`.
+			return "~";
+		}
+		if (relative.startsWith("..") || path.isAbsolute(relative)) {
+			return rawCwd;
+		}
+		const sep = relative.includes(path.sep) ? path.sep : "";
+		return `~${sep}${relative.split(path.sep).join("/")}`;
 	}
 
 	dispose(): void {

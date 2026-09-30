@@ -13,79 +13,114 @@
       title: "👋 Welcome to PiLot Studio!",
       content:
         "Your graphical interface for the PI coding agent. Let's take a quick tour of the key features.",
-      icon: "rocket",
     },
     {
       title: "💬 Chat Panel",
       content: "Type messages in the chat box and press Enter to send.",
-      icon: "chat",
     },
     {
       title: "📋 Session History",
       content:
         "Click the clock icon in the sidebar to view and switch between sessions. Browse your conversation tree to revisit any point.",
-      icon: "history",
     },
     {
       title: "🧠 Thinking Levels",
       content:
         "Use the thinking level dropdown in the header to control how much reasoning the AI uses. Higher levels = deeper analysis but slower responses.",
-      icon: "brain",
     },
     {
       title: "🔧 Tools & Extensions",
       content:
         "The tools panel shows what PI can do. You can enable/disable tools per session in the Capabilities tab (wrench icon).",
-      icon: "tools",
     },
     {
       title: "📦 Packages",
       content:
         "Discover and install PI packages (extensions, skills, prompts, themes) from the marketplace in the Packages tab.",
-      icon: "package",
     },
     {
       title: "🔑 Provider API Keys",
       content:
         "Open the Providers tab (key icon) to add API keys for your preferred AI providers. Configure once, then switch models freely.",
-      icon: "key",
     },
   ];
 
-  const isLast = $derived(step === steps.length - 1);
-  // Clamp the index so a corrupted/Out-of-range `step` can never read
-  // `steps[step]` as undefined and crash the render.
+  // Clamp the index so a corrupted/out-of-range `step` can never read
+  // `steps[step]` as undefined and crash the render. `step` stays private;
+  // every consumer derives from the clamped value so the card content, the
+  // dots, isLast and the buttons can never disagree.
   const safeStep = $derived(Math.min(Math.max(0, step), steps.length - 1));
   const currentStep = $derived(steps[safeStep] ?? steps[0]);
+  const isLast = $derived(safeStep === steps.length - 1);
 
   function next() {
     if (isLast) {
       onComplete();
     } else {
-      step = Math.min(step + 1, steps.length - 1);
+      step = Math.min(safeStep + 1, steps.length - 1);
     }
   }
 
   function prev() {
-    if (step > 0) step--;
+    if (safeStep > 0) step = safeStep - 1;
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      e.preventDefault();
       e.stopPropagation();
       onDismiss();
       return;
     }
     // Enter is excluded: a focused card button fires its own click on Enter,
     // and handling it here too would double-trigger next()/onComplete().
-    if (e.key === "ArrowRight") next();
-    if (e.key === "ArrowLeft") prev();
+    // The repeat guard stops a held key from racing through every step and
+    // completing the tour by accident.
+    if (e.key === "ArrowRight" && !e.repeat) {
+      e.preventDefault();
+      e.stopPropagation();
+      next();
+    }
+    if (e.key === "ArrowLeft" && !e.repeat) {
+      e.preventDefault();
+      e.stopPropagation();
+      prev();
+    }
   }
 
-  /** Svelte action: move focus into the dialog on mount (a modal dialog that
-   *  doesn't take focus is invisible to keyboard and screen-reader users). */
-  function focusOnMount(node: HTMLElement) {
+  /** Svelte action: focus trap + focus restore for the modal dialog.
+   *  Without it Tab walks past the opaque backdrop into the app behind, and
+   *  on close focus falls back to <body> losing the user's place. */
+  function focusTrap(node: HTMLElement) {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     node.focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const focusable = node.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === node)) {
+        e.preventDefault();
+        e.stopPropagation();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        e.stopPropagation();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleTab, true);
+
+    return {
+      destroy() {
+        document.removeEventListener("keydown", handleTab, true);
+        previouslyFocused?.focus?.();
+      },
+    };
   }
 </script>
 
@@ -97,9 +132,9 @@
   tabindex="-1"
   onclick={onDismiss}
   onkeydown={handleKeydown}
-  use:focusOnMount
+  use:focusTrap
 >
-  <div class="onboarding-card" role="presentation" onclick={(e) => e.stopPropagation()}>
+  <div class="onboarding-card" role="presentation">
     <button class="dismiss-btn" onclick={onDismiss} aria-label="Close tour">
       <svg
         width="16"
@@ -119,8 +154,10 @@
       {/each}
     </div>
 
-    <h2 class="step-title">{currentStep.title}</h2>
-    <p class="step-content">{currentStep.content}</p>
+    <div class="step-body" aria-live="polite" aria-atomic="true">
+      <h2 class="step-title">{currentStep.title}</h2>
+      <p class="step-content">{currentStep.content}</p>
+    </div>
 
     <div class="step-nav">
       <button class="nav-btn" onclick={prev} disabled={step === 0}>

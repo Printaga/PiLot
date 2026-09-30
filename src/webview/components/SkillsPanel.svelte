@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { postToHost } from "../messages";
+  import { onMount, onDestroy } from "svelte";
+  import { postToHost, asString, getVsCodeApi } from "../messages";
 
   interface SkillInfo {
     name: string;
@@ -44,42 +44,59 @@
     }),
   );
 
-  function getVsCodeApi() {
-    const existing = (window as any).vscode;
-    if (existing?.postMessage) return existing;
-    if (typeof (window as any).acquireVsCodeApi === "function") {
-      const vscode = (window as any).acquireVsCodeApi();
-      (window as any).vscode = vscode;
-      return vscode;
-    }
-    return null;
-  }
-
   function sendMessage(msg: any) {
     postToHost(msg);
   }
+
+  // Tracked so re-arms replace pending timers and teardown clears them: an
+  // untracked timer previously fired after unmount, and the fixed 2s deadline
+  // also masked a "host never replied" as an empty "No skills loaded" state.
+  let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   function refreshSkills() {
     sendMessage({ type: "getSkills" });
     sendMessage({ type: "getSessionResources" });
     isLoading = true;
-    setTimeout(() => {
+    if (loadingTimer) clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(() => {
       isLoading = false;
     }, 2000);
   }
 
-  // Normalize a raw skill record into the panel's SkillInfo shape
-  function toSkillInfo(s: any): SkillInfo {
+  onDestroy(() => {
+    if (loadingTimer) clearTimeout(loadingTimer);
+    if (refreshTimer) clearTimeout(refreshTimer);
+  });
+
+  // Normalize a raw skill record into the panel's SkillInfo shape. The payload
+  // is untrusted host data: every field is coerced so a malformed record can
+  // never throw during render (`s.name.toLowerCase()` used to take down the
+  // whole panel).
+  function toSkillInfo(raw: unknown): SkillInfo {
+    const s = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+    const name = asString(s.name);
+    const sourceName = typeof s.sourceName === "string" && s.sourceName ? s.sourceName : null;
+    const packageSource =
+      typeof s.packageSource === "string" && s.packageSource ? s.packageSource : null;
+    const path = asString(s.path);
+    const rawType = asString(s.sourceType) as SkillInfo["sourceType"];
+    let sourceType: SkillInfo["sourceType"] = "built-in";
+    if (rawType === "local" || rawType === "package" || rawType === "built-in") {
+      sourceType = rawType;
+    } else if (sourceName) {
+      sourceType = "package";
+    } else if (path.includes("/.pi/")) {
+      sourceType = "local";
+    }
     return {
-      name: s.name,
-      description: s.description || "",
-      sourceName: s.sourceName || null,
-      packageSource: s.packageSource || null,
-      key: s.key || s.path || `${s.sourceName || ""}::${s.name}`,
-      path: s.path || "",
-      sourceType:
-        s.sourceType ||
-        (s.sourceName ? "package" : s.path?.includes("/.pi/") ? "local" : "built-in"),
+      name,
+      description: asString(s.description),
+      sourceName,
+      packageSource,
+      key: asString(s.key) || path || `${asString(s.sourceName)}::${name}`,
+      path,
+      sourceType,
     };
   }
 
@@ -91,8 +108,14 @@
     }
   }
 
-  // React to prop changes — when parent updates sessionResources, apply them
+  // React to prop changes — but only when the payload actually changed: the
+  // parent recreates the object on unrelated re-renders, and unconditionally
+  // re-mapping clobbered fresher host-pushed lists and churned the whole keyed
+  // each block on every parent update.
   $effect(() => {
+    const next = sessionResources?.skills;
+    if (!Array.isArray(next)) return;
+    if (skills.length === next.length && skills.every((s, i) => s.key === next[i]?.key)) return;
     applySessionResources(sessionResources);
   });
 
@@ -131,6 +154,11 @@
   function addSkillPath() {
     const trimmed = newSkillPath.trim();
     if (!trimmed || extraSkillPaths.includes(trimmed)) return;
+    // Reject unusable entries before persisting: relative paths are written
+    // verbatim into the global setting and scanned on every reload.
+    if (!trimmed.startsWith("/") && !trimmed.startsWith("~") && !/^[A-Za-z]:[\\/]/.test(trimmed)) {
+      return;
+    }
     extraSkillPaths = [...extraSkillPaths, trimmed];
     newSkillPath = "";
     sendMessage({ type: "setExtraSkillPaths", data: { paths: extraSkillPaths } });
@@ -168,7 +196,9 @@
   }
 
   function expandSkill(skill: SkillInfo) {
-    expandedSkill = expandedSkill === skill.name ? null : skill.name;
+    // `key` is the unique identity the host supplies (names collide across
+    // packages/sources); expansion and each-keys must use it too.
+    expandedSkill = expandedSkill === skill.key ? null : skill.key;
   }
 
   function applyResourceToggleMessage(data: any) {
@@ -205,13 +235,17 @@
       if (type === "loading") {
         showLoadingOverlay = data?.loading;
         if (!data?.loading) {
-          setTimeout(() => {
+          if (refreshTimer) clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => {
             refreshSkills();
           }, 100);
         }
       }
       if (type === "output") {
-        outputText += data?.text || "";
+        // Cap the buffer: an unbounded log re-rendered per chunk is real jank
+        // in the webview and grows without bound on long installs.
+        const MAX_OUTPUT_CHARS = 20_000;
+        outputText = (outputText + asString(data?.text)).slice(-MAX_OUTPUT_CHARS);
       }
     }
     window.addEventListener("message", handleMessage);
@@ -303,7 +337,7 @@
         {/if}
       </div>
     {:else}
-      {#each filteredSkills as skill (skill.name)}
+      {#each filteredSkills as skill (skill.key)}
         <div class="skill-card">
           <div
             class="skill-header"
@@ -332,7 +366,7 @@
               {formatSource(skill)}
             </span>
           </div>
-          {#if expandedSkill === skill.name}
+          {#if expandedSkill === skill.key}
             <div class="skill-details">
               <div class="detail-row">
                 <span class="detail-label">Source:</span>

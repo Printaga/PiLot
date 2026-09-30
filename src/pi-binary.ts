@@ -155,42 +155,46 @@ export function findPiBinary(): string {
 	// over any workspace-local copy that may come from an SDK dependency.
 	// NOTE: workspace node_modules/.bin/pi is intentionally excluded — it may
 	// point to a devDependency copy, not the user's global PI install.
-	const candidates =
-		process.platform === "win32"
-			? [
-					// pnpm global
-					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi"),
-					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.exe"),
-					path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.cmd"),
-					// npm global (APPDATA/npm)
-					path.join(process.env.APPDATA || "", "npm", "pi"),
-					path.join(process.env.APPDATA || "", "npm", "pi.exe"),
-					path.join(process.env.APPDATA || "", "npm", "pi.cmd"),
-					// npm global (LOCALAPPDATA/npm)
-					path.join(process.env.LOCALAPPDATA || "", "npm", "pi"),
-					path.join(process.env.LOCALAPPDATA || "", "npm", "pi.exe"),
-					path.join(process.env.LOCALAPPDATA || "", "npm", "pi.cmd"),
-					// ProgramFiles/nodejs (nodejs installer global dir)
-					path.join(process.env.ProgramFiles || "", "nodejs", "pi"),
-					path.join(process.env.ProgramFiles || "", "nodejs", "pi.exe"),
-					path.join(process.env.ProgramFiles || "", "nodejs", "pi.cmd"),
-					// bun / other
-					path.join(home, ".bun", "bin", "pi"),
-					path.join(home, ".npm-global", "pi"),
-					path.join(home, ".npm-global", "pi.exe"),
-					path.join(home, ".npm-global", "pi.cmd"),
-					path.join(home, ".local", "bin", "pi"),
-					path.join(home, ".local", "share", "pnpm", "bin", "pi"),
-				]
-			: [
-					path.join(home, ".bun/bin/pi"),
-					path.join(home, ".local/bin/pi"),
-					path.join(home, ".npm-global/bin/pi"),
-					path.join(home, ".local/share/pnpm/bin/pi"),
-					// mise shims — covers installs where 'pi' is not on PATH seen by VS Code
-					path.join(home, ".local/share/mise/shims/pi"),
-					"pi",
-				];
+	const win32Candidates = [
+		// pnpm global
+		path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi"),
+		path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.exe"),
+		path.join(process.env.LOCALAPPDATA || "", "pnpm", "pi.cmd"),
+		// npm global (APPDATA/npm)
+		path.join(process.env.APPDATA || "", "npm", "pi"),
+		path.join(process.env.APPDATA || "", "npm", "pi.exe"),
+		path.join(process.env.APPDATA || "", "npm", "pi.cmd"),
+		// npm global (LOCALAPPDATA/npm)
+		path.join(process.env.LOCALAPPDATA || "", "npm", "pi"),
+		path.join(process.env.LOCALAPPDATA || "", "npm", "pi.exe"),
+		path.join(process.env.LOCALAPPDATA || "", "npm", "pi.cmd"),
+		// ProgramFiles/nodejs (nodejs installer global dir)
+		path.join(process.env.ProgramFiles || "", "nodejs", "pi"),
+		path.join(process.env.ProgramFiles || "", "nodejs", "pi.exe"),
+		path.join(process.env.ProgramFiles || "", "nodejs", "pi.cmd"),
+		// bun / other
+		path.join(home, ".bun", "bin", "pi"),
+		path.join(home, ".npm-global", "pi"),
+		path.join(home, ".npm-global", "pi.exe"),
+		path.join(home, ".npm-global", "pi.cmd"),
+		path.join(home, ".local", "bin", "pi"),
+		path.join(home, ".local", "share", "pnpm", "bin", "pi"),
+	];
+	const posixCandidates = [
+		path.join(home, ".bun/bin/pi"),
+		path.join(home, ".local/bin/pi"),
+		path.join(home, ".npm-global/bin/pi"),
+		path.join(home, ".local/share/pnpm/bin/pi"),
+		// mise shims — covers installs where 'pi' is not on PATH seen by VS Code
+		path.join(home, ".local/share/mise/shims/pi"),
+	];
+	// An unset base env var (HOME, LOCALAPPDATA, …) makes `path.join` produce a
+	// CWD-relative path, which would probe files shipped inside the current
+	// working directory. Only absolute candidates are safe to probe; the bare
+	// "pi" fallthrough below remains the last resort.
+	const candidates = (process.platform === "win32" ? win32Candidates : posixCandidates).filter(
+		(c) => path.isAbsolute(c),
+	);
 
 	for (const c of candidates) {
 		try {
@@ -222,9 +226,17 @@ export function resolvePiBinary(): string | null {
 		}
 	}
 	try {
+		// `binary` can be the bare "pi" fallthrough or a relative candidate; every
+		// value here ends up as a child-process program name, so apply the same
+		// guard the settings path uses.
+		if (!isSafeBinaryPath(binary)) {
+			return null;
+		}
 		if (process.platform === "win32") {
+			// `where` is an executable, not a shell builtin, so no shell is needed
+			// (a shell would re-parse the program name).
 			const result = piBinaryInternals.spawnSync("where", [binary], {
-				shell: true,
+				shell: false,
 				timeout: 1000,
 			});
 			if (result.status === 0 && result.stdout) {
@@ -240,7 +252,7 @@ export function resolvePiBinary(): string | null {
 			// from environment-controlled values). Resolve by scanning PATH
 			// directly instead — same `command -v` semantics (first executable
 			// match wins) with no shell in the loop. `binary` is validated by
-			// resolvePiBinaryFromSetting()/isSafeBinaryPath before reaching here.
+			// resolvePiBinaryFromSetting() and re-checked by isSafeBinaryPath above.
 			const pathDirs = (process.env.PATH || "")
 				.split(path.delimiter)
 				.filter((dir) => dir.length > 0);
@@ -288,8 +300,13 @@ export function parseInstalledPackages(output: string): InstalledPackage[] {
 			continue;
 		}
 
-		// Package paths are indented deeper than their source line.
-		if (/^\s{4,}\S/.test(line)) {
+		// Documented shape contract of `pi list`: source headers indent 2 spaces,
+		// their package paths indent 4. Matching the two known levels explicitly
+		// (rather than testing "4+" first with a blanket continue) keeps an oddly
+		// indented line from being misclassified as the other kind; anything else
+		// is ignored.
+		const indent = line.length - line.trimStart().length;
+		if (indent >= 4) {
 			if (currentSource) {
 				packages.push({ source: currentSource, path: trimmed });
 				sawPackageForSource = true;
@@ -297,7 +314,7 @@ export function parseInstalledPackages(output: string): InstalledPackage[] {
 			continue;
 		}
 
-		if (/^\s{2,}\S/.test(line)) {
+		if (indent >= 2) {
 			flushEmptySource();
 			currentSource = trimmed.replace(/\s+\(filtered\)$/, "");
 			sawPackageForSource = false;
@@ -316,9 +333,9 @@ export function readPackageManifest(installedPath: string): {
 } {
 	if (!installedPath) return { description: "", version: "" };
 	try {
-		const pkgJsonPath = path.join(installedPath, "package.json");
-		if (!fs.existsSync(pkgJsonPath)) return { description: "", version: "" };
-		const raw = fs.readFileSync(pkgJsonPath, "utf-8");
+		// A single read; ENOENT (missing package.json) lands in the catch below,
+		// so the extra existsSync stat (and its TOCTOU window) is not needed.
+		const raw = fs.readFileSync(path.join(installedPath, "package.json"), "utf-8");
 		const pkg = JSON.parse(raw);
 		return {
 			description: typeof pkg.description === "string" ? pkg.description : "",
@@ -346,7 +363,13 @@ export function readPackageSourcesFromSettingsFile(
 		}
 
 		return parsed.packages
-			.map((entry) => (typeof entry === "string" ? entry.trim() : entry.source?.trim()))
+			.map((entry) => {
+				if (typeof entry === "string") return entry.trim();
+				// The JSON is untrusted input: one malformed entry (null, or a
+				// non-string `source`) must not throw away every valid source.
+				const source = (entry as { source?: unknown } | null)?.source;
+				return typeof source === "string" ? source.trim() : undefined;
+			})
 			.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 	} catch (error) {
 		logDebug?.("[PI] Failed to read package sources from settings file:", filePath, error);

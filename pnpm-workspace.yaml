@@ -7,15 +7,10 @@ overrides:
   # Security: qs DoS advisories (patched in 6.16.0, moderate)
   'qs@<6.16.0': '6.16.0'
 
-# Dependencies allowed to run postinstall build scripts (pnpm v10+).
-onlyBuiltDependencies:
-  - '@google/genai'
-  - '@vscode/vsce-sign'
-  - esbuild
-  - keytar
-  - koffi
-  - protobufjs
-
+# Single source of truth for postinstall build-script approvals (pnpm 10+;
+# supersedes onlyBuiltDependencies). Keep every entry that exists in the
+# dependency tree — removing one makes pnpm skip (and warn about) its build
+# scripts, which breaks e.g. esbuild and the vsce signing flow.
 allowBuilds:
   '@google/genai': true
   '@vscode/vsce-sign': true

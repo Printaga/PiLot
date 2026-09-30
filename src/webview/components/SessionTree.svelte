@@ -70,7 +70,7 @@
     }
   }
 
-  function sendMessage(msg: unknown) {
+  function sendMessage(msg: { type: string; id?: string; data?: unknown }) {
     postToHost(msg);
   }
 

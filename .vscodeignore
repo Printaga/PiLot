@@ -41,8 +41,8 @@ node_modules/**
 openspec/**
 **/openspec/**
 graphify-out/**
-fallow-baselines/**
-reference/**
+/fallow-baselines/
+/reference/
 
 # ── Extension scaffolding / hooks (dev-only) ──
 .husky/**
@@ -90,6 +90,15 @@ media/**
 !media/voice/**
 media/kofi.webp
 media/screenshot.png
+# macOS .framework bundles are symlink farms (Versions/Current -> A plus
+# top-level Headers/Resources/Libraries/whisper links). Re-adding them verbatim
+# either trips the yazl "not a file" packager error or gets silently dropped,
+# which breaks @rpath/.../Versions/Current/whisper for the darwin voice helper.
+# Ship only the real (non-link) payload under Versions/A and Versions/Current.
+media/voice/whisper.framework/Versions/A/whisper
+media/voice/whisper.framework/Versions/A/Resources/Info.plist
+media/voice/whisper.framework/Versions/Current/whisper
+media/voice/whisper.framework/Versions/Current/Resources/Info.plist
 
 # ── Misc ──
 *.vsix
@@ -107,6 +116,32 @@ media/screenshot.png
 **/*.key
 credentials*.json
 **/credentials*.json
+*credentials*.json
+**/*credentials*.json
+secrets*.json
+**/secrets*.json
+*-service-account*.json
+**/*-service-account*.json
+*.p12
+**/*.p12
+*.pfx
+**/*.pfx
+*.jks
+**/*.jks
+*.keystore
+**/*.keystore
+*.crt
+**/*.crt
+id_rsa*
+**/id_rsa*
+id_ed25519*
+**/id_ed25519*
+.npmrc
+**/.npmrc
+.netrc
+**/.netrc
+*.pypirc
+**/*.pypirc
 **/*.ts.map
 **/tsconfig.json
 **/tslint.json

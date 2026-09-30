@@ -402,7 +402,8 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 				5 * 60 * 1000,
 			);
 
-			this.checkNativeAddons();
+			// Async: the rebuild can take minutes — never block activation on it.
+			void this.checkNativeAddons().catch(() => {});
 		} catch (error) {
 			// Restore PATH on failure
 			if (originalPath !== undefined && this.binaryService.isBinaryAvailable()) {
@@ -494,9 +495,11 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 	 * Check native addon (better-sqlite3) ABI compatibility.
 	 * Auto-rebuilds if mismatched. Logs result.
 	 */
-	private checkNativeAddons(): void {
+	private async checkNativeAddons(): Promise<void> {
 		try {
-			const result = ensureBetterSqlite3Compatible();
+			// No network prebuilds on the startup path: a repair that downloads
+			// and unpacks a native binary requires an explicit user action.
+			const result = await ensureBetterSqlite3Compatible({ allowNetworkPrebuilds: false });
 			if (result.ok) {
 				if (result.rebuilt) {
 					this.log(
@@ -609,7 +612,10 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 					cancellable: false,
 				},
 				async () => {
-					const result = ensureBetterSqlite3Compatible();
+					// Explicit user command: network prebuild downloads are allowed here.
+					const result = await ensureBetterSqlite3Compatible({
+						allowNetworkPrebuilds: true,
+					});
 					if (result.ok) {
 						vscode.window.showInformationMessage(
 							result.rebuilt

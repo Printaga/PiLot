@@ -5,7 +5,7 @@ import { runUpdateCheck } from "../update-checker.js";
 import { draftCommitMessage, findRepositoryRoot } from "../git-commit-message.js";
 import { findGitRepository, writeCommitMessage } from "../git-extension.js";
 import {
-	diagnosticsChannel,
+	getDiagnosticsChannel,
 	getDiagnosticsLogContent,
 	logDiagnostics,
 	setDiagnosticsEnabled,
@@ -375,7 +375,6 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 
 					switch (outcome.status) {
 						case "message": {
-							writeCommitMessage(lookup.repository, outcome.message);
 							const notes: string[] = [];
 							if (outcome.truncated) notes.push("the patch was truncated");
 							if (outcome.untrackedCount > 0) {
@@ -383,11 +382,19 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 									`${outcome.untrackedCount} untracked file(s) were not included`,
 								);
 							}
-							vscode.window.showInformationMessage(
-								notes.length > 0
-									? `Commit message drafted (${notes.join("; ")}).`
-									: "Commit message drafted.",
-							);
+							// The repository handle was captured before the model round-trip;
+							// a stale/closed repository reports failure instead of silently
+							// swallowing the drafted message.
+							if (!writeCommitMessage(lookup.repository, outcome.message)) {
+								notes.push("the SCM input box was no longer available");
+							}
+							if (notes.length > 0) {
+								vscode.window.showWarningMessage(
+									`Commit message drafted, but ${notes.join("; ")}.`,
+								);
+							} else {
+								vscode.window.showInformationMessage("Commit message drafted.");
+							}
 							break;
 						}
 						case "nothing-to-commit":
@@ -416,7 +423,7 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 	// Diagnostics Commands
 	context.subscriptions.push(
 		vscode.commands.registerCommand("pi-agent.showDiagnosticsLog", async () => {
-			diagnosticsChannel.show(true);
+			getDiagnosticsChannel().show(true);
 		}),
 	);
 

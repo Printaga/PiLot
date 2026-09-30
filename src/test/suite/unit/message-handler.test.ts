@@ -679,9 +679,11 @@ suite("MessageHandler", () => {
 		assert.strictEqual(msg.data.length, 1);
 	});
 
-	test("getSessions - returns []", async () => {
+	test("getSessions is not a supported type (sessions come from listSessions)", async () => {
+		// The dead `getSessions` case (unconditionally returning []) was removed:
+		// it silently shadowed real session data with an empty list.
 		const result = await handler.handle({ type: "getSessions", data: {} });
-		assert.deepStrictEqual(result, []);
+		assert.ok(result.error?.includes("Unknown message type"));
 	});
 
 	test("getContextUsage - pushes immediately via sendContextUsage", async () => {

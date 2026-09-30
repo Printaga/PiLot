@@ -12,7 +12,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 
 /**
  * Known Node.js module version -> Node.js major mapping.
@@ -25,7 +25,9 @@ const NODE_MODULE_VERSIONS: Record<number, string> = {
 	115: "20.x",
 	127: "22.x",
 	137: "24.x",
-	140: "22.x (Electron build)",
+	// Electron ABIs are not Node ABIs — label them as such instead of guessing
+	// a Node major that the binary was never built for.
+	140: "Electron build (unmapped to a Node major)",
 	141: "25.x",
 	142: "27.x",
 };
@@ -61,6 +63,11 @@ function findBetterSqlite3Paths(): string[] {
 	}
 
 	return candidates;
+}
+
+/** Single source of truth for the top-level better-sqlite3 directory. */
+function getTopLevelBetterSqlite3Dir(): string {
+	return path.join(os.homedir(), ".pi", "agent", "npm", "node_modules", "better-sqlite3");
 }
 
 /**
@@ -173,36 +180,79 @@ export function checkBetterSqlite3(paths?: string[]): {
  *
  * Values are passed as an argv array (no shell), so filesystem-derived
  * paths and version strings can never be reinterpreted as shell syntax.
+ *
+ * Resolved through require.resolve so this also works on Windows, where
+ * npm only creates `.cmd` shims under node_modules/.bin, and so a missing
+ * devDependency tool is reported as such instead of as a build failure.
  */
-function tryPrebuildInstall(targetDir: string, electronVersion: string): string | null {
+function tryPrebuildInstall(targetDir: string, electronVersion: string): Promise<string | null> {
+	const toolEntry = resolveToolEntry(targetDir, "prebuild-install");
+	if (!toolEntry) return Promise.resolve(null); // tool not installed here
+	return execFileAsync(
+		process.execPath,
+		[
+			toolEntry,
+			"--runtime",
+			"electron",
+			"--target",
+			electronVersion,
+			// Derive the architecture from the runtime: a hardcoded x64 downloads
+			// the wrong binary on arm64 hosts.
+			"--arch",
+			process.arch,
+		],
+		{
+			cwd: targetDir,
+			timeout: 30_000,
+			maxBuffer: 256 * 1024,
+			windowsHide: true,
+		},
+	).then(
+		(result) => result.stdout ?? "",
+		() => null, // prebuild not available
+	);
+}
+
+/**
+ * Resolve a build tool's real JS entry point inside `targetDir`.
+ * Returns null when the tool is not installed there (it is a devDependency
+ * of better-sqlite3, so this is common and must not look like a failure).
+ */
+function resolveToolEntry(targetDir: string, toolName: string): string | null {
 	try {
-		const result = spawnSync(
-			process.execPath,
-			[
-				// npx without a shell: run the package's CLI via node
-				path.join("node_modules", ".bin", "prebuild-install"),
-				"--runtime",
-				"electron",
-				"--target",
-				electronVersion,
-				"--arch",
-				"x64",
-			],
-			{
-				cwd: targetDir,
-				timeout: 30_000,
-				maxBuffer: 256 * 1024,
-				shell: false,
-				windowsHide: true,
-			},
-		);
-		if (result.error || result.status !== 0) {
-			return null; // prebuild not available
-		}
-		return result.stdout?.toString() ?? "";
+		// The package.json "bin" entry is the actual script node should run.
+		const pkgJson = path.join(targetDir, "node_modules", toolName, "package.json");
+		const pkg = JSON.parse(fs.readFileSync(pkgJson, "utf-8"));
+		const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[toolName];
+		if (!bin) return null;
+		return path.join(targetDir, "node_modules", toolName, bin);
 	} catch {
-		return null; // prebuild not available
+		return null;
 	}
+}
+
+function execFileAsync(
+	file: string,
+	args: string[],
+	options: { cwd: string; timeout?: number; maxBuffer?: number; windowsHide?: boolean },
+): Promise<{ stdout?: string; stderr?: string }> {
+	return new Promise((resolve, reject) => {
+		execFile(file, args, options, (error, stdout, stderr) => {
+			if (error) {
+				// Preserve exit code/signal details from the execFile error.
+				const err = error as Error & { code?: unknown; killed?: boolean; signal?: string };
+				reject(
+					Object.assign(new Error(err.message), {
+						code: err.code,
+						killed: err.killed,
+						signal: err.signal,
+					}),
+				);
+				return;
+			}
+			resolve({ stdout, stderr });
+		});
+	});
 }
 
 /** argv for `node-gyp rebuild`, tagged with the Electron target when running inside Electron. */
@@ -210,69 +260,102 @@ function nodeGypArgs(electronVersion: string | undefined): string[] {
 	const args: string[] = ["rebuild"];
 	if (electronVersion) {
 		args.push(`--target=${electronVersion}`);
-		args.push("--arch=x64");
+		args.push(`--arch=${process.arch}`);
 		args.push("--dist-url=https://electronjs.org/headers");
 	}
 	return args;
 }
 
-/** Interpret one spawnSync result for the node-gyp run. */
-function nodeGypOutcome(result: ReturnType<typeof spawnSync>): {
+/** Outcome of one async rebuild attempt. */
+interface RebuildOutcome {
 	success: boolean;
 	output: string;
-} {
-	if (result.error) {
-		return { success: false, output: result.error.message };
-	}
-	if (result.signal) {
-		return { success: false, output: `node-gyp terminated by signal ${result.signal}` };
-	}
-	if (result.status !== 0) {
+	/** True when the tool was not installed at all (distinct from a build failure). */
+	toolMissing: boolean;
+}
+
+/** Per-copy result action surfaced by rebuildBetterSqlite3(). */
+export type RebuildAction = "already-ok" | "rebuilt" | "upgraded" | "failed";
+
+/** Interpret one execFileAsync rejection for the node-gyp run. */
+function nodeGypFailure(error: Error & { code?: unknown; signal?: string }): RebuildOutcome {
+	const code = error.code;
+	if (code === "ENOENT" || code === "EACCES") {
 		return {
 			success: false,
-			output: `node-gyp exited with code ${result.status}: ${(result.stderr?.toString() ?? "").slice(0, 400)}`,
+			output: `node-gyp is not available in this copy (${error.message})`,
+			toolMissing: true,
 		};
 	}
-	return { success: true, output: result.stdout?.toString() ?? "" };
+	if (error.signal) {
+		return {
+			success: false,
+			output: `node-gyp terminated by signal ${error.signal}`,
+			toolMissing: false,
+		};
+	}
+	if (typeof code === "number" && code !== 0) {
+		return {
+			success: false,
+			output: `node-gyp exited with code ${code}: ${error.message.slice(0, 400)}`,
+			toolMissing: false,
+		};
+	}
+	return { success: false, output: error.message, toolMissing: false };
 }
 
 /**
  * Rebuild a single better-sqlite3 directory for the Electron ABI.
- * Tries prebuild-install first (fast download), then node-gyp (compilation).
- * All child invocations use argv arrays with `shell: false` so the
- * environment-derived electron version and filesystem-derived cwd are inert.
+ * Tries prebuild-install first (fast download, only on an explicit,
+ * user-requested rebuild), then node-gyp (compilation).
+ * All child invocations use argv arrays (no shell) so environment-derived
+ * values stay inert.
+ *
+ * `allowNetworkPrebuilds` must only be true when the user explicitly asked
+ * for the repair: prebuild-install downloads a compiled native binary from
+ * the network and unpacks it where the runtime will load it — that must not
+ * happen unattended at activation time.
  */
-function rebuildOnePath(targetDir: string): {
-	success: boolean;
-	output: string;
-} {
+async function rebuildOnePath(
+	targetDir: string,
+	allowNetworkPrebuilds: boolean,
+): Promise<RebuildOutcome> {
 	const electronVersion = getElectronVersion();
 
 	// Strategy 1: prebuild-install (fast — downloads prebuilt binary)
-	if (electronVersion) {
-		const prebuildResult = tryPrebuildInstall(targetDir, electronVersion);
-		if (prebuildResult !== null) {
-			return { success: true, output: prebuildResult };
+	if (allowNetworkPrebuilds && electronVersion) {
+		const prebuildResult = await tryPrebuildInstall(targetDir, electronVersion);
+		// prebuild-install can exit 0 while downloading nothing (no prebuilt
+		// binary for this Electron/arch combination); validate the binary
+		// before declaring success so strategy 2 still runs.
+		if (prebuildResult !== null && readABI(targetDir) === getRuntimeABI()) {
+			return { success: true, output: prebuildResult, toolMissing: false };
 		}
 	}
 
 	// Strategy 2: node-gyp rebuild (slow — compiles from source)
 	try {
-		const result = spawnSync(
+		const nodeGypEntry = resolveToolEntry(targetDir, "node-gyp");
+		if (!nodeGypEntry) {
+			return {
+				success: false,
+				output: "node-gyp is not installed in this better-sqlite3 copy",
+				toolMissing: true,
+			};
+		}
+		const result = await execFileAsync(
 			process.execPath,
-			[path.join("node_modules", ".bin", "node-gyp"), ...nodeGypArgs(electronVersion)],
+			[nodeGypEntry, ...nodeGypArgs(electronVersion)],
 			{
 				cwd: targetDir,
 				timeout: 300_000, // 5 min — sqlite3.c is huge
 				maxBuffer: 2 * 1024 * 1024,
-				shell: false,
 				windowsHide: true,
 			},
 		);
-		return nodeGypOutcome(result);
+		return { success: true, output: result.stdout?.toString() ?? "", toolMissing: false };
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { success: false, output: message };
+		return nodeGypFailure(error as Error & { code?: unknown; signal?: string });
 	}
 }
 
@@ -282,14 +365,18 @@ function rebuildOnePath(targetDir: string): {
  * For v11.x copies that can't compile against newer Electron versions,
  * we fall back to replacing them with the top-level v12.x copy (if available).
  */
-export function rebuildBetterSqlite3(): {
+export async function rebuildBetterSqlite3(
+	options: { allowNetworkPrebuilds?: boolean } = {},
+): Promise<{
 	success: boolean;
 	output: string;
 	/** Per-copy rebuild results. */
-	results: Array<{ dir: string; success: boolean; output: string }>;
-} {
+	results: Array<{ dir: string; success: boolean; action: RebuildAction; output: string }>;
+}> {
+	const allowNetworkPrebuilds = options.allowNetworkPrebuilds ?? false;
 	const status = checkBetterSqlite3();
-	const results: Array<{ dir: string; success: boolean; output: string }> = [];
+	const results: Array<{ dir: string; success: boolean; action: RebuildAction; output: string }> =
+		[];
 	let allOk = true;
 	const outputParts: string[] = [];
 
@@ -298,14 +385,29 @@ export function rebuildBetterSqlite3(): {
 			results.push({
 				dir: copy.dir,
 				success: true,
+				action: "already-ok",
 				output: "already compatible",
 			});
 			continue;
 		}
 
 		// Try rebuilding
-		const result = rebuildOnePath(copy.dir);
-		results.push({ dir: copy.dir, ...result });
+		const result = await rebuildOnePath(copy.dir, allowNetworkPrebuilds);
+		if (result.success) {
+			results.push({
+				dir: copy.dir,
+				success: true,
+				action: "rebuilt",
+				output: result.output,
+			});
+		} else {
+			results.push({
+				dir: copy.dir,
+				success: false,
+				action: "failed",
+				output: result.output,
+			});
+		}
 
 		if (result.success) {
 			// Verify
@@ -316,7 +418,20 @@ export function rebuildBetterSqlite3(): {
 				);
 				continue;
 			}
+			// Keep the results entry consistent with reality: the copy is still
+			// broken even though the compiler exited 0.
+			results[results.length - 1] = {
+				dir: copy.dir,
+				success: false,
+				action: "failed",
+				output: "rebuild succeeded but ABI still mismatched",
+			};
 			outputParts.push(`${copy.dir}: rebuild succeeded but ABI still mismatched`);
+			allOk = false;
+		} else if (result.toolMissing) {
+			// Tooling missing is a dead end for this copy: do NOT fall through to
+			// the destructive v11->v12 swap because of a missing devDependency.
+			outputParts.push(`${copy.dir}: rebuild failed (${result.output})`);
 			allOk = false;
 		} else {
 			// v11.x can't compile for newer Electron — try upgrading to v12 via top-level copy
@@ -327,6 +442,7 @@ export function rebuildBetterSqlite3(): {
 					results[results.length - 1] = {
 						dir: copy.dir,
 						success: true,
+						action: "upgraded",
 						output: "upgraded to v12.x",
 					};
 					outputParts.push(`${copy.dir}: upgraded to v12.x, ABI OK`);
@@ -349,9 +465,7 @@ export function rebuildBetterSqlite3(): {
 	return { success: allOk, output: outputParts.join("\n"), results };
 }
 
-/**
- * Read the ABI version from a compiled better_sqlite3.node file.
- */
+/** Read the ABI version from a compiled better_sqlite3.node file. */
 function readABI(targetDir: string): number | null {
 	return readAbiFromNodeFile(path.join(targetDir, "build", "Release", "better_sqlite3.node"));
 }
@@ -371,22 +485,20 @@ function tryUpgradeToV12(brokenDir: string): boolean {
 		if (major >= 12) return false; // already v12+, not a v11 issue
 
 		// Find the top-level v12+ copy
-		const home = os.homedir();
-		const topLevel = path.join(home, ".pi", "agent", "npm", "node_modules", "better-sqlite3");
+		const topLevel = getTopLevelBetterSqlite3Dir();
 		if (!fs.existsSync(topLevel)) return false;
 		const topPkg = JSON.parse(fs.readFileSync(path.join(topLevel, "package.json"), "utf-8"));
 		const topMajor = parseInt(topPkg.version?.split(".")[0] ?? "0", 10);
 		if (topMajor < 12) return false;
 
-		// Replace broken v11 with symlink to top-level v12 — but move the broken
-		// copy aside instead of deleting it so user patches/local builds are
-		// recoverable if the top-level copy later disappears or upgrades.
-		const backupDir = brokenDir + ".bak-v11";
+		// Replace broken v11 with symlink to top-level v12 — move the broken copy
+		// aside so it stays recoverable, and NEVER delete it: if it cannot be
+		// moved aside, abort the upgrade instead of destroying the install.
+		const backupDir = `${brokenDir}.bak-v11-${Date.now()}`;
 		try {
-			fs.rmSync(backupDir, { recursive: true, force: true });
 			fs.renameSync(brokenDir, backupDir);
 		} catch {
-			fs.rmSync(brokenDir, { recursive: true, force: true });
+			return false;
 		}
 		try {
 			fs.symlinkSync(topLevel, brokenDir, "dir");
@@ -408,20 +520,31 @@ function tryUpgradeToV12(brokenDir: string): boolean {
 /**
  * Check ABI and auto-rebuild if mismatched.
  * Returns true if all copies are OK or were successfully rebuilt.
+ *
+ * The automatic startup path never downloads prebuilt binaries; the explicit
+ * "Rebuild Native Addons" command may opt into that via `allowNetworkPrebuilds`.
  */
-export function ensureBetterSqlite3Compatible(): {
+export async function ensureBetterSqlite3Compatible(
+	options: { allowNetworkPrebuilds?: boolean } = {},
+): Promise<{
 	ok: boolean;
 	rebuilt: boolean;
 	output: string;
-} {
+}> {
 	const status = checkBetterSqlite3();
+	if (status.copies.length === 0) {
+		// Nothing installed — not an ABI problem and nothing to rebuild.
+		return { ok: true, rebuilt: false, output: "No better-sqlite3 copies found" };
+	}
 	if (status.ok) {
 		return { ok: true, rebuilt: false, output: "ABI compatible" };
 	}
 
-	const rebuildResult = rebuildBetterSqlite3();
+	const rebuildResult = await rebuildBetterSqlite3(options);
+	// Discriminated action field instead of parsing free-text output for
+	// "already compatible" (a build log could contain that phrase).
 	const anyRebuilt = rebuildResult.results.some(
-		(r) => r.success && !r.output.includes("already compatible"),
+		(r) => r.success && (r.action === "rebuilt" || r.action === "upgraded"),
 	);
 	return {
 		ok: rebuildResult.success,

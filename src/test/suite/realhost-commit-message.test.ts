@@ -255,9 +255,23 @@ suite("REALHOST commit message wiring", () => {
 		await vscode.commands.executeCommand("pi-agent.generateCommitMessage");
 
 		assert.strictEqual(repository.inputBox.value, "feat(scm): canned subject");
-		const info = recorded.info.join(" | ");
-		assert.ok(info.includes("Commit message drafted"), `unexpected info: ${info}`);
-		assert.ok(info.includes("untracked"), `untracked files should be reported: ${info}`);
+		// Caveats such as untracked files escalate the draft to a warning so they
+		// are not mistaken for a clean draft; the plain info message is reserved
+		// for an unqualified success.
+		const warnings = recorded.warnings.join(" | ");
+		assert.ok(
+			warnings.includes("Commit message drafted"),
+			`draft should be reported: ${warnings}`,
+		);
+		assert.ok(
+			warnings.includes("untracked"),
+			`untracked files should be reported: ${warnings}`,
+		);
+		assert.strictEqual(
+			recorded.info.length,
+			0,
+			`a caveat draft must not claim clean success: ${recorded.info.join(" | ")}`,
+		);
 		assert.strictEqual(recorded.errors.length, 0, recorded.errors.join(" | "));
 
 		// The draft must request its progress in the SCM location rather than a

@@ -1,4 +1,8 @@
 :root {
+  /* Tell the UA this is a dark surface, so native controls, form-widget
+   * internals, the scrollbar gutter and ::placeholder get dark defaults. */
+  color-scheme: dark;
+
   /* Industrial / Utilitarian Aesthetic */
   --color-bg: #09090b;
   --color-surface: #18181b;
@@ -8,6 +12,9 @@
   --color-text-inverse: #09090b;
   --color-border: #3f3f46;
   --color-divider: #3f3f46;
+  /* Interactive boundaries (buttons, scrollbar thumb) need >= 3:1 contrast
+   * against the bg for WCAG 1.4.11; the decorative tokens above are ~1.9:1. */
+  --color-border-strong: #71717a;
 
   /* Acid Green Accent */
   --color-primary: #bef264;
@@ -113,6 +120,12 @@ body {
   background-size: 20px 20px;
 }
 
+/* Flex items default to min-height:auto, so a panel without its own overflow
+ * grows past the shell and is clipped by body{overflow:hidden}. */
+#app > * {
+  min-height: 0;
+}
+
 a {
   color: var(--color-primary);
   text-decoration: underline;
@@ -147,10 +160,13 @@ button {
 /* Outline-based focus indicator: unlike box-shadow, a real outline survives
    scoped component styles that set their own box-shadow/border/background
    (e.g. ChatPanel's .send-btn), so keyboard focus stays visible everywhere. */
-button:focus-visible {
-  outline: 2px solid var(--color-primary);
+button:focus-visible,
+:where([role="button"], [role="listbox"], [role="option"], [role="tab"], [tabindex]):focus-visible {
+  /* !important: a zero-specificity :where() selector cannot override a scoped
+   * `.foo { outline: none }` rule (0,1,0+), and components ship such rules
+   * (e.g. .session-panel). Keyboard focus must stay visible everywhere. */
+  outline: 2px solid var(--color-primary) !important;
   outline-offset: 2px;
-  border-color: var(--color-primary);
 }
 
 /* Zero-specificity wrapper so component-level hover styles (e.g. semantic
@@ -166,8 +182,24 @@ button:focus-visible {
 /* Zero-specificity wrapper so component-level pressed styles can win, and so
    box-shadow: none here can't swallow the focus-visible outline while pressing. */
 :where(button:active:not(:disabled)) {
-  transform: translate(2px, 2px);
+  /* No translate: with body{overflow:hidden} a 2px outward shift clips
+   * edge-aligned buttons. Press feedback comes from the shadow alone. */
   box-shadow: none;
+}
+
+/* High Contrast: authored background/box-shadow are dropped, so restore the
+ * boundary and the state cue with system colors. */
+@media (forced-colors: active) {
+  button {
+    border: 1px solid ButtonBorder;
+  }
+
+  :where(button:hover:not(:disabled)),
+  :where(button:active:not(:disabled)) {
+    border: 2px solid Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
 }
 
 button:disabled {
@@ -176,7 +208,10 @@ button:disabled {
   filter: grayscale(1);
 }
 
-input,
+/* Text-like inputs only: the blanket selector also caught checkbox/radio/
+ * range/color inputs, which components hide but any future visible native
+ * control would inherit the oversized 2px-border box treatment. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
 textarea,
 select {
   font-family: var(--font-mono);
@@ -195,11 +230,12 @@ select {
 input:focus,
 textarea:focus,
 select:focus {
-  /* Outline-based indicator: survives scoped overrides (ChatPanel zeroes
-   * box-shadow/background on its borderless textarea). Do not revert to
-   * outline: none. No transform: keep the control's geometry stable on focus
-   * so it can't clip against overflow-hidden ancestors. */
-  outline: 2px solid var(--color-primary);
+  /* !important so a scoped `.x :global(.y) { outline: none }` (0,2,0) cannot
+   * strip the focus ring (ChatPanel's search input does exactly that).
+   * Do not revert to `outline: none`. No transform: keep the control's
+   * geometry stable on focus so it can't clip against overflow-hidden
+   * ancestors. */
+  outline: 2px solid var(--color-primary) !important;
   outline-offset: 2px;
   border-color: var(--color-primary);
   background: var(--color-surface);
@@ -217,7 +253,9 @@ select:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  /* Stronger token: the decorative border color is near-invisible on the
+   * track (WCAG 1.4.11 wants >= 3:1 for UI component boundaries). */
+  background: var(--color-border-strong);
   border: 2px solid var(--color-bg);
 }
 
@@ -226,8 +264,19 @@ select:focus {
 }
 
 /* Global hover/active/focus rules shift geometry; honor prefers-reduced-motion
- * app-wide (scoped component animations handle their own media queries). */
+ * app-wide. The universal block below is the safety net that also covers
+ * @keyframes/animation and scroll-behavior declared inside scoped component
+ * styles, which the element-level rules cannot reach. */
 @media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   button,
   input,
   textarea,

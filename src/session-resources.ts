@@ -10,68 +10,113 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { readPackageSourcesFromSettingsFile, type InstalledPackage } from "./pi-binary.js";
 
+/** Extensions that must never be inlined into the agent context. */
+const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".bmp",
+	".ico",
+	".tiff",
+	".tif",
+	".svg",
+	".avif",
+	".heic",
+	".heif",
+	".mp3",
+	".wav",
+	".ogg",
+	".flac",
+	".aac",
+	".wma",
+	".m4a",
+	".mp4",
+	".mov",
+	".avi",
+	".mkv",
+	".webm",
+	".flv",
+	".wmv",
+	".zip",
+	".tar",
+	".gz",
+	".bz2",
+	".7z",
+	".rar",
+	".pdf",
+	".doc",
+	".docx",
+	".xls",
+	".xlsx",
+	".ppt",
+	".pptx",
+	".exe",
+	".dll",
+	".so",
+	".dylib",
+	".wasm",
+	".o",
+	".a",
+	".lib",
+	".woff",
+	".woff2",
+	".ttf",
+	".otf",
+	".eot",
+	".db",
+	".sqlite",
+	".sqlite3",
+]);
+
+/** Refuse to read mention files larger than this (10 MB). */
+const MAX_MENTION_FILE_BYTES = 10 * 1024 * 1024;
+/** Per-file inline budget before truncation (50 KB). */
+const MAX_MENTION_INLINE_BYTES = 50 * 1024;
+/** Marker appended when a mention file is truncated. */
+const TRUNCATION_NOTICE = `\n... [file truncated at ${Math.round(
+	MAX_MENTION_INLINE_BYTES / 1024,
+)}KB]`;
+/** Mentions matching more candidates than this are ignored entirely. */
+const MAX_MENTIONS_PER_PROMPT = 64;
+
+/** Back a byte offset off to the last complete UTF-8 sequence boundary. */
+function trimToUtf8Boundary(buf: Buffer, end: number): string {
+	let safe = end;
+	// Do not split a multi-byte sequence: back off to a lead byte.
+	while (safe > 0 && (buf[safe] & 0xc0) === 0x80) safe--;
+	return buf.subarray(0, safe).toString("utf-8");
+}
+
+/**
+ * Build the prompt text left after mention removal: collapse only the
+ * whitespace the removal introduced, preserving the user's own newlines and
+ * indentation elsewhere.
+ */
+function collapseAroundRemovedMentions(
+	text: string,
+	spans: Array<{ index: number; length: number }>,
+): string {
+	let result = text;
+	for (const span of spans.sort((a, b) => b.index - a.index)) {
+		const start = span.index;
+		const end = span.index + span.length;
+		let from = start;
+		let to = end;
+		// Swallow one adjacent whitespace run on each side of the removed span.
+		while (from > 0 && /\s/.test(result[from - 1])) from--;
+		while (to < result.length && /\s/.test(result[to])) to++;
+		result =
+			result.slice(0, from) + (from > 0 && to < result.length ? " " : "") + result.slice(to);
+	}
+	return result;
+}
+
 /** Check whether a file extension indicates a binary (non-text) file. */
 export function isBinaryExtension(filePath: string): boolean {
-	const binaryExts = new Set([
-		".png",
-		".jpg",
-		".jpeg",
-		".gif",
-		".webp",
-		".bmp",
-		".ico",
-		".tiff",
-		".tif",
-		".svg",
-		".avif",
-		".heic",
-		".heif",
-		".mp3",
-		".wav",
-		".ogg",
-		".flac",
-		".aac",
-		".wma",
-		".m4a",
-		".mp4",
-		".mov",
-		".avi",
-		".mkv",
-		".webm",
-		".flv",
-		".wmv",
-		".zip",
-		".tar",
-		".gz",
-		".bz2",
-		".7z",
-		".rar",
-		".pdf",
-		".doc",
-		".docx",
-		".xls",
-		".xlsx",
-		".ppt",
-		".pptx",
-		".exe",
-		".dll",
-		".so",
-		".dylib",
-		".wasm",
-		".o",
-		".a",
-		".lib",
-		".woff",
-		".woff2",
-		".ttf",
-		".otf",
-		".eot",
-		".db",
-		".sqlite",
-		".sqlite3",
-	]);
 	const ext = path.extname(filePath).toLowerCase();
-	return binaryExts.has(ext);
+	return BINARY_EXTENSIONS.has(ext);
 }
 
 /** Validate that an array of image objects is well-formed. */
@@ -80,14 +125,16 @@ export function areImagesValid(
 ): images is Array<{ type: "image"; data: string; mimeType: string }> {
 	if (!Array.isArray(images) || images.length === 0) return false;
 	return images.every(
-		(img) =>
-			img &&
-			typeof img === "object" &&
-			"type" in img &&
-			(img as any).type === "image" &&
-			typeof (img as any).data === "string" &&
-			typeof (img as any).mimeType === "string" &&
-			(img as any).data.length > 0,
+		(img: unknown): img is { type: "image"; data: string; mimeType: string } => {
+			if (!img || typeof img !== "object") return false;
+			const o = img as Record<string, unknown>;
+			return (
+				o.type === "image" &&
+				typeof o.data === "string" &&
+				typeof o.mimeType === "string" &&
+				o.data.length > 0
+			);
+		},
 	);
 }
 
@@ -110,6 +157,12 @@ export class SessionResources {
 	/** Get the current workspace root path. */
 	getWorkspacePath(): string {
 		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+	}
+
+	/** Get the first workspace folder path, or undefined without a workspace. */
+	private getWorkspaceRoot(): string | undefined {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		return folder ? folder.uri.fsPath : undefined;
 	}
 
 	/** Get packages configured in settings files, enriched with install paths. */
@@ -160,7 +213,9 @@ export class SessionResources {
 	/**
 	 * Resolve a @mention path against the workspace root, refusing escapes.
 	 * Returns the absolute path when the mention stays inside `root`, or null
-	 * when it would traverse out (`@../../etc/passwd`) or is absolute.
+	 * when it would traverse out (`@../../etc/passwd`) or is absolute. The final
+	 * decision follows symlinks: a link inside the workspace may point anywhere,
+	 * so a purely lexical prefix check is not sufficient.
 	 */
 	resolveMentionWithinRoot(root: string, mentionPath: string): string | null {
 		if (path.isAbsolute(mentionPath)) return null;
@@ -169,19 +224,30 @@ export class SessionResources {
 		if (absPath !== root && !absPath.startsWith(rootWithSep)) {
 			return null;
 		}
-		return absPath;
+		try {
+			const realRoot = fs.realpathSync(root);
+			const realPath = fs.realpathSync(absPath);
+			const realRootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+			if (realPath !== realRoot && !realPath.startsWith(realRootWithSep)) {
+				return null;
+			}
+			return realPath;
+		} catch {
+			// realpathSync throws when the target does not exist; the caller's
+			// exists check reports that case.
+			return null;
+		}
 	}
 
 	/**
 	 * Read one resolved @mention into a `<file>` context block.
 	 * Returns null when the mention should be skipped (unreadable, missing, or
-	 * binary). Mutates `resolvedText` (via the returned value) to strip the
-	 * mention from the prompt.
+	 * binary).
 	 */
-	private readMentionContext(
+	private async readMentionContext(
 		root: string,
 		mention: { match: string; filePath: string },
-	): { context: string; remainingText: string } | null {
+	): Promise<string | null> {
 		// Constrain mentions to the workspace root: a path that escapes it
 		// (e.g. @../../etc/passwd) would otherwise be read and injected into
 		// the agent's context as if the user had attached it.
@@ -190,32 +256,29 @@ export class SessionResources {
 			this.deps.logDebug(`[PI] @mention outside the workspace ignored: ${mention.filePath}`);
 			return null;
 		}
-		if (!fs.existsSync(absPath) || isBinaryExtension(mention.filePath)) {
+		if (isBinaryExtension(mention.filePath)) {
 			return null;
 		}
 
 		try {
-			const stat = fs.statSync(absPath);
+			const stat = await fs.promises.stat(absPath);
 			// Guard the read: a multi-GB text file would be loaded whole into the
 			// extension host before the truncation below ever applies.
-			if (stat.size > 10 * 1024 * 1024) {
+			if (stat.size > MAX_MENTION_FILE_BYTES) {
 				this.deps.logDebug(`[PI] @mention file too large (${stat.size} bytes): ${absPath}`);
 				return null;
 			}
-			const content = fs.readFileSync(absPath, "utf-8");
-			const maxBytes = 50 * 1024;
-			// Compare with Buffer.byteLength: UTF-16 code units over-count ASCII
-			// and under-count multi-byte, so content.length against a byte budget
-			// is wrong in both directions.
+			const content = await fs.promises.readFile(absPath, "utf-8");
+			const full = Buffer.from(content, "utf-8");
 			let truncated = content;
-			if (Buffer.byteLength(content, "utf-8") > maxBytes) {
-				const buf = Buffer.from(content, "utf-8").subarray(0, maxBytes);
-				truncated = buf.toString("utf-8") + "\n... [file truncated at 50KB]";
+			if (full.length > MAX_MENTION_INLINE_BYTES) {
+				truncated = trimToUtf8Boundary(full, MAX_MENTION_INLINE_BYTES) + TRUNCATION_NOTICE;
 			}
-			return {
-				context: `<file path="${mention.filePath}">\n${truncated}\n</file>`,
-				remainingText: "",
-			};
+			// Escape the path and neutralize a content-forged closing tag so a
+			// file cannot terminate (or spoof) its own <file> block.
+			const safePath = mention.filePath.replace(/"/g, "&quot;");
+			const safeContent = truncated.replace(/<\/file>/gi, "<\\/file>");
+			return `<file path="${safePath}">\n${safeContent}\n</file>`;
 		} catch (e) {
 			this.deps.logError(`[PI] Failed to read file ${absPath}:`, e);
 			return null;
@@ -223,13 +286,15 @@ export class SessionResources {
 	}
 
 	async resolveFileMentions(text: string): Promise<string> {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (!workspaceFolders || workspaceFolders.length === 0) {
+		const root = this.getWorkspaceRoot();
+		if (!root) {
 			return text;
 		}
-		const root = workspaceFolders[0].uri.fsPath;
 
-		const mentionRegex = /@([^\s]+)/g;
+		// Match path-like candidates only: bare `@word` (emails, `@types/node`
+		// scopes) carries a separator or extension char before it can be a path,
+		// and trailing punctuation must not become part of the path.
+		const mentionRegex = /@([\w./~-]*[\w~-])/g;
 		const mentions: Array<{ match: string; filePath: string; index: number }> = [];
 		let match: RegExpExecArray | null;
 		while ((match = mentionRegex.exec(text)) !== null) {
@@ -238,42 +303,45 @@ export class SessionResources {
 				filePath: match[1],
 				index: match.index,
 			});
+			if (mentions.length >= MAX_MENTIONS_PER_PROMPT) break;
 		}
 
 		if (mentions.length === 0) return text;
 
 		const fileContexts: string[] = [];
+		const spans: Array<{ index: number; length: number }> = [];
 		let resolvedText = text;
 
 		for (const mention of mentions) {
-			const read = this.readMentionContext(root, mention);
-			if (!read) continue;
-			fileContexts.push(read.context);
-			// Remove by index+length, not by value: `.replace(mention.match, "")`
-			// deletes the FIRST occurrence anywhere in the text, so a repeated
-			// mention (`@a.txt @a.txt`) left the wrong one behind.
-			resolvedText =
-				resolvedText.slice(0, mention.index) +
-				resolvedText.slice(mention.index + mention.match.length);
+			const context = await this.readMentionContext(root, mention);
+			if (context === null) continue;
+			fileContexts.push(context);
+			// Collect spans and strip below by index, not value: indices were
+			// captured against the original text and stay valid until removal.
+			spans.push({ index: mention.index, length: mention.match.length });
 		}
 
 		if (fileContexts.length === 0) return text;
 
+		// Strip in descending index order so earlier offsets remain valid.
+		for (const span of spans.sort((a, b) => b.index - a.index)) {
+			resolvedText =
+				resolvedText.slice(0, span.index) + resolvedText.slice(span.index + span.length);
+		}
+
 		const fileBlock = fileContexts.join("\n\n");
-		const cleanText = resolvedText.replace(/\s+/g, " ").trim();
+		const cleanText = collapseAroundRemovedMentions(text, spans).trim();
 
 		return `${fileBlock}\n\n${cleanText}`;
 	}
 
 	/** Build a project context string from package.json. */
 	async getProjectContext(): Promise<string> {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (!workspaceFolders) return "";
-
-		const root = workspaceFolders[0].uri.fsPath;
+		const root = this.getWorkspaceRoot();
+		if (!root) return "";
 
 		try {
-			const packageJsonPath = vscode.Uri.joinPath(workspaceFolders[0].uri, "package.json");
+			const packageJsonPath = vscode.Uri.joinPath(vscode.Uri.file(root), "package.json");
 			const packageJsonContent = await vscode.workspace.fs.readFile(packageJsonPath);
 			const pkg = JSON.parse(packageJsonContent.toString());
 
@@ -282,7 +350,9 @@ export class SessionResources {
         Project Name: ${pkg.name || "Unknown"}
         Project Version: ${pkg.version || "Unknown"}
       `.trim();
-		} catch {
+		} catch (error) {
+			// Distinguish "no package.json" from a broken or unreadable one.
+			this.deps.logError("[PI] Failed to read package.json for project context:", error);
 			return `Project Root: ${root}`;
 		}
 	}

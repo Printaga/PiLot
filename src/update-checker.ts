@@ -26,6 +26,9 @@ interface PackageUpdateInfo {
 
 const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const MIN_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour floor between checks
+const STARTUP_CHECK_DELAY_MS = 15_000; // let the extension fully initialize
+const PACKAGE_CHECK_TIMEOUT_MS = 15_000;
 const VERSION_CHECK_TIMEOUT_MS = 10_000;
 const STORAGE_KEY_LAST_CHECK = "updateChecker.lastCheck";
 const STORAGE_KEY_KNOWN_PI_UPDATE = "updateChecker.knownPiUpdate";
@@ -54,8 +57,10 @@ export function parsePackageVersion(version: string): ParsedVersion | undefined 
 export function isNewerVersion(candidate: string, current: string): boolean {
 	const c = parsePackageVersion(candidate);
 	const r = parsePackageVersion(current);
-	// Fallback to plain string comparison when either side is unparseable.
-	if (!c || !r) return candidate.trim() > current.trim(); // documented fallback: string ordering, not semver
+	// An unparseable version cannot be compared reliably (string ordering
+	// misorders e.g. "1.2" vs "1.10.0"), so report "not newer" instead of a
+	// possibly bogus "update available".
+	if (!c || !r) return false;
 
 	if (c.major !== r.major) return c.major > r.major;
 	if (c.minor !== r.minor) return c.minor > r.minor;
@@ -163,13 +168,23 @@ export async function checkForPackageUpdates(
 			settingsManager,
 		});
 
-		const updates = await packageManager.checkForAvailableUpdates();
+		const updates = await Promise.race([
+			packageManager.checkForAvailableUpdates(),
+			new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error("Package update check timed out")),
+					PACKAGE_CHECK_TIMEOUT_MS,
+				),
+			),
+		]);
 		return updates.map((u) => ({
 			source: u.source,
 			displayName: u.displayName,
-			type: u.type as "npm" | "git",
+			// Unchecked upstream values must not pass through as-is.
+			type: u.type === "git" ? "git" : "npm",
 		}));
-	} catch {
+	} catch (error) {
+		logDiagnostics(`[Update Checker] Package update check failed: ${error}`);
 		return [];
 	}
 }
@@ -240,6 +255,63 @@ async function runPiExtensionsUpdateInTerminal(): Promise<void> {
 }
 
 /**
+ * Show the update notification and dispatch the chosen action.
+ * Shared by runUpdateCheck() and performCheckWithDeduplication() so the details
+ * dialog, action dispatch and error handling cannot drift apart.
+ */
+async function promptForUpdates(
+	piUpdate: PiReleaseInfo | undefined,
+	packageUpdates: PackageUpdateInfo[],
+): Promise<void> {
+	const action = await showUpdateNotification(piUpdate, packageUpdates);
+
+	switch (action) {
+		case "Update All":
+			logDiagnostics("[Update Checker] User chose 'Update All'");
+			await runPiUpdateInTerminal();
+			break;
+		case "Update Extensions Only":
+			logDiagnostics("[Update Checker] User chose 'Update Extensions Only'");
+			await runPiExtensionsUpdateInTerminal();
+			break;
+		case "View Details": {
+			logDiagnostics("[Update Checker] User chose 'View Details'");
+			try {
+				const details: string[] = [];
+				if (piUpdate) {
+					details.push(`PI CLI: v${piUpdate.version} available`);
+					if (piUpdate.note) details.push(`Note: ${piUpdate.note}`);
+					if (piUpdate.packageName) details.push(`Package: ${piUpdate.packageName}`);
+				}
+				if (packageUpdates.length > 0) {
+					details.push("");
+					details.push("Package updates:");
+					for (const pkg of packageUpdates) {
+						details.push(`  • ${pkg.displayName} (${pkg.type})`);
+					}
+				}
+				// Awaited (not a floating .then) so a failed update command cannot
+				// become an unhandled rejection after this function returns.
+				const choice = await vscode.window.showInformationMessage(
+					`Package Updates Available\n${details.join("\n")}`,
+					"Update All",
+					"Update Extensions Only",
+					"Close",
+				);
+				if (choice === "Update All") {
+					await runPiUpdateInTerminal();
+				} else if (choice === "Update Extensions Only") {
+					await runPiExtensionsUpdateInTerminal();
+				}
+			} catch (error) {
+				logDiagnostics(`[Update Checker] Update dispatch failed: ${error}`);
+			}
+			break;
+		}
+	}
+}
+
+/**
  * Perform a full update check and notify the user if updates are available.
  * This is the main entry point for a check cycle.
  */
@@ -277,8 +349,12 @@ export async function runUpdateCheck(provider: PiAgentProvider): Promise<void> {
 		return;
 	}
 
-	// Check auto-update setting
+	// Check auto-update / offline settings (same keys as the background checker)
 	const config = vscode.workspace.getConfiguration("pi-agent");
+	if (config.get<boolean>("offline", false)) {
+		logDiagnostics("[Update Checker] Offline mode active, skipping network check.");
+		return;
+	}
 	const autoUpdate = config.get<boolean>("autoUpdate", false);
 
 	if (autoUpdate) {
@@ -295,53 +371,8 @@ export async function runUpdateCheck(provider: PiAgentProvider): Promise<void> {
 			logDiagnostics(`[Update Checker] Auto-update failed: ${error}`);
 		}
 		return;
-	}
-
-	// Show notification
-	const action = await showUpdateNotification(piUpdate, packageUpdates);
-
-	switch (action) {
-		case "Update All":
-			logDiagnostics("[Update Checker] User chose 'Update All'");
-			await runPiUpdateInTerminal();
-			break;
-		case "Update Extensions Only":
-			logDiagnostics("[Update Checker] User chose 'Update Extensions Only'");
-			await runPiExtensionsUpdateInTerminal();
-			break;
-		case "View Details": {
-			logDiagnostics("[Update Checker] User chose 'View Details'");
-			// Show full update info in a message box
-			const details: string[] = [];
-			if (piUpdate) {
-				details.push(`PI CLI: v${piUpdate.version} available`);
-				if (piUpdate.note) details.push(`Note: ${piUpdate.note}`);
-				if (piUpdate.packageName) details.push(`Package: ${piUpdate.packageName}`);
-			}
-			if (packageUpdates.length > 0) {
-				details.push("");
-				details.push("Package updates:");
-				for (const pkg of packageUpdates) {
-					details.push(`  • ${pkg.displayName} (${pkg.type})`);
-				}
-			}
-			vscode.window
-				.showInformationMessage(
-					`Package Updates Available\n${details.join("\n")}`,
-					"Update All",
-					"Update Extensions Only",
-					"Close",
-				)
-				.then(async (choice) => {
-					if (choice === "Update All") {
-						await runPiUpdateInTerminal();
-					} else if (choice === "Update Extensions Only") {
-						await runPiExtensionsUpdateInTerminal();
-					}
-				});
-			break;
-		}
-	}
+	} // Show notification
+	await promptForUpdates(piUpdate, packageUpdates);
 }
 
 // ── Background checker ─────────────────────────────────────────────────────
@@ -356,25 +387,37 @@ export function startUpdateChecker(
 	context: vscode.ExtensionContext,
 	provider: PiAgentProvider,
 ): vscode.Disposable {
-	// Run an initial check after a short delay (let the extension fully initialize)
-	const initialTimeout = setTimeout(async () => {
-		try {
-			logDiagnostics("[Update Checker] Initializing periodic update checker…");
-			await performCheckWithDeduplication(context, provider);
-		} catch (err) {
-			logDiagnostics(`[Update Checker] Initial update check failed: ${err}`);
+	// Guard against overlapping runs (startup timer + interval + a manual
+	// command): the throttle timestamp is only persisted after the check, so two
+	// invocations could otherwise both observe a stale `lastCheck` and duplicate
+	// the whole network round trip and notification.
+	let inFlight = false;
+	const runUpdateCheckerCheck = (label: string): Promise<void> => {
+		if (inFlight) {
+			logDiagnostics(`[Update Checker] ${label} skipped: a check is already in progress.`);
+			return Promise.resolve();
 		}
-	}, 15_000); // 15 seconds after activation
+		inFlight = true;
+		return performCheckWithDeduplication(context, provider)
+			.catch((err: unknown) => {
+				logDiagnostics(`[Update Checker] ${label} failed: ${err}`);
+			})
+			.finally(() => {
+				inFlight = false;
+			});
+	};
+
+	// Run an initial check after a short delay (let the extension fully initialize)
+	const initialTimeout = setTimeout(
+		() => void runUpdateCheckerCheck("Initial update check"),
+		STARTUP_CHECK_DELAY_MS,
+	);
 
 	// Set up periodic checks
-	const interval = setInterval(async () => {
-		try {
-			logDiagnostics("[Update Checker] Running periodic update check…");
-			await performCheckWithDeduplication(context, provider);
-		} catch (err) {
-			logDiagnostics(`[Update Checker] Periodic update check failed: ${err}`);
-		}
-	}, DEFAULT_CHECK_INTERVAL_MS);
+	const interval = setInterval(
+		() => void runUpdateCheckerCheck("Periodic update check"),
+		DEFAULT_CHECK_INTERVAL_MS,
+	);
 
 	return {
 		dispose: () => {
@@ -404,7 +447,7 @@ export async function performCheckWithDeduplication(
 	const now = Date.now();
 
 	// Don't check more than once per hour at minimum (respects the 6-hour default too)
-	if (now - lastCheck < 60 * 60 * 1000) {
+	if (now - lastCheck < MIN_CHECK_INTERVAL_MS) {
 		logDiagnostics("[Update Checker] Last check was less than 1 hour ago, skipping.");
 		return;
 	}
@@ -470,52 +513,22 @@ export async function performCheckWithDeduplication(
 	if (config.get<boolean>("autoUpdate", false)) {
 		logDiagnostics("[Update Checker] Auto-update enabled, running pi update…");
 		try {
-			await runPiUpdateInTerminal();
+			// Only run the full `pi update` when the CLI itself has an update;
+			// package-only updates get the extensions-only command, matching the
+			// manual path.
+			if (piUpdate) {
+				await runPiUpdateInTerminal();
+			} else if (packageUpdates.length > 0) {
+				await runPiExtensionsUpdateInTerminal();
+			}
 		} catch (error) {
 			logDiagnostics(`[Update Checker] Auto-update failed: ${error}`);
 		}
 		return;
 	}
 
-	const action = await showUpdateNotification(piUpdate, packageUpdates);
-
-	switch (action) {
-		case "Update All":
-			await runPiUpdateInTerminal();
-			break;
-		case "Update Extensions Only":
-			await runPiExtensionsUpdateInTerminal();
-			break;
-		case "View Details": {
-			const details: string[] = [];
-			if (piUpdate) {
-				details.push(`PI CLI: v${piUpdate.version} available`);
-				if (piUpdate.note) details.push(`Note: ${piUpdate.note}`);
-			}
-			if (packageUpdates.length > 0) {
-				details.push("");
-				details.push("Package updates:");
-				for (const pkg of packageUpdates) {
-					details.push(`  • ${pkg.displayName} (${pkg.type})`);
-				}
-			}
-			vscode.window
-				.showInformationMessage(
-					`Package Updates Available\n${details.join("\n")}`,
-					"Update All",
-					"Update Extensions Only",
-					"Close",
-				)
-				.then(async (choice) => {
-					if (choice === "Update All") {
-						await runPiUpdateInTerminal();
-					} else if (choice === "Update Extensions Only") {
-						await runPiExtensionsUpdateInTerminal();
-					}
-				});
-			break;
-		}
-	}
+	// Show notification
+	await promptForUpdates(piUpdate, packageUpdates);
 }
 
 /**

@@ -3,40 +3,12 @@
 //
 // Characterization target: the System Prompt sidebar panel. The prompt text is
 // the payload the host pushes via `system-prompt` messages; the panel must
-// render it verbatim, offer it to the clipboard, and keep degrading gracefully
-// when no session prompt is available.
+// render it verbatim (as inert TEXT, never markup), offer it to the clipboard,
+// and keep degrading gracefully when no session prompt is available.
 
-// ── jsdom DOM setup (must precede any component import) ─────────────────────
 import * as assert from "node:assert";
-import { JSDOM } from "jsdom";
+import { domWindow } from "./test-dom-setup.mjs";
 // Svelte loader hooks are registered by the runner before this spec imports.
-
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
-for (const k of [
-	"navigator",
-	"Element",
-	"Node",
-	"Text",
-	"Comment",
-	"HTMLElement",
-	"HTMLSelectElement",
-	"HTMLOptionElement",
-	"Event",
-	"MessageEvent",
-	"MouseEvent",
-	// Svelte's select binding observes option changes, so the <select> render
-	// path needs MutationObserver on the global scope.
-	"MutationObserver",
-]) {
-	Object.defineProperty(globalThis, k, {
-		value: dom.window[k],
-		configurable: true,
-		writable: true,
-	});
-}
-globalThis.window.requestAnimationFrame ??= (cb) => globalThis.setTimeout(cb, 0);
 
 const { render, cleanup } = await import("@testing-library/svelte");
 const { default: SystemPromptPanel } =
@@ -50,9 +22,9 @@ const flush = () => new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 /** Deliver a `system-prompt` message the way the extension host would. */
 function pushSystemPrompt(prompt) {
 	globalThis.window.dispatchEvent(
-		new globalThis.window.MessageEvent("message", {
+		new domWindow.MessageEvent("message", {
 			data: { type: "system-prompt", data: { prompt } },
-			source: globalThis.window,
+			source: domWindow,
 		}),
 	);
 }
@@ -68,6 +40,23 @@ suite("SystemPromptPanel", () => {
 		const pre = mounted.container.querySelector(".prompt-view");
 		assert.ok(pre, "the prompt view should render");
 		assert.strictEqual(pre.textContent, PROMPT, "the prompt must not be rewritten");
+	});
+
+	test("host-supplied markup stays inert text, never becomes DOM nodes", async () => {
+		const mounted = render(SystemPromptPanel, {});
+
+		const hostile = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
+		pushSystemPrompt(hostile);
+		await flush();
+
+		const pre = mounted.container.querySelector(".prompt-view");
+		assert.ok(pre, "the prompt view should render");
+		assert.strictEqual(
+			pre.querySelector("img, script"),
+			null,
+			"prompt markup must be escaped, not parsed",
+		);
+		assert.strictEqual(pre.textContent, hostile, "raw markup must still be shown as text");
 	});
 
 	test("shows usage metadata for the rendered prompt", async () => {
@@ -95,45 +84,108 @@ suite("SystemPromptPanel", () => {
 		const copy = [...mounted.container.querySelectorAll(".action-btn")].find(
 			(b) => b.textContent.trim() === "Copy",
 		);
+		assert.ok(copy, "the copy action should always render");
 		assert.ok(copy.disabled, "copy must be disabled without a prompt");
 	});
 
-	test("copy hands the exact prompt to the clipboard", async () => {
-		const written = [];
-		Object.defineProperty(globalThis.navigator, "clipboard", {
-			value: { writeText: async (text) => written.push(text) },
-			configurable: true,
+	suite("copy", () => {
+		let originalClipboardDescriptor;
+
+		suiteSetup(() => {
+			// Mutating the shared jsdom navigator leaks into every later spec in
+			// this process; capture it once so suiteTeardown can restore it.
+			originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+				globalThis.navigator,
+				"clipboard",
+			);
 		});
 
-		const mounted = render(SystemPromptPanel, {});
-		pushSystemPrompt(PROMPT);
-		await flush();
+		suiteTeardown(() => {
+			if (originalClipboardDescriptor) {
+				Object.defineProperty(
+					globalThis.navigator,
+					"clipboard",
+					originalClipboardDescriptor,
+				);
+			} else {
+				delete globalThis.navigator.clipboard;
+			}
+		});
 
-		const copy = [...mounted.container.querySelectorAll(".action-btn")].find(
-			(b) => b.textContent.trim() === "Copy",
-		);
-		copy.click();
-		await flush();
+		function stubClipboard(writeText) {
+			Object.defineProperty(globalThis.navigator, "clipboard", {
+				value: { writeText },
+				configurable: true,
+			});
+		}
 
-		assert.deepStrictEqual(written, [PROMPT]);
+		test("hands the exact prompt to the clipboard and shows the copied state", async () => {
+			const written = [];
+			stubClipboard(async (text) => written.push(text));
+
+			const mounted = render(SystemPromptPanel, {});
+			pushSystemPrompt(PROMPT);
+			await flush();
+
+			const copy = [...mounted.container.querySelectorAll(".action-btn")].find(
+				(b) => b.textContent.trim() === "Copy",
+			);
+			assert.ok(copy, "the copy action should render once a prompt exists");
+			copy.click();
+			await flush();
+
+			assert.deepStrictEqual(written, [PROMPT]);
+			assert.ok(
+				copy.textContent.includes("Copied"),
+				`copy button should confirm success, got: ${copy.textContent}`,
+			);
+		});
+
+		test("reports a clipboard failure instead of pretending to succeed", async () => {
+			stubClipboard(async () => {
+				throw new Error("denied");
+			});
+
+			const mounted = render(SystemPromptPanel, {});
+			pushSystemPrompt(PROMPT);
+			await flush();
+
+			const copy = [...mounted.container.querySelectorAll(".action-btn")].find(
+				(b) => b.textContent.trim() === "Copy",
+			);
+			copy.click();
+			await flush();
+
+			assert.ok(
+				copy.textContent.includes("fail"),
+				`copy button should report failure, got: ${copy.textContent}`,
+			);
+		});
 	});
 
 	test("ignores malformed and unrelated host messages", async () => {
-		const mounted = render(SystemPromptPanel, {});
+		// Render WITH session resources (a session is waiting on the host): the
+		// panel stays in the Loading branch until a real reply arrives. Without
+		// them the component deliberately shows the empty state immediately.
+		const mounted = render(SystemPromptPanel, { sessionResources: {} });
 
+		globalThis.window.dispatchEvent(new domWindow.MessageEvent("message", { data: "junk" }));
 		globalThis.window.dispatchEvent(
-			new globalThis.window.MessageEvent("message", { data: "junk" }),
-		);
-		globalThis.window.dispatchEvent(
-			new globalThis.window.MessageEvent("message", {
+			new domWindow.MessageEvent("message", {
 				data: { type: "unrelated", data: { prompt: "nope" } },
 			}),
 		);
 		await flush();
 
+		const status = mounted.container.querySelector(".prompt-status");
 		assert.ok(
-			mounted.container.querySelector(".prompt-status"),
+			status?.textContent.includes("Loading"),
 			"the panel should stay in its initial waiting state",
+		);
+		assert.strictEqual(
+			mounted.container.querySelector(".prompt-view"),
+			null,
+			"junk messages must not produce a prompt view",
 		);
 	});
 });

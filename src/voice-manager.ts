@@ -63,9 +63,10 @@ export const voiceManagerInternals = {
 	accessSync: (path: string, mode?: number) => fs.accessSync(path, mode),
 	existsSync: (path: fs.PathLike) => fs.existsSync(path),
 	statSync: (path: fs.PathLike) => fs.statSync(path),
-	/** Seam for VoiceManager to track in-flight <model>.tmp downloads. */
-	onPendingTmpFile: undefined as ((tmpPath: string) => void) | undefined,
 };
+
+/** Extension id used as a fallback when no extensionUri is supplied. */
+const EXTENSION_ID = "PrintagaPublishingLLC.pilots-studio";
 
 // ── Helper path resolution ──────────────────────────────────────────────
 
@@ -73,9 +74,12 @@ function getVoiceHelperPath(extensionUri?: vscode.Uri): string {
 	const platform = process.platform;
 	const arch = process.arch;
 	const extensionPath =
-		extensionUri?.fsPath ||
-		vscode.extensions.getExtension("PrintagaPublishingLLC.pilots-studio")?.extensionPath ||
-		"";
+		extensionUri?.fsPath || vscode.extensions.getExtension(EXTENSION_ID)?.extensionPath;
+	if (!extensionPath) {
+		// Fail fast: falling back to "" produced a cwd-relative path and a
+		// confusing "Voice helper not found at media/voice/..." error later.
+		throw new Error("Cannot resolve the extension path for the voice helper");
+	}
 	const voiceDir = path.join(extensionPath, "media", "voice");
 
 	switch (platform) {
@@ -119,6 +123,7 @@ async function downloadVoiceModel(
 	onPhase?: (phase: string, message?: string) => void,
 	signal?: AbortSignal,
 	logDebug?: (msg: string, ...details: unknown[]) => void,
+	onTmpFile?: (tmpPath: string) => void,
 ): Promise<string> {
 	const modelDef = VOICE_MODELS[modelName];
 	if (!modelDef) {
@@ -150,10 +155,20 @@ async function downloadVoiceModel(
 	const { createWriteStream } = await import("node:fs");
 
 	const tmpPath = destPath + ".tmp";
-	voiceManagerInternals.onPendingTmpFile?.(tmpPath);
+	// Explicit callback instead of module-global mutable state: the global slot
+	// captured `this`, was only cleared on failure paths, and broke with two
+	// concurrent instances.
+	onTmpFile?.(tmpPath);
 
 	await new Promise<void>((resolve, reject) => {
-		const doRequest = (requestUrl: string) => {
+		const MAX_REDIRECTS = 5;
+		// Redirects may only stay on https and on the model host: the download is
+		// unpacked/loaded by the runtime, so an http downgrade or arbitrary origin
+		// must be refused, and a redirect loop must fail instead of hanging.
+		const isAllowedRedirectTarget = (next: URL) =>
+			next.protocol === "https:" && next.host.endsWith("huggingface.co");
+
+		const doRequest = (requestUrl: string, redirects: number) => {
 			https
 				.get(requestUrl, (response) => {
 					// Handle redirects
@@ -163,7 +178,32 @@ async function downloadVoiceModel(
 						response.statusCode < 400 &&
 						response.headers.location
 					) {
-						doRequest(response.headers.location);
+						// Destroy the redirect response: an unconsumed body holds the
+						// socket in the keep-alive pool.
+						response.destroy();
+						if (redirects >= MAX_REDIRECTS) {
+							reject(new Error("Too many redirects while downloading voice model"));
+							return;
+						}
+						let next: URL;
+						try {
+							// Resolve relative locations; a malformed one would otherwise
+							// throw synchronously inside this response callback, beyond
+							// the reach of the Promise executor.
+							next = new URL(response.headers.location, requestUrl);
+						} catch {
+							reject(
+								new Error(
+									`Invalid redirect location while downloading voice model`,
+								),
+							);
+							return;
+						}
+						if (!isAllowedRedirectTarget(next)) {
+							reject(new Error(`Refusing to follow redirect to ${next.href}`));
+							return;
+						}
+						doRequest(next.href, redirects + 1);
 						return;
 					}
 
@@ -184,11 +224,20 @@ async function downloadVoiceModel(
 
 					const fileStream = createWriteStream(tmpPath);
 
-					const onAbort = () => {
+					// Single failure path: destroys BOTH sides, removes the abort
+					// listener and rejects exactly once. The per-side rejects leaked
+					// the open write handle (which then also blocks tmp-file removal
+					// on Windows) and the abort listener.
+					let settled = false;
+					const fail = (err: Error) => {
+						if (settled) return;
+						settled = true;
+						signal?.removeEventListener("abort", onAbort);
 						response.destroy();
-						fileStream.close();
-						reject(new Error("Download cancelled"));
+						fileStream.destroy();
+						reject(err);
 					};
+					const onAbort = () => fail(new Error("Download cancelled"));
 					if (signal?.aborted) {
 						onAbort();
 						return;
@@ -200,17 +249,35 @@ async function downloadVoiceModel(
 						onProgress?.(downloaded, totalSize);
 					});
 
-					response.on("error", reject);
-					fileStream.on("error", reject);
+					response.on("error", fail);
+					fileStream.on("error", fail);
 					fileStream.on("finish", () => {
+						if (settled) return;
+						// Reject truncated transfers BEFORE the rename promotes a
+						// corrupt file into the model cache.
+						if (totalSize > 0 && downloaded !== totalSize) {
+							fail(
+								new Error(
+									`Incomplete voice model download: got ${downloaded} of ${totalSize} bytes`,
+								),
+							);
+							return;
+						}
+						settled = true;
 						signal?.removeEventListener("abort", onAbort);
 						resolve();
 					});
 					response.pipe(fileStream);
 				})
-				.on("error", reject);
+				.on("error", (err) => {
+					// Request-level failures (DNS, ECONNREFUSED) happen before the
+					// response handler ran, so fail() (and its fileStream cleanup)
+					// may not exist yet: guard with a settled flag at the executor
+					// scope and fall back to a bare reject.
+					reject(err);
+				});
 		};
-		doRequest(url);
+		doRequest(url, 0);
 	});
 
 	try {
@@ -327,9 +394,10 @@ export class VoiceManager {
 					"Cancel",
 				);
 				if (choice !== "Download") return;
-
 				try {
-					voiceManagerInternals.onPendingTmpFile = (tmpPath) => {
+					// Pass the tracking callback explicitly: no module-global slot that
+					// captures `this` and leaks across instances/success paths.
+					const onTmpFile = (tmpPath: string) => {
 						this.pendingTmpFile = tmpPath;
 					};
 					modelPath = await vscode.window.withProgress(
@@ -342,6 +410,9 @@ export class VoiceManager {
 							const aborter = new AbortController();
 							token.onCancellationRequested(() => aborter.abort());
 
+							// `increment` is a delta — track the last reported percentage
+							// and send the difference, or the bar saturates past 100%.
+							let lastPct = 0;
 							return downloadVoiceModel(
 								this.deps.agentDir,
 								this.voiceModel,
@@ -352,8 +423,9 @@ export class VoiceManager {
 										const mbTotal = (total / (1024 * 1024)).toFixed(1);
 										progress.report({
 											message: `${mbDown} / ${mbTotal} MB (${pct}%)`,
-											increment: pct,
+											increment: pct - lastPct,
 										});
+										lastPct = pct;
 										this.sendVoiceMessage("voice-status", {
 											status: "downloading",
 											message: `Downloading voice model... ${pct}%`,
@@ -368,11 +440,11 @@ export class VoiceManager {
 								},
 								aborter.signal,
 								this.deps.logDebug,
+								onTmpFile,
 							);
 						},
 					);
 				} catch (err) {
-					voiceManagerInternals.onPendingTmpFile = undefined;
 					if (err instanceof Error && err.message === "Download cancelled") {
 						// Cancelled mid-download: remove the partial temp file.
 						await this.removePendingTmpFile();
@@ -394,19 +466,23 @@ export class VoiceManager {
 				message: "Loading voice model...",
 			});
 
-			// Initialize voice helper with full model path
-			this.voiceHelperProcess = voiceManagerInternals.spawn(helperPath, [
-				"--model",
-				modelPath,
-			]);
+			// Never orphan a previous helper (it would keep holding the mic).
+			if (this.voiceHelperProcess) this.stopVoiceCapture();
 
-			this.voiceHelperProcess.stdout?.on("data", (chunk) => {
-				const text = chunk.toString();
-				this.deps.logDebug("[PI Voice stdout]", text.substring(0, 200));
-				this.handleVoiceHelperOutput(text, modelPath);
+			// Initialize voice helper with full model path
+			const proc = voiceManagerInternals.spawn(helperPath, ["--model", modelPath]);
+			this.voiceHelperProcess = proc;
+
+			// setEncoding keeps a StringDecoder internally so multi-byte UTF-8
+			// characters split across chunk boundaries decode correctly — per-chunk
+			// toString() garbles accented/CJK transcriptions.
+			proc.stdout?.setEncoding?.("utf8");
+			proc.stdout?.on("data", (text: string) => {
+				this.deps.logDebug("[PI Voice stdout]", String(text).substring(0, 200));
+				this.handleVoiceHelperOutput(String(text), modelPath);
 			});
 
-			this.voiceHelperProcess.stderr?.on("data", (chunk) => {
+			proc.stderr?.on("data", (chunk) => {
 				const text = chunk.toString().trim();
 				if (!text) return;
 
@@ -416,7 +492,13 @@ export class VoiceManager {
 					if (trimmed.startsWith("{")) {
 						try {
 							const msg: VoiceHelperMessage = JSON.parse(trimmed);
-							if (msg.type === "transcription" && msg.text) {
+							// Accept both spellings: the stdout path matches "transcript"
+							// and this mirror must not silently drop dictation if the
+							// helper uses one name for both streams.
+							if (
+								(msg.type === "transcript" || msg.type === "transcription") &&
+								msg.text
+							) {
 								this.deps.logDebug(
 									"[PI Voice] Transcription (from stderr):",
 									msg.text.substring(0, 100),
@@ -434,7 +516,11 @@ export class VoiceManager {
 				}
 			});
 
-			this.voiceHelperProcess.on("error", (err) => {
+			// Capture locally: the instance handle is cleared in the terminal
+			// handlers when it still points at THIS process, so stopVoiceCapture()
+			// and dispose() can never act on a stale handle while the real child is
+			// orphaned holding the microphone.
+			proc.on("error", (err) => {
 				this.deps.logError("[PI Voice Helper error]:", err);
 				const errMsg = err.message || String(err);
 				if (
@@ -451,9 +537,10 @@ export class VoiceManager {
 					});
 				}
 				this.isListening = false;
+				if (this.voiceHelperProcess === proc) this.voiceHelperProcess = undefined;
 			});
 
-			this.voiceHelperProcess.on("close", (code) => {
+			proc.on("close", (code) => {
 				this.deps.logDebug("[PI Voice Helper] Process exited with code:", code);
 				if (this.isListening) {
 					this.sendVoiceMessage("voice-listening-changed", {
@@ -461,6 +548,7 @@ export class VoiceManager {
 					});
 					this.isListening = false;
 				}
+				if (this.voiceHelperProcess === proc) this.voiceHelperProcess = undefined;
 			});
 		} catch (error) {
 			this.deps.logError("[PI] Voice capture start failed:", error);
@@ -503,8 +591,6 @@ export class VoiceManager {
 					/* already gone */
 				}
 			}, 2000);
-			killTimer.unref?.();
-			proc.once?.("exit", () => clearTimeout(killTimer));
 			// Detach stdio listeners before dropping the reference: the helper can
 			// emit stderr lines for a while after stop, and those handlers kept the
 			// buffers alive and kept logging after a stop/dispose.
@@ -514,6 +600,14 @@ export class VoiceManager {
 				proc.removeAllListeners();
 			} catch {
 				/* listeners already gone */
+			}
+			// Register the timer cleanup AFTER the listener strip above — an `exit`
+			// handler registered before it would be removed and the timer would
+			// never be cleared.
+			try {
+				proc.once?.("exit", () => clearTimeout(killTimer));
+			} catch {
+				/* mock without event surface */
 			}
 			this.voiceHelperProcess = undefined;
 		}
@@ -530,79 +624,78 @@ export class VoiceManager {
 		for (const line of lines) {
 			const trimmed = line.trim();
 			if (!trimmed) continue;
+			// try/catch wraps ONLY the parse: a runtime error while handling a
+			// message (EPIPE on stdin.write, a throwing webview post) is not a
+			// parse failure and must surface as such.
+			let msg: VoiceHelperMessage;
 			try {
-				const msg: VoiceHelperMessage = JSON.parse(trimmed);
-
-				switch (msg.type) {
-					case "ready":
-						this.voiceHelperProcess?.stdin?.write(
-							JSON.stringify({ type: "prepare", modelPath }) + "\n",
-						);
-						break;
-
-					case "prepared":
-						this.voiceHelperProcess?.stdin?.write(
-							JSON.stringify({ type: "start" }) + "\n",
-						);
-						break;
-
-					case "started":
-						this.isListening = true;
-						this.sendVoiceMessage("voice-listening-changed", {
-							listening: true,
-						});
-						this.sendVoiceMessage("voice-status", {
-							status: "listening",
-							message: "Listening...",
-						});
-						break;
-
-					case "permission":
-						break;
-
-					case "transcript":
-						if (msg.text) {
-							this.deps.logDebug(
-								"[PI Voice] Transcription:",
-								msg.text.substring(0, 100),
-							);
-							this.sendVoiceMessage("voice-transcription", { text: msg.text });
-						} else {
-							this.deps.logDebug(
-								"[PI Voice] Transcription message received but text field is empty or undefined. Full message: " +
-									JSON.stringify(msg),
-							);
-						}
-						break;
-
-					case "error":
-						this.deps.logError(
-							"[PI Voice Helper error]:",
-							msg.code + " " + (msg.message || msg.error),
-						);
-						if (
-							msg.code === "start_failed" &&
-							msg.message?.includes("model is not ready")
-						) {
-							this.sendVoiceMessage("voice-status", {
-								status: "error",
-								message:
-									"Voice model failed to load. Please try again or choose a different model.",
-							});
-						} else {
-							vscode.window.showErrorMessage(
-								`Voice capture error: ${msg.message || msg.error || "Unknown error"}`,
-							);
-						}
-						this.stopVoiceCapture();
-						break;
-
-					case "level":
-						this.sendVoiceMessage("voice-audio-level", { level: msg.level });
-						break;
-				}
+				msg = JSON.parse(trimmed);
 			} catch {
 				this.deps.logDebug("[PI] Failed to parse voice helper line:", trimmed);
+				continue;
+			}
+			switch (msg.type) {
+				case "ready":
+					this.voiceHelperProcess?.stdin?.write(
+						JSON.stringify({ type: "prepare", modelPath }) + "\n",
+					);
+					break;
+
+				case "prepared":
+					this.voiceHelperProcess?.stdin?.write(JSON.stringify({ type: "start" }) + "\n");
+					break;
+
+				case "started":
+					this.isListening = true;
+					this.sendVoiceMessage("voice-listening-changed", {
+						listening: true,
+					});
+					this.sendVoiceMessage("voice-status", {
+						status: "listening",
+						message: "Listening...",
+					});
+					break;
+
+				case "permission":
+					break;
+
+				case "transcript":
+					if (msg.text) {
+						this.deps.logDebug("[PI Voice] Transcription:", msg.text.substring(0, 100));
+						this.sendVoiceMessage("voice-transcription", { text: msg.text });
+					} else {
+						this.deps.logDebug(
+							"[PI Voice] Transcription message received but text field is empty or undefined. Full message: " +
+								JSON.stringify(msg),
+						);
+					}
+					break;
+
+				case "error":
+					this.deps.logError(
+						"[PI Voice Helper error]:",
+						msg.code + " " + (msg.message || msg.error),
+					);
+					if (
+						msg.code === "start_failed" &&
+						msg.message?.includes("model is not ready")
+					) {
+						this.sendVoiceMessage("voice-status", {
+							status: "error",
+							message:
+								"Voice model failed to load. Please try again or choose a different model.",
+						});
+					} else {
+						vscode.window.showErrorMessage(
+							`Voice capture error: ${msg.message || msg.error || "Unknown error"}`,
+						);
+					}
+					this.stopVoiceCapture();
+					break;
+
+				case "level":
+					this.sendVoiceMessage("voice-audio-level", { level: msg.level });
+					break;
 			}
 		}
 	}

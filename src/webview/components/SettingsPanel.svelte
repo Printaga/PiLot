@@ -1,12 +1,25 @@
 <script lang="ts">
-  import type { OpenConfigFileKey, Model } from "../types/index";
+  import type { OpenConfigFileKey, Model, ThinkingLevel } from "../types/index";
   import HelpTooltip from "./HelpTooltip.svelte";
+
+  // Single source for the fallback level list (mirrors the prop default; both
+  // derive from the shared ThinkingLevel union in ../types/index). Declared
+  // before the Props destructuring that consumes it.
+  const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ];
 
   interface Props {
     autoContext: boolean;
     appVersion: string;
-    thinkingLevel: string;
-    availableThinkingLevels?: string[];
+    thinkingLevel: ThinkingLevel | string;
+    availableThinkingLevels?: readonly ThinkingLevel[];
     showCacheMissNotices?: boolean;
     lightMode?: boolean;
     /** Pinned commit-message model (`provider/id`); empty uses the standard PI model. */
@@ -24,7 +37,7 @@
     autoContext,
     appVersion,
     thinkingLevel,
-    availableThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    availableThinkingLevels = [...DEFAULT_THINKING_LEVELS],
     showCacheMissNotices = false,
     lightMode = false,
     commitMessageModel = "",
@@ -69,15 +82,14 @@
     onCommitMessageModelChange?.(value);
   }
 
-  const allThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-  const levels = $derived.by(() =>
+  const levels = $derived.by<readonly ThinkingLevel[]>(() =>
     availableThinkingLevels && availableThinkingLevels.length > 0
       ? availableThinkingLevels
-      : allThinkingLevels,
+      : [...DEFAULT_THINKING_LEVELS],
   );
   // The level actually applied, clamped to what the selected model supports.
-  const effectiveThinkingLevel = $derived.by(() => {
-    if (levels.includes(thinkingLevel)) return thinkingLevel;
+  const effectiveThinkingLevel = $derived.by((): ThinkingLevel => {
+    if (levels.includes(thinkingLevel as ThinkingLevel)) return thinkingLevel as ThinkingLevel;
     return levels[0] ?? "off";
   });
 
@@ -107,9 +119,7 @@
   }
 
   function openConfigFile(file: OpenConfigFileKey) {
-    if (typeof (window as any).vscode?.postMessage === "function") {
-      (window as any).vscode.postMessage({ type: "openConfigFile", data: { file } });
-    }
+    getVsCodeApi()?.postMessage({ type: "openConfigFile", data: { file } });
   }
 
   // PI ignores SYSTEM.md / APPEND_SYSTEM.md while pi-agent.systemPrompt or
@@ -118,12 +128,18 @@
   let systemPromptOverrides = $state({ systemPrompt: false, appendSystemPrompts: false });
 
   function getVsCodeApi() {
-    const existing = (window as any).vscode;
+    const existing = window.vscode;
     if (existing?.postMessage) return existing;
-    if (typeof (window as any).acquireVsCodeApi === "function") {
-      const vscode = (window as any).acquireVsCodeApi();
-      (window as any).vscode = vscode;
-      return vscode;
+    if (typeof window.acquireVsCodeApi === "function") {
+      try {
+        const vscode = window.acquireVsCodeApi();
+        window.vscode = vscode;
+        return vscode;
+      } catch {
+        // Already acquired elsewhere without caching; use the cached handle if
+        // any so this request is not silently dropped.
+        return window.vscode ?? null;
+      }
     }
     return null;
   }
@@ -143,7 +159,14 @@
     }
     window.addEventListener("message", handleOverridesMessage);
     vscode.postMessage({ type: "getSystemPromptOverrides" });
-    return () => window.removeEventListener("message", handleOverridesMessage);
+    // Re-request on focus: the warning tells the user to change VS Code
+    // settings, and it must track reality when they return after doing so.
+    const refetch = () => vscode.postMessage({ type: "getSystemPromptOverrides" });
+    window.addEventListener("focus", refetch);
+    return () => {
+      window.removeEventListener("message", handleOverridesMessage);
+      window.removeEventListener("focus", refetch);
+    };
   });
 
   const overridingSettingNames = $derived.by(() => {
@@ -200,9 +223,10 @@
         <label class="toggle">
           <input
             type="checkbox"
-            checked={autoContext}
+            checked={lightMode ? false : autoContext}
             onchange={handleAutoContextChange}
             disabled={lightMode}
+            aria-label="Auto Context"
             title={lightMode ? "Auto context is off while Light Mode is enabled" : undefined}
           />
           <span class="toggle-slider"></span>
@@ -224,7 +248,12 @@
           </span>
         </div>
         <label class="toggle">
-          <input type="checkbox" checked={lightMode} onchange={handleLightModeChange} />
+          <input
+            type="checkbox"
+            checked={lightMode}
+            onchange={handleLightModeChange}
+            aria-label="Light Mode (local LLMs)"
+          />
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -245,6 +274,7 @@
             type="checkbox"
             checked={showCacheMissNotices}
             onchange={handleShowCacheMissNoticesChange}
+            aria-label="Cache Miss Notices"
           />
           <span class="toggle-slider"></span>
         </label>
@@ -266,6 +296,7 @@
           <button
             class="thinking-option"
             class:selected={effectiveThinkingLevel === level}
+            aria-pressed={effectiveThinkingLevel === level}
             onclick={() => handleThinkingLevelChange(level)}
           >
             <span class="level-name">{level}</span>

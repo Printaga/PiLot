@@ -7,6 +7,8 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = tab
 indent_size = 4
+# Matches "printWidth": 100 in .prettierrc.json
+max_line_length = 100
 
 # Everything under src/webview is formatted by Prettier with 2 spaces
 # (matches the [src/webview/**] override in .prettierrc.json).
@@ -14,9 +16,17 @@ indent_size = 4
 indent_style = space
 indent_size = 2
 
-[*.{svelte,yml,yaml,json,md}]
+# Mirrors the "*.json" / "*.jsonc" override in .prettierrc.json.
+# src/webview/** (including the .svelte files there) is already covered above.
+# md/yml/yaml stay at the global tab/4 setting: Prettier formats them with the
+# global config, so a 2-space editor setting here would fight `pnpm run format`.
+[*.{json,jsonc}]
 indent_style = space
 indent_size = 2
 
 [*.md]
 trim_trailing_whitespace = false
+
+# NOTE: end_of_line above is only an editor hint. Git enforces line endings via
+# .gitattributes (`* text=auto eol=lf`) so a Windows checkout with
+# core.autocrlf=true cannot make `format:check` fail on CRLF.

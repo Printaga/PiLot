@@ -1,0 +1,26 @@
+# Normalize all text files to LF in the repository and check them out with LF
+# so the EditorConfig contract (`end_of_line = lf`) holds on every platform and
+# `format:check` in CI never depends on a contributor's core.autocrlf setting.
+* text=auto eol=lf
+
+# Windows scripts that genuinely need CRLF (none today; reserved).
+# *.bat text eol=crlf
+# *.cmd text eol=crlf
+
+# Binary assets — never diff or normalize these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.wasm binary
+*.vsix binary
+*.node binary
+media/voice/** binary

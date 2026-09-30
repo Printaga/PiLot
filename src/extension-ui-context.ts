@@ -8,8 +8,23 @@ export interface ExtensionUIContextDeps {
 	logError: (msg: string, error?: unknown) => void;
 }
 
+/** Upper bound for an extension `custom()` factory that never calls done(). */
+const CUSTOM_UI_TIMEOUT_MS = 30_000;
+
+/** Structural type for the session_start payload the runner emits. */
+interface SessionStartEvent {
+	type: "session_start";
+	reason: "startup" | "reload" | "new" | "resume" | "fork";
+	cwd: string;
+	sessionPath?: string;
+}
+
 export class ExtensionUIContext {
 	private statusPoller: ReturnType<typeof setInterval> | undefined;
+	/** Serialized statuses snapshot: the poller only re-broadcasts on change. */
+	private lastStatusSnapshot = "";
+	/** Error keys this instance has already forwarded (pruned when gone). */
+	private reportedErrorKeys = new Set<string>();
 
 	constructor(private readonly deps: ExtensionUIContextDeps) {}
 
@@ -41,58 +56,77 @@ export class ExtensionUIContext {
 			// Set the UI context on the runner so extension setStatus calls reach us
 			runner.setUIContext(uiContext);
 
-			// Also set the internal _extensionUIContext field so session.reload() preserves it.
-			(session as any)._extensionUIContext = uiContext;
+			// Internal (untyped) AgentSession/runner fields we depend on. The upstream
+			// API is not fully typed, so the exact shape we touch is declared once and
+			// the casts stay isolated here.
+			const internals = session as unknown as {
+				_extensionUIContext?: unknown;
+				_sessionStartEvent?: SessionStartEvent;
+				_applyExtensionBindings?: (runner: unknown) => void;
+				extendResourcesFromExtensions?: (reason: string) => Promise<void>;
+			};
+			const runnerInternals = runner as unknown as {
+				extensions?: Array<{
+					path?: string;
+					handlers?: Map<string, Array<unknown>>;
+				}>;
+			};
 
-			const extensionPaths = runner.getExtensionPaths?.() ?? [];
-			const extensionCount = extensionPaths.length;
-			this.deps.logDebug(`[PiLot DIAGNOSTIC] Extension paths found: ${extensionCount}`);
-			if (extensionCount > 0) {
-				this.deps.logDebug("[PiLot DIAGNOSTIC] Extension paths:", extensionPaths);
-			}
+			// Preserve our UI context so session.reload() does not restore the no-op one.
+			internals._extensionUIContext = uiContext;
 
-			// Check if extensions have session_start handlers
-			const extensions = (runner as any).extensions ?? [];
+			const extensions = runnerInternals.extensions ?? [];
 			this.deps.logDebug(`[PiLot DIAGNOSTIC] Extensions loaded: ${extensions.length}`);
 			if (extensions.length > 0) {
-				const handlers = extensions.map((ext: any) => ({
+				const handlers = extensions.map((ext) => ({
 					path: ext.path,
-					hasSessionStart: ext.handlers?.has("session_start"),
+					hasSessionStart: ext.handlers?.has("session_start") ?? false,
 					handlerCount: ext.handlers?.get("session_start")?.length ?? 0,
 				}));
 				this.deps.logDebug("[PiLot DIAGNOSTIC] Extension handlers:", handlers);
 			}
 
 			this.deps.logDebug(
-				`[PI] Bound extension UI context for setStatus forwarding (${extensionCount} extensions loaded)`,
+				`[PI] Bound extension UI context for setStatus forwarding (${extensions.length} extensions loaded)`,
 			);
 
 			// Re-apply bindings so the new UI context is used by the runner
-			(session as any)._applyExtensionBindings?.(runner);
+			internals._applyExtensionBindings?.(runner);
 
 			// CRITICAL: Emit session_start to initialize extensions
 			// Without this, extensions never run their initialization handlers (LSP setup, indexing, etc.)
-			// and never call setStatus() to report their activity.
-			const sessionStartEvent = (session as any)._sessionStartEvent ?? {
-				type: "session_start" as const,
-				reason: "startup" as const,
+			// and never call setStatus() to report their activity. A stale cached event
+			// must not pin an old cwd/sessionPath, so the payload is rebuilt per bind.
+			const sessionStartEvent: SessionStartEvent = {
+				type: "session_start",
+				reason: "startup",
 				cwd: session.sessionManager.getCwd(),
-				sessionPath: (session as any).sessionFile,
+				sessionPath: (session as unknown as { sessionFile?: string }).sessionFile,
 			};
 
 			// Store it for future reload() calls
-			(session as any)._sessionStartEvent = sessionStartEvent;
+			internals._sessionStartEvent = sessionStartEvent;
 
-			this.deps.logDebug(
-				"[PiLot DIAGNOSTIC] Emitting session_start event:",
-				sessionStartEvent,
-			);
-			this.deps.logDebug("[PI] Emitting session_start to extensions");
-			await runner.emit(sessionStartEvent);
-			this.deps.logDebug("[PiLot DIAGNOSTIC] session_start emitted successfully");
+			// Re-emitting session_start re-runs initialization (LSP servers,
+			// indexers, MCP children). Only the first bind of a runner may emit it;
+			// later binds (retry paths, re-binds on the same session) must be
+			// idempotent or those processes get duplicated.
+			const boundRunner = runner as unknown as { __piLotUIBound?: boolean };
+			if (boundRunner.__piLotUIBound) {
+				this.deps.logDebug("[PI] Runner already bound; skipping session_start re-emit");
+			} else {
+				boundRunner.__piLotUIBound = true;
+				this.deps.logDebug(
+					"[PiLot DIAGNOSTIC] Emitting session_start event:",
+					sessionStartEvent,
+				);
+				this.deps.logDebug("[PI] Emitting session_start to extensions");
+				await runner.emit(sessionStartEvent);
+				this.deps.logDebug("[PiLot DIAGNOSTIC] session_start emitted successfully");
+			}
 
 			// Let extensions discover additional resources (skills, prompts, themes)
-			await (session as any).extendResourcesFromExtensions?.("startup");
+			await internals.extendResourcesFromExtensions?.("startup");
 
 			this.deps.logDebug(
 				`[PiLot DIAGNOSTIC] Extension statuses after session_start: ${this.deps.extensionStatuses.size}`,
@@ -155,17 +189,25 @@ export class ExtensionUIContext {
 
 		try {
 			const runner = session.extensionRunner;
-			if (!runner || !runner.hasUI()) return;
+			if (!runner) return;
+			// Optional-chained elsewhere in the runner API: guard this call too so a
+			// renamed/absent method cannot kill the poller via the empty catch.
+			if (typeof runner.hasUI === "function" && !runner.hasUI()) return;
 
 			// The extension runner stores statuses via the FooterDataProvider.
 			// Since we can't access FooterDataProvider directly from the extension host,
 			// we rely on the setStatus forwarding from our UI context.
-			// This poller is a safety net — send the current full map.
-			if (this.deps.extensionStatuses.size > 0) {
-				this.deps.notifyWebview({
-					type: "extension-statuses-full",
-					data: Object.fromEntries(this.deps.extensionStatuses),
-				});
+			// This poller is a safety net — send the current full map, but only when
+			// it actually changed (setStatus already notifies per change).
+			const snapshot = JSON.stringify(Object.fromEntries(this.deps.extensionStatuses));
+			if (snapshot !== this.lastStatusSnapshot) {
+				this.lastStatusSnapshot = snapshot;
+				if (this.deps.extensionStatuses.size > 0) {
+					this.deps.notifyWebview({
+						type: "extension-statuses-full",
+						data: JSON.parse(snapshot),
+					});
+				}
 			}
 
 			// Also re-check the resource loader for extension loading errors.
@@ -198,18 +240,23 @@ export class ExtensionUIContext {
 			const er = rl.getExtensions();
 			if (!er.errors || er.errors.length === 0) return;
 
+			const currentErrorKeys = new Set<string>();
 			for (const err of er.errors) {
 				if (!err.path || !err.error) continue;
 				const errKey = `ext:error:${err.path}`;
+				currentErrorKeys.add(errKey);
 				if (this.deps.extensionStatuses.has(errKey)) continue;
+				this.reportedErrorKeys.add(errKey);
 
 				const rawError = err.error as unknown;
-				const errorText =
-					typeof rawError === "string"
-						? rawError
-						: rawError instanceof Error
-							? rawError.message
-							: String(rawError);
+				let errorText: string;
+				if (typeof rawError === "string") {
+					errorText = rawError;
+				} else if (rawError instanceof Error) {
+					errorText = rawError.message;
+				} else {
+					errorText = JSON.stringify(rawError) ?? String(rawError);
+				}
 				// Truncate long load errors to first 200 chars
 				const displayText =
 					errorText.length > 200 ? errorText.slice(0, 200) + "…" : errorText;
@@ -219,6 +266,19 @@ export class ExtensionUIContext {
 					type: "extension-status",
 					data: { key: errKey, text: displayText },
 				});
+			}
+
+			// An error that no longer exists (fixed and reloaded extension) must
+			// not stay in the status map forever as a false failure.
+			for (const key of this.reportedErrorKeys) {
+				if (currentErrorKeys.has(key)) continue;
+				this.reportedErrorKeys.delete(key);
+				if (this.deps.extensionStatuses.delete(key)) {
+					this.deps.notifyWebview({
+						type: "extension-status",
+						data: { key, text: undefined },
+					});
+				}
 			}
 		} catch (e) {
 			this.deps.logDebug("[PI] Failed to forward extension loading errors:", e);
@@ -293,21 +353,45 @@ export class ExtensionUIContext {
 				// Call factory with no TUI context so extensions gracefully detect
 				// headless mode and call done() to complete initialization.
 				return new Promise<T>((resolve) => {
-					const done = (result: T) => resolve(result);
+					// A factory that never calls done() must not hang initialization
+					// forever; the timeout settles the promise as a last resort.
+					let settled = false;
+					// The timer handle is read by settle() (declared before it) but only
+					// written once below, so a mutable holder satisfies prefer-const.
+					const timerHolder: { current?: ReturnType<typeof setTimeout> } = {};
+					const settle = (result: T) => {
+						if (settled) return;
+						settled = true;
+						if (timerHolder.current !== undefined) clearTimeout(timerHolder.current);
+						resolve(result);
+					};
+					timerHolder.current = setTimeout(() => {
+						this.deps.logDebug(
+							"[PI] Extension custom factory timed out without calling done()",
+						);
+						settle(undefined as unknown as T);
+					}, CUSTOM_UI_TIMEOUT_MS);
+					const done = (result: T) => settle(result);
 					try {
 						const component = factory(undefined, undefined, undefined, done);
-						// Factory may return a Promise (async component factory).
-						// Resolution/failure handled via done() call.
+						// Factory may return a Promise (async component factory). Settle
+						// from it as well: resolution may bypass done().
 						if (component && typeof (component as any)?.then === "function") {
-							(component as Promise<any>).catch((e: unknown) => {
-								this.deps.logDebug(
-									`[PI] Extension custom factory promise error: ${e}`,
-								);
-							});
+							(component as Promise<any>).then(
+								(result: unknown) => {
+									if (result !== undefined) settle(result as T);
+								},
+								(e: unknown) => {
+									this.deps.logDebug(
+										`[PI] Extension custom factory promise error: ${e}`,
+									);
+									settle(undefined as unknown as T);
+								},
+							);
 						}
 					} catch (e) {
 						this.deps.logDebug(`[PI] Extension custom factory error: ${e}`);
-						resolve(undefined as unknown as T);
+						settle(undefined as unknown as T);
 					}
 				});
 			},

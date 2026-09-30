@@ -1,9 +1,11 @@
 <script lang="ts">
+  import type { ThinkingLevel } from "../types/index";
+
   interface Model {
     id: string;
     provider: string;
     name: string;
-    availableThinkingLevels?: string[];
+    availableThinkingLevels?: ThinkingLevel[];
   }
 
   interface Props {
@@ -13,7 +15,7 @@
     piCliVersion: string | null;
     providerName: string;
     thinkingLevel: string;
-    availableThinkingLevels: string[];
+    availableThinkingLevels: readonly ThinkingLevel[];
     onNewSession?: () => void;
     favoriteModels: string[];
     models: Model[];
@@ -36,7 +38,15 @@
     piCliVersion = null,
     providerName = "",
     thinkingLevel = "medium",
-    availableThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    availableThinkingLevels = [
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ] as ThinkingLevel[],
     onNewSession,
     favoriteModels = [],
     models = [],
@@ -58,52 +68,76 @@
   let thinkWrapperEl = $state<HTMLElement | null>(null);
 
   // The level actually applied, clamped to what the selected model supports.
-  const effectiveThinkingLevel = $derived.by(() => {
-    if (availableThinkingLevels.includes(thinkingLevel)) return thinkingLevel;
+  const effectiveThinkingLevel = $derived.by((): ThinkingLevel => {
+    if (availableThinkingLevels.includes(thinkingLevel as ThinkingLevel)) {
+      return thinkingLevel as ThinkingLevel;
+    }
     return availableThinkingLevels[0] ?? "off";
   });
 
+  // Propagate the clamp to the session: without this the backend keeps
+  // running the unsupported level while the header claims the fallback is
+  // active, and the drift persists until the user re-picks a level manually.
   $effect(() => {
-    if (!showThinkDropdown) return;
-
-    function handleClick(e: MouseEvent) {
-      if (thinkWrapperEl && !thinkWrapperEl.contains(e.target as Node)) {
-        showThinkDropdown = false;
-      }
+    if (
+      availableThinkingLevels.length > 0 &&
+      !availableThinkingLevels.includes(thinkingLevel as ThinkingLevel)
+    ) {
+      onThinkingLevelChange(availableThinkingLevels[0] ?? "off");
     }
-
-    const id = setTimeout(() => {
-      document.addEventListener("click", handleClick);
-    }, 0);
-
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener("click", handleClick);
-    };
   });
 
-  $effect(() => {
-    if (!showFavDropdown) return;
+  /** Shared outside-click + Escape dismissal for the header popups.
+   *  Extracted from two verbatim copies; keyboard-only users previously had no
+   *  way to close an open dropdown. */
+  function useDropdownDismiss(
+    isOpen: () => boolean,
+    close: () => void,
+    wrapper: () => HTMLElement | null,
+  ) {
+    $effect(() => {
+      if (!isOpen()) return;
 
-    function handleClick(e: MouseEvent) {
-      if (favWrapperEl && !favWrapperEl.contains(e.target as Node)) {
-        showFavDropdown = false;
+      function onOutsideClick(e: MouseEvent) {
+        const el = wrapper();
+        if (el && !el.contains(e.target as Node)) close();
       }
-    }
+      function onKey(e: KeyboardEvent) {
+        if (e.key === "Escape") close();
+      }
 
-    // Delay adding listener so the click that opened dropdown doesn't close it
-    const id = setTimeout(() => {
-      document.addEventListener("click", handleClick);
-    }, 0);
+      // Delay adding listener so the click that opened dropdown doesn't close it
+      const id = setTimeout(() => {
+        document.addEventListener("click", onOutsideClick);
+        document.addEventListener("keydown", onKey);
+      }, 0);
 
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener("click", handleClick);
-    };
-  });
+      return () => {
+        clearTimeout(id);
+        document.removeEventListener("click", onOutsideClick);
+        document.removeEventListener("keydown", onKey);
+      };
+    });
+  }
 
+  useDropdownDismiss(
+    () => showThinkDropdown,
+    () => (showThinkDropdown = false),
+    () => thinkWrapperEl,
+  );
+  useDropdownDismiss(
+    () => showFavDropdown,
+    () => (showFavDropdown = false),
+    () => favWrapperEl,
+  );
+
+  // Unresolved ids (stale/renamed favorites) are dropped, so derive the badge
+  // from the resolved list to keep the count and the visible items in sync.
   const favModelDetails = $derived(
-    favoriteModels.map((id) => models.find((m) => m.id === id)).filter(Boolean) as Model[],
+    favoriteModels.flatMap((id) => {
+      const m = models.find((x) => x.id === id);
+      return m ? [m] : [];
+    }),
   );
 
   function getUpdateTitle(piVersion: string | null | undefined, pkgCount: number): string {
@@ -149,7 +183,14 @@
         onclick={onSwitchToModels}
         role="button"
         tabindex="0"
-        onkeydown={(e) => e.key === "Enter" && onSwitchToModels()}
+        onkeydown={(e) => {
+          // ARIA button pattern: both Enter and Space activate; Space must not
+          // scroll the page.
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSwitchToModels();
+          }
+        }}
       >
         <span class="provider-tag">{providerName}</span>
         <span class="model-name">{modelName}</span>
@@ -162,6 +203,8 @@
           class="fav-btn"
           onclick={() => (showFavDropdown = !showFavDropdown)}
           title="Quick-select favorite models"
+          aria-haspopup="menu"
+          aria-expanded={showFavDropdown}
           data-active={showFavDropdown}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -211,7 +254,12 @@
   </div>
 
   <div class="header-right">
-    <button class="new-session-btn" onclick={onNewSession} title="New Session">
+    <button
+      class="new-session-btn"
+      onclick={onNewSession ?? (() => {})}
+      disabled={!onNewSession}
+      title="New Session"
+    >
       <svg
         width="14"
         height="14"
@@ -280,6 +328,8 @@
         class="think-btn"
         onclick={() => (showThinkDropdown = !showThinkDropdown)}
         title="Change thinking level"
+        aria-haspopup="menu"
+        aria-expanded={showThinkDropdown}
         data-active={showThinkDropdown}
       >
         <svg
@@ -321,7 +371,7 @@
                 }}
               >
                 <span class="item-name">{level}</span>
-                {#if thinkingLevel === level}
+                {#if effectiveThinkingLevel === level}
                   <svg
                     width="14"
                     height="14"

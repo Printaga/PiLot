@@ -128,8 +128,10 @@ suite("update-checker: isNewerVersion", () => {
 		assert.strictEqual(isNewerVersion("1.2.3-beta.1", "1.2.3-beta.2"), false);
 	});
 
-	test("falls back to string comparison when parsing fails", () => {
-		assert.strictEqual(isNewerVersion("unparseable", "1.0.0"), true);
+	test("treats unparseable versions as not-newer (string ordering misorders semver)", () => {
+		// "1.2" > "1.10.0" lexically, so a lexicographic fallback produced false
+		// "update available" claims; an unparseable pair now reports not-newer.
+		assert.strictEqual(isNewerVersion("unparseable", "1.0.0"), false);
 		assert.strictEqual(isNewerVersion("1.0.0", "unparseable"), false);
 	});
 });

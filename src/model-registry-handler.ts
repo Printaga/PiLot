@@ -6,13 +6,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type BinaryService } from "./binary-service.js";
 import { type ThinkingLevel } from "./webview/types/index.js";
-import { execFileAsync } from "./utils/shell.js";
+import { execFileAsync, stripAnsi } from "./utils/shell.js";
 
 /**
  * Pi's thinking levels in ascending intensity. "off" disables reasoning.
  * Shared with the extension host so the webview and host agree on ordering.
  */
-export const THINKING_LEVELS: ThinkingLevel[] = [
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"off",
 	"minimal",
 	"low",
@@ -74,17 +74,21 @@ export interface ModelRegistryHandlerDeps {
 	globalState: vscode.Memento;
 	notifyWebview: (message: { type: string; data?: unknown }) => void;
 	logError: (msg: string, error?: unknown) => void;
-	logDebug: (msg: string, ...details: unknown[]) => void;
+	logDebug?: (msg: string, ...details: unknown[]) => void;
 }
 
 export class ModelRegistryHandler {
 	private cliModelIdsCache: Set<string> | null = null;
 	private cliModelIdsPromise: Promise<Set<string>> | null = null;
+	/** Bumped on invalidation so in-flight resolutions cannot re-seed the cache. */
+	private cliModelIdsGeneration = 0;
 
 	constructor(private readonly deps: ModelRegistryHandlerDeps) {}
 
 	getAvailableModels(): ModelItem[] {
-		return this.deps.availableModels;
+		// Defensive copy, matching getFavorites(): callers must not be able to
+		// mutate the array already shared with notifyWebview payloads.
+		return [...this.deps.availableModels];
 	}
 
 	getCurrentModelId(): string | null {
@@ -148,8 +152,17 @@ export class ModelRegistryHandler {
 		// Without this, getMergedModels() returns stale data from initial construction.
 		// Must be awaited: SDK 0.84+ reloads models.json asynchronously in refresh()
 		// and synchronous getAll()/getAvailable() reads race it otherwise.
-		await modelRegistry.refresh();
-		const models = await this.getMergedModels();
+		// A failure here (corrupt models.json, disk error) must keep the previous
+		// list and still reach callers as a logged no-op instead of an unhandled
+		// rejection that leaves the webview without any feedback.
+		let models: RegistryModel[];
+		try {
+			await modelRegistry.refresh();
+			models = await this.getMergedModels();
+		} catch (err) {
+			this.deps.logError("[PI] Failed to refresh available models:", err);
+			return;
+		}
 		this.deps.availableModels = this.buildModelList(models);
 		this.deps.notifyWebview({
 			type: "models-updated",
@@ -165,17 +178,31 @@ export class ModelRegistryHandler {
 	async getCliModelIds(): Promise<Set<string>> {
 		if (this.cliModelIdsCache) return this.cliModelIdsCache;
 		if (!this.cliModelIdsPromise) {
+			const generation = this.cliModelIdsGeneration;
 			this.cliModelIdsPromise = this.resolveCliModelIds()
 				.then((ids) => {
-					this.cliModelIdsCache = ids;
+					// Only a real table is cacheable: an empty result means the CLI
+					// was unreachable, so drop the memoized promise and retry later
+					// instead of disabling favorites sync for the whole session.
+					if (ids.size > 0) {
+						this.cliModelIdsCache = ids;
+					} else {
+						this.cliModelIdsPromise = null;
+					}
 					return ids;
 				})
 				.catch(() => {
-					// Do NOT memoize a failed/empty resolution: the CLI may be
-					// transiently unavailable, and caching the empty set here made
-					// favorites sync permanently dead until an explicit invalidate.
 					this.cliModelIdsPromise = null;
 					return new Set<string>();
+				})
+				.then((ids) => {
+					// A superseded resolution (post-invalidation) must not re-seed
+					// the cache with a pre-invalidation model list.
+					if (generation !== this.cliModelIdsGeneration) {
+						this.cliModelIdsPromise = null;
+						return new Set<string>();
+					}
+					return ids;
 				});
 		}
 		return this.cliModelIdsPromise;
@@ -184,13 +211,16 @@ export class ModelRegistryHandler {
 	private resolveCliModelIds(): Promise<Set<string>> {
 		const binaryPath = this.deps.binaryService.getBinaryPath();
 		return execFileAsync(binaryPath, ["--list-models"])
-			.then(({ code, stdout, stderr }) => {
+			.then(({ code, stdout }) => {
 				// Treat a failing command as "no models" so shell error text on
 				// stderr is never parsed as a model table.
 				if (code !== 0) {
-					throw new Error(`pi --list-models exited with code ${code}: ${stderr}`);
+					throw new Error(`pi --list-models exited with code ${code}`);
 				}
-				const output = (stderr || "") + "\n" + (stdout || "");
+				// Parse stdout only — stderr holds warnings/errors, and any 3-token
+				// line there would be misread as a "provider/model" row. ANSI codes
+				// are stripped so colored table output cannot pollute parsed ids.
+				const output = stripAnsi(stdout || "");
 				const models = new Set<string>();
 
 				for (const line of output.split("\n")) {
@@ -203,11 +233,14 @@ export class ModelRegistryHandler {
 
 				return models;
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
+				// Logged here and rethrown so getCliModelIds() can tell "CLI
+				// unavailable" (not memoizable) from an empty but valid table.
 				this.deps.logError(
 					"[PI] Failed to list CLI models - is 'pi' installed and on PATH?",
+					error,
 				);
-				return new Set<string>();
+				throw error;
 			});
 	}
 
@@ -225,8 +258,18 @@ export class ModelRegistryHandler {
 		// If CLI not available or not yet resolved, skip sync
 		if (cliModels.size === 0) return;
 
-		// Only write patterns that the CLI actually knows about
-		const validPatterns = this.deps.favoriteModels.filter((pattern) => cliModels.has(pattern));
+		// Only write patterns that the CLI actually knows about, but never delete
+		// entries the CLI already has enabled (they may have been set outside the
+		// extension, e.g. via Ctrl+P in PI CLI) — setEnabledModels replaces the
+		// whole list, so filtering against favorites alone would silently erase
+		// the CLI-side selection.
+		const existing = settingsManager.getEnabledModels() || [];
+		const validPatterns = [
+			...new Set([
+				...existing.filter((pattern) => cliModels.has(pattern)),
+				...this.deps.favoriteModels.filter((pattern) => cliModels.has(pattern)),
+			]),
+		];
 
 		settingsManager.setEnabledModels(validPatterns);
 		await settingsManager.flush();
@@ -266,7 +309,7 @@ export class ModelRegistryHandler {
 		if (isFavorite && !this.deps.favoriteModels.includes(modelId)) {
 			// Guard: only add models that exist in the current registry
 			if (!this.deps.availableModels.some((m) => m.id === modelId)) {
-				return this.deps.favoriteModels;
+				return [...this.deps.favoriteModels];
 			}
 			this.deps.favoriteModels = [...this.deps.favoriteModels, modelId];
 		} else if (!isFavorite) {
@@ -284,7 +327,8 @@ export class ModelRegistryHandler {
 			this.deps.logError("[PI] Failed to sync favorites to CLI settings:", err);
 		}
 
-		return this.deps.favoriteModels;
+		// Defensive copy: the array is shared with webview payloads.
+		return [...this.deps.favoriteModels];
 	}
 
 	async cycleModel(): Promise<void> {
@@ -308,6 +352,9 @@ export class ModelRegistryHandler {
 
 	/** Invalidate CLI model IDs cache (call after auth changes). */
 	invalidateCliModelIdsCache(): void {
+		// Bump the generation so an in-flight resolution cannot re-seed the cache
+		// with a pre-invalidation model list.
+		this.cliModelIdsGeneration++;
 		this.cliModelIdsCache = null;
 		this.cliModelIdsPromise = null;
 	}

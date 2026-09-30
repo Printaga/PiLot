@@ -92,14 +92,20 @@
   // without the scope prefix.
   function isInstalled(name: string): boolean {
     const lower = name.toLowerCase();
-    const scoped = lower.startsWith("@");
-    const bare = scoped ? lower.slice(lower.indexOf("/") + 1) : lower;
+    const slash = lower.indexOf("/");
+    const scoped = lower.startsWith("@") && slash > 0;
+    const scope = scoped ? lower.slice(1, slash) : "";
+    const bare = scoped ? lower.slice(slash + 1) : lower;
     return installedPackages.some((p) => {
       if (p.local) return false;
       const source = p.source.toLowerCase();
       if (source.startsWith("local:")) return false;
       if (source === `npm:${lower}`) return true;
-      return scoped && (source === `npm:${bare}` || source.endsWith(`/${bare}`));
+      if (!scoped) return false;
+      // Only a matching scope may satisfy the bare name: `@other/pkg` must not
+      // report `@scope/pkg` as installed via a bare `/pkg` suffix match.
+      if (source === `npm:${bare}`) return true;
+      return source.startsWith(`npm:@${scope}/`) && source.endsWith(`/${bare}`);
     });
   }
 
@@ -134,8 +140,15 @@
     postToHost(msg);
   }
 
+  /** npm's canonical escaping: keep the leading `@`, encode the scope separator. */
+  function encodePkgName(name: string): string {
+    return name.startsWith("@")
+      ? `@${name.slice(1).replace("/", "%2f")}`
+      : encodeURIComponent(name);
+  }
+
   function npmUrl(name: string): string {
-    return `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
+    return `https://www.npmjs.com/package/${encodePkgName(name)}`;
   }
 
   function formatPackageMeta(pkg: MarketplacePackage): string {
@@ -149,6 +162,9 @@
   // Extract types from a package's full manifest (pi field)
   function extractPiTypes(manifest: any): string[] {
     const types: string[] = [];
+    // A null/non-object body (or wrong-typed `pi`) used to throw here and the
+    // rejection cleared the whole already-fetched search result.
+    if (!manifest || typeof manifest !== "object") return types;
     if (manifest.pi?.extensions?.length) types.push("extensions");
     if (manifest.pi?.skills?.length) types.push("skills");
     if (manifest.pi?.prompts?.length) types.push("prompts");
@@ -211,6 +227,10 @@
 
       if (fetchSeq !== marketplaceFetchSeq) return;
       marketplacePackages = packages;
+      // Render the search results now; the fan-out below only refines `types`
+      // in place, so the Available tab must not show a spinner for its whole
+      // (up to 250-entry) duration.
+      marketplaceLoading = false;
 
       const BATCH_SIZE = 20;
       for (let i = 0; i < packages.length; i += BATCH_SIZE) {
@@ -272,8 +292,10 @@
   }
 
   function togglePackage(pkg: InstalledPackage) {
-    const enabled = disabledPackages.has(pkg.source);
-    sendMessage({ type: "setPackageEnabled", data: { source: pkg.source, enabled } });
+    // Derive from the single source of truth: assigning `disabledPackages.has()`
+    // to a variable named `enabled` was the logical inverse of the expression.
+    const nextEnabled = !isPackageEnabled(pkg);
+    sendMessage({ type: "setPackageEnabled", data: { source: pkg.source, enabled: nextEnabled } });
   }
 
   async function updatePackages() {
@@ -319,10 +341,22 @@
               path: typeof p.path === "string" ? p.path : "",
               description: typeof p.description === "string" ? p.description : "",
               version: typeof p.version === "string" ? p.version : "",
-              types: Array.isArray(p.types) ? p.types : [],
-              skills: Array.isArray(p.skills) ? p.skills : [],
-              extensions: Array.isArray(p.extensions) ? p.extensions : [],
-              prompts: Array.isArray(p.prompts) ? p.prompts : [],
+              types: asArray<string>(p.types, (v): v is string => typeof v === "string"),
+              skills: asArray<{ name: string; description: string }>(
+                p.skills,
+                (v): v is { name: string; description: string } =>
+                  !!v && typeof v === "object" && typeof (v as any).name === "string",
+              ),
+              extensions: asArray<{ path: string; sourceName: string | null }>(
+                p.extensions,
+                (v): v is { path: string; sourceName: string | null } =>
+                  !!v && typeof v === "object" && typeof (v as any).path === "string",
+              ),
+              prompts: asArray<{ name: string; description: string }>(
+                p.prompts,
+                (v): v is { name: string; description: string } =>
+                  !!v && typeof v === "object" && typeof (v as any).name === "string",
+              ),
               local: p.local === true,
             },
           ];
@@ -350,8 +384,11 @@
       }
       if (type === "packages-updated") {
         refreshInstalled();
+        // The host posts this after EVERY successful install/remove/update;
+        // re-running the full manifest fan-out each time hammers the registry
+        // for data that barely changes. Only refresh when the tab is visible.
         setTimeout(() => {
-          fetchMarketplacePackages();
+          if (activeTab === "available") void fetchMarketplacePackages();
         }, 1000);
       }
     }
@@ -430,8 +467,9 @@
               {/if}
               {#if pkg.source.toLowerCase().startsWith("npm:")}
                 <a
-                  href={npmUrl(pkg.source.replace("npm:", ""))}
+                  href={npmUrl(pkg.source.replace(/^npm:/, ""))}
                   target="_blank"
+                  rel="noopener noreferrer"
                   class="package-link"
                   title="Open on npm"
                 >
@@ -501,8 +539,11 @@
                   >Managed manually — edit files in {pkg.path || "agent extensions dir"}</span
                 >
               {:else}
-                <button class="uninstall-btn" onclick={() => removePackage(pkg.source)}
-                  >Remove</button
+                <button
+                  class="uninstall-btn"
+                  onclick={() => removePackage(pkg.source)}
+                  disabled={lightMode}
+                  title={lightMode ? "Disabled by Light Mode" : "Remove"}>Remove</button
                 >
               {/if}
             </div>
@@ -535,8 +576,11 @@
             <option value="newest">Newest</option>
             <option value="name">A-Z</option>
           </select>
-          <button class="update-btn" onclick={updatePackages} title="Update all packages"
-            >Update</button
+          <button
+            class="update-btn"
+            onclick={updatePackages}
+            disabled={lightMode}
+            title={lightMode ? "Disabled by Light Mode" : "Update all packages"}>Update</button
           >
         </div>
       </div>
@@ -583,7 +627,11 @@
               {#if isInstalled(pkg.name)}
                 <button class="installed-badge" disabled>Installed</button>
               {:else}
-                <button class="install-btn" onclick={() => installPackage(pkg.name)}>Install</button
+                <button
+                  class="install-btn"
+                  disabled={lightMode}
+                  title={lightMode ? "Disabled by Light Mode" : "Install"}
+                  onclick={() => installPackage(pkg.name)}>Install</button
                 >
               {/if}
             </div>
@@ -594,7 +642,9 @@
   {/if}
 
   <div class="footer">
-    <a href="https://pi.dev/packages" target="_blank" class="browse-link">Browse all packages ↗</a>
+    <a href="https://pi.dev/packages" target="_blank" rel="noopener noreferrer" class="browse-link"
+      >Browse all packages ↗</a
+    >
   </div>
 </div>
 
@@ -609,6 +659,11 @@
       <button
         class="close-btn"
         onclick={() => {
+          // The host command keeps running; just stop tracking its output and
+          // disarm the safety timer so a stale `loading: false` from an older
+          // operation cannot close a newer one's overlay.
+          clearTimeout(overlaySafetyTimer);
+          overlaySafetyTimer = undefined;
           showLoadingOverlay = false;
           outputText = "";
         }}>Close</button

@@ -14,7 +14,7 @@
   import OnboardingTour from "./components/OnboardingTour.svelte";
   import ExportDialog from "./components/ExportDialog.svelte";
   import PromptTemplates from "./components/PromptTemplates.svelte";
-  import type { ImageContent, Message, Model } from "./types/index";
+  import type { ImageContent, Message, Model, ThinkingLevel } from "./types/index";
 
   let activeTab = $state<
     | "chat"
@@ -45,7 +45,15 @@
 
   // Thinking levels supported by the currently selected model (falls back to the
   // full set when the model carries no capability metadata).
-  const ALL_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const ALL_THINKING_LEVELS: readonly ThinkingLevel[] = [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ];
   const availableThinkingLevels = $derived.by(() => {
     const m = models.find((x) => x.id === currentModel);
     const a = m?.availableThinkingLevels;
@@ -76,6 +84,8 @@
   // a plain Map never triggers reactivity for anything that reads it.
   let activeToolCalls = new SvelteMap<string, { toolName: string; args: any }>();
   let toolPreset = $state<string | null>(null);
+  // Persisted tool list from the host; null until the first settings sync.
+  let customTools = $state<string[] | null>(null);
 
   // Update notification state
   let hasUpdates = $state(false);
@@ -407,6 +417,7 @@
 
       case "settings-response":
         toolPreset = data?.toolPreset ?? null;
+        customTools = Array.isArray(data?.customTools) ? data.customTools : null;
         break;
 
       case "pi-settings-changed":
@@ -1496,7 +1507,7 @@
       {:else if activeTab === "providers"}
         <ProviderSettings {providers} />
       {:else if activeTab === "tools"}
-        <ToolsPanel {toolPreset} {lightMode} />
+        <ToolsPanel {toolPreset} {customTools} {lightMode} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel {lightMode} />
       {:else if activeTab === "skills"}

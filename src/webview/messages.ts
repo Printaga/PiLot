@@ -1,4 +1,6 @@
 // ── Shared message-event validation for webview components ────────────────────
+import type { WebviewMessage } from "../protocol/types.js";
+import type { VsCodeApi } from "./app.d";
 //
 // Every component listens on window "message". The only legitimate sender is
 // the extension host, but any other frame, script, or devtools snippet can
@@ -21,6 +23,10 @@ export function parseHostMessage(
   event: MessageEvent,
 ): { type: string; data: Record<string, unknown> } | null {
   const envelope: unknown = event.data;
+  // Defense-in-depth against forged events: reject anything not dispatched by
+  // this window itself (the host bridge posts with the webview window as
+  // source; a devtools snippet or injected frame typically does not).
+  if (typeof event.source !== "undefined" && event.source !== window) return null;
   if (!isRecord(envelope) || typeof envelope.type !== "string") return null;
   const data: unknown = envelope.data;
   return { type: envelope.type, data: isRecord(data) ? data : {} };
@@ -36,21 +42,28 @@ export function asNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-/** Clamp a number into [min, max], returning fallback for non-finite input
- *  or invalid bounds (min > max would otherwise yield an arbitrary value). */
+/** Clamp a number into [min, max], returning a safe in-range fallback for
+ *  non-finite input or invalid bounds (min > max would otherwise yield an
+ *  arbitrary value; an out-of-range fallback would silently defeat the clamp). */
 export function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(fallback) || min > max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
     return fallback;
   }
-  const n = asNumber(value, fallback);
+  const safeFallback = Math.min(max, Math.max(min, Number.isFinite(fallback) ? fallback : min));
+  const n = asNumber(value, safeFallback);
   return Math.min(max, Math.max(min, n));
 }
+
+/** Maximum items retained by asArray: the payload is untrusted, and a forged
+ *  hole-preserved huge array must not be walked in full. */
+const MAX_ARRAY_ITEMS = 10_000;
 
 /** True when the value is an array (optionally with every item passing `item`). */
 export function asArray<T = unknown>(value: unknown, item?: (v: unknown) => v is T): T[] {
   if (!Array.isArray(value)) return [];
-  if (!item) return [...value] as T[];
-  return value.filter((v): v is T => item(v));
+  const slice = value.slice(0, MAX_ARRAY_ITEMS);
+  if (!item) return [...slice] as T[];
+  return slice.filter((v): v is T => item(v));
 }
 
 /**
@@ -59,9 +72,27 @@ export function asArray<T = unknown>(value: unknown, item?: (v: unknown) => v is
  * Single shared implementation — five components previously carried byte-ident
  * copies of this helper (fallow dupes.json flagged the clone group).
  */
-export function postToHost(message: unknown): void {
-  const vscode = (window as any).vscode;
+export function postToHost(message: WebviewMessage): void {
+  const vscode = window.vscode;
   if (typeof vscode?.postMessage === "function") {
     vscode.postMessage(message);
   }
+}
+
+/**
+ * Memoized acquisition of the single permitted VS Code API instance.
+ *
+ * VS Code grants exactly one `acquireVsCodeApi()` call per webview session —
+ * a second call throws — so every consumer must go through this helper
+ * instead of calling the raw API directly.
+ */
+export function getVsCodeApi(): VsCodeApi | undefined {
+  if (window.vscode) return window.vscode;
+  if (typeof window.acquireVsCodeApi !== "function") return undefined;
+  try {
+    window.vscode = window.acquireVsCodeApi();
+  } catch {
+    // Already acquired elsewhere without populating the cache: nothing to do.
+  }
+  return window.vscode;
 }

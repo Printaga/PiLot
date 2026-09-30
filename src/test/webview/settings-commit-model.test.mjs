@@ -7,35 +7,9 @@
 // round-trip through the <select> rather than being treated as "nothing
 // selected".
 
-// ── jsdom DOM setup (must precede any component import) ─────────────────────
 import * as assert from "node:assert";
-import { JSDOM } from "jsdom";
+import { domWindow } from "./test-dom-setup.mjs";
 // Svelte loader hooks are registered by the runner before this spec imports.
-
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
-for (const k of [
-	"navigator",
-	"Element",
-	"Node",
-	"Text",
-	"Comment",
-	"HTMLElement",
-	"HTMLSelectElement",
-	"HTMLOptionElement",
-	"Event",
-	// Svelte's select binding observes option changes, so the <select> render
-	// path needs MutationObserver on the global scope.
-	"MutationObserver",
-]) {
-	Object.defineProperty(globalThis, k, {
-		value: dom.window[k],
-		configurable: true,
-		writable: true,
-	});
-}
-globalThis.window.requestAnimationFrame ??= (cb) => globalThis.setTimeout(cb, 0);
 
 const { render, cleanup } = await import("@testing-library/svelte");
 const { default: SettingsPanel } = await import("../../webview/components/SettingsPanel.svelte");
@@ -58,13 +32,19 @@ function mount(overrides = {}) {
 	});
 }
 
+/** The chooser <select>, asserted once so a renamed class fails readably. */
+function selectOf(mounted) {
+	const select = mounted.container.querySelector(".model-select");
+	assert.ok(select, "the commit-message model chooser (.model-select) should render");
+	return select;
+}
+
 /** Select a value the way a user would: set the value, dispatch `change`. */
 function choose(select, value) {
-	const proto = globalThis.window.HTMLSelectElement.prototype ?? Object.getPrototypeOf(select);
-	const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-	if (setter) setter.call(select, value);
-	else select.value = value;
-	select.dispatchEvent(new globalThis.window.Event("change", { bubbles: true }));
+	// SettingsPanel uses an explicit onchange + value attribute (not
+	// bind:value), so a plain assignment is the whole contract.
+	select.value = value;
+	select.dispatchEvent(new domWindow.Event("change", { bubbles: true }));
 }
 
 suite("SettingsPanel commit-message model chooser", () => {
@@ -72,8 +52,7 @@ suite("SettingsPanel commit-message model chooser", () => {
 
 	test("offers an explicit standard-model option alongside the reported models", () => {
 		const mounted = mount();
-		const select = mounted.container.querySelector(".model-select");
-		assert.ok(select, "the chooser should render");
+		const select = selectOf(mounted);
 
 		const labels = [...select.querySelectorAll("option")].map((o) => o.textContent.trim());
 		assert.ok(
@@ -81,11 +60,12 @@ suite("SettingsPanel commit-message model chooser", () => {
 			`expected a standard-model option, got: ${labels.join(" | ")}`,
 		);
 		assert.ok(labels.includes("Claude Haiku 4.5"), "reported models should be selectable");
-		assert.strictEqual(
-			select.querySelector("option").value,
-			"",
-			"the standard option must store the empty string",
-		);
+
+		// Locate the standard option by VALUE (the load-bearing part), not by
+		// document order; its label is a secondary expectation.
+		const standard = [...select.querySelectorAll("option")].find((o) => o.value === "");
+		assert.ok(standard, "the standard option must store the empty string");
+		assert.strictEqual(standard.textContent.trim(), "Use standard PI model");
 	});
 
 	test("selecting the standard option emits an empty model id", () => {
@@ -94,9 +74,8 @@ suite("SettingsPanel commit-message model chooser", () => {
 			commitMessageModel: "anthropic/claude-sonnet-4-5",
 			onCommitMessageModelChange: (value) => seen.push(value),
 		});
-		const select = mounted.container.querySelector(".model-select");
 
-		choose(select, "");
+		choose(selectOf(mounted), "");
 
 		assert.deepStrictEqual(seen, [""], "clearing the pin must emit an empty string");
 	});
@@ -106,28 +85,47 @@ suite("SettingsPanel commit-message model chooser", () => {
 		const mounted = mount({
 			onCommitMessageModelChange: (value) => seen.push(value),
 		});
-		const select = mounted.container.querySelector(".model-select");
 
-		choose(select, "anthropic/claude-haiku-4-5");
+		choose(selectOf(mounted), "anthropic/claude-haiku-4-5");
 
 		assert.deepStrictEqual(seen, ["anthropic/claude-haiku-4-5"]);
 	});
 
-	test("reflects a persisted model on load", () => {
-		const mounted = mount({ commitMessageModel: "anthropic/claude-haiku-4-5" });
-		const select = mounted.container.querySelector(".model-select");
+	test("reflects a persisted model on load without writing back to the host", () => {
+		const seen = [];
+		const mounted = mount({
+			commitMessageModel: "anthropic/claude-haiku-4-5",
+			onCommitMessageModelChange: (value) => seen.push(value),
+		});
+		const select = selectOf(mounted);
 		assert.strictEqual(select.value, "anthropic/claude-haiku-4-5");
+		// Mounting must not emit a model change (a refactor to bind:value/$effect
+		// would start emitting a spurious settings write on load).
+		assert.deepStrictEqual(seen, [], "mounting must not emit a model change");
+	});
+
+	test("re-syncs the select when the host updates the persisted model", async () => {
+		const mounted = mount({ commitMessageModel: "" });
+		const select = selectOf(mounted);
+		assert.strictEqual(select.value, "");
+
+		await mounted.rerender({ commitMessageModel: "anthropic/claude-sonnet-4-5" });
+		assert.strictEqual(
+			select.value,
+			"anthropic/claude-sonnet-4-5",
+			"the chooser must follow host-side setting updates",
+		);
 	});
 
 	test("reflects the standard model when nothing is pinned", () => {
 		const mounted = mount({ commitMessageModel: "" });
-		const select = mounted.container.querySelector(".model-select");
+		const select = selectOf(mounted);
 		assert.strictEqual(select.value, "");
 	});
 
 	test("keeps a pinned model that is absent from the reported list", () => {
 		const mounted = mount({ commitMessageModel: "custom/local-model" });
-		const select = mounted.container.querySelector(".model-select");
+		const select = selectOf(mounted);
 
 		assert.strictEqual(
 			select.value,

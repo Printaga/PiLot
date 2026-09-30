@@ -1,9 +1,14 @@
+# Keep in sync with .gitignore (generated/build/tooling output only).
 node_modules/
 dist/
 dist-tsc/
 out/
 .vscode-test/
+# Binary assets only — human-written text under media/ stays covered by Prettier.
 media/
+!media/**/*.md
+!media/**/*.json
+# No-op today (Prettier has no .patch parser); kept so future patch helpers are skipped.
 patches/
 .kilo/
 .kilocode/
@@ -16,4 +21,6 @@ openspec/
 graphify-out/
 reference/
 pnpm-lock.yaml
+# Hand-authored security overrides / onlyBuiltDependencies — kept verbatim on
+# purpose; do NOT let Prettier rewrite the quoted keys or the allowBuilds block.
 pnpm-workspace.yaml

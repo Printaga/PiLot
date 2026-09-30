@@ -83,17 +83,19 @@ suite("native-addons", () => {
 	});
 
 	suite("rebuildBetterSqlite3()", () => {
-		test("returns success: false when no better-sqlite3 found", () => {
+		// Both entry points are async now (fs via fs.promises); awaited throughout.
+		test("reports per-copy results when no better-sqlite3 found", async () => {
 			// Without PI agent npm, no better-sqlite3 exists
-			const result = rebuildBetterSqlite3();
+			const result = await rebuildBetterSqlite3();
 			assert.strictEqual(typeof result.success, "boolean");
 			assert.strictEqual(typeof result.output, "string");
+			assert.ok(Array.isArray(result.results), "results array must be present");
 		});
 	});
 
 	suite("ensureBetterSqlite3Compatible()", () => {
-		test("returns ok: true, rebuilt: false when already compatible", () => {
-			const result = ensureBetterSqlite3Compatible();
+		test("returns ok: true, rebuilt: false when already compatible", async () => {
+			const result = await ensureBetterSqlite3Compatible();
 			assert.strictEqual(typeof result.ok, "boolean");
 			assert.strictEqual(typeof result.rebuilt, "boolean");
 			assert.strictEqual(typeof result.output, "string");
@@ -122,10 +124,11 @@ suite("native-addons", () => {
 			assert.ok(desc.includes("24.x"));
 		});
 
-		test("formats known ABI 140 as Node 22.x (Electron build)", () => {
+		test("formats Electron ABI 140 without guessing a Node major", () => {
 			const desc = describeABIStatus(140, 140);
-			assert.ok(desc.includes("22.x"));
 			assert.ok(desc.includes("Electron build"));
+			// Electron ABIs are not Node ABIs — the label must not claim "Node 22.x".
+			assert.ok(!desc.includes("22.x"));
 		});
 
 		test("formats known ABI 142 as Node 27.x", () => {

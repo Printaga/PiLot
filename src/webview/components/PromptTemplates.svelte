@@ -223,8 +223,16 @@ Scope:
 
   let recentTemplates = $state<Template[]>([]);
 
-  /** Validate localStorage data before use: corrupt/legacy entries previously
-   *  crashed rendering ({#each template.tags} on undefined). */
+  /** Upper bound for the recents list, applied on read AND on write so a
+   *  legacy/hand-edited payload cannot keep an arbitrarily long list alive. */
+  const RECENT_LIMIT = 10;
+
+  /**
+   * Validate localStorage data before use: corrupt/legacy entries previously
+   * crashed rendering. `name` and `tags` are used as each-keys downstream, so
+   * duplicates must also be removed — Svelte throws "Cannot have duplicate keys
+   * in a keyed each block" and would take down the whole panel.
+   */
   function parseStoredTemplates(value: unknown): Template[] {
     if (!Array.isArray(value)) return [];
     const validCategories: TemplateCategory[] = [
@@ -233,41 +241,45 @@ Scope:
       "quality",
       "workflow",
     ];
-    return value.filter(
-      (t): t is Template =>
-        !!t &&
-        typeof t === "object" &&
-        typeof (t as Template).name === "string" &&
-        typeof (t as Template).description === "string" &&
-        typeof (t as Template).prompt === "string" &&
-        validCategories.includes((t as Template).category) &&
-        Array.isArray((t as Template).tags) &&
-        (t as Template).tags.every((tag) => typeof tag === "string"),
+    return (
+      value
+        .filter(
+          (t): t is Template =>
+            !!t &&
+            typeof t === "object" &&
+            typeof (t as Template).name === "string" &&
+            typeof (t as Template).description === "string" &&
+            typeof (t as Template).prompt === "string" &&
+            validCategories.includes((t as Template).category) &&
+            Array.isArray((t as Template).tags) &&
+            (t as Template).tags.every((tag) => typeof tag === "string"),
+        )
+        // Deduplicate each-keys: tags within a template, then names across it.
+        .map((t) => ({ ...t, tags: [...new Set(t.tags)] }))
+        .filter((t, i, arr) => arr.findIndex((o) => o.name === t.name) === i)
+        .slice(0, RECENT_LIMIT)
     );
   }
 
-  $effect(() => {
+  // One-shot mount-time read: an $effect runs after the first render, so the
+  // dialog painted once empty and then popped in the "Recent (n)" tab.
+  onMount(() => {
     try {
       const stored = localStorage.getItem("pilots-recent-templates");
       if (stored) recentTemplates = parseStoredTemplates(JSON.parse(stored));
     } catch {
       /* localStorage may be unavailable or hold corrupt data: defaults are intentional. */
     }
-  });
-
-  // Mount-only focus: a content-keyed $effect would steal focus back to the
-  // search box every time the list re-renders (e.g. after tabbing away).
-  onMount(() => {
     searchInput?.focus();
   });
 
   function saveToRecents(template: Template) {
-    const existing = recentTemplates.findIndex((t) => t.name === template.name);
-    if (existing >= 0) {
-      recentTemplates = [template, ...recentTemplates.filter((_, i) => i !== existing)];
-    } else {
-      recentTemplates = [template, ...recentTemplates].slice(0, 10);
-    }
+    // Single place for dedupe + cap: covers re-selecting an existing entry and
+    // a stored list that was never trimmed.
+    recentTemplates = [template, ...recentTemplates.filter((t) => t.name !== template.name)].slice(
+      0,
+      RECENT_LIMIT,
+    );
     try {
       localStorage.setItem("pilots-recent-templates", JSON.stringify(recentTemplates));
     } catch {

@@ -5,9 +5,15 @@ node_modules/
 dist/
 dist-tsc/
 out/
+*.tsbuildinfo
+coverage/
 
 # VS Code
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
 .vscode-test/
 .openspec/
 openspec/
@@ -17,8 +23,9 @@ openspec/
 # VS Code extension package
 *.vsix
 
-# Reference extension folder and everything in it
-reference/
+# Reference extension folder and everything in it (regenerate with the
+# upstream repo checkout; safe to delete at any time)
+/reference/
 
 # PI agent runtime state (generated)
 .pi/
@@ -30,7 +37,7 @@ reference/
 .freebuff/
 
 # Graphify output (generated)
-graphify-out
+graphify-out/
 
 # Logs
 *.log
@@ -38,14 +45,12 @@ graphify-out
 # Environment files
 .env
 .env.*
+!.env.example
+!.env.sample
+!.env.*.example
 
 # macOS
 .DS_Store
 
-# Compiled extension sources (tsc/esbuild output, never commit)
-src/**/*.js
-src/**/*.js.map
-
-
-
+# Fallow output (generated)
 .fallow/
