@@ -158,7 +158,8 @@ suite("REALHOST commit message wiring", () => {
 		}
 	});
 
-	suiteTeardown(() => {
+	suiteTeardown(function () {
+		this.timeout(120_000); // DIAGNOSTIC: folder-removal rescan once took minutes on CI
 		for (const [name, value] of Object.entries(saved)) {
 			(vscode.window as any)[name] = value;
 		}
@@ -182,13 +183,45 @@ suite("REALHOST commit message wiring", () => {
 	/**
 	 * Poll until the git extension publishes our repository. The extension scans
 	 * asynchronously and has no "rescan now" entry point.
+	 *
+	 * DIAGNOSTIC BRANCH (do not merge as-is): on CI every test calling this hit
+	 * mocha's 10s default timeout while the same suite passes locally in <1s.
+	 * Log discovery state while polling and dump the git API's repository list
+	 * when discovery never succeeds, so the CI log distinguishes a slow scan
+	 * from a repository that never appears.
 	 */
 	async function waitForRepository(repoRoot: string, timeoutMs = 20_000) {
-		const deadline = Date.now() + timeoutMs;
-		for (;;) {
+		const startedAt = Date.now();
+		const deadline = startedAt + timeoutMs;
+		for (let poll = 0; ; poll++) {
 			const lookup = await findGitRepository(repoRoot);
-			if (lookup.status === "found") return lookup.repository;
-			if (Date.now() > deadline) return null;
+			if (lookup.status === "found") {
+				if (poll > 0)
+					console.log(
+						`[diag] repository discovered after ${poll} poll(s), ${Date.now() - startedAt}ms`,
+					);
+				return lookup.repository;
+			}
+			if (Date.now() > deadline) {
+				console.log(
+					`[diag] repository NOT discovered within ${timeoutMs}ms. Last lookup said: ${lookup.message}`,
+				);
+				try {
+					const gitExt = vscode.extensions.getExtension<any>("vscode.git");
+					const api = gitExt
+						? (gitExt.isActive ? gitExt.exports : await gitExt.activate())?.getAPI?.(1)
+						: undefined;
+					const roots = (api?.repositories ?? []).map((r: any) => r.rootUri?.fsPath);
+					console.log(`[diag] git API repository roots: ${JSON.stringify(roots)}`);
+				} catch (error) {
+					console.log(`[diag] git API dump failed: ${String(error)}`);
+				}
+				return null;
+			}
+			if (poll % 8 === 0)
+				console.log(
+					`[diag] waiting for repository (poll ${poll}, ${Date.now() - startedAt}ms): ${lookup.message}`,
+				);
 			await new Promise((resolve) => setTimeout(resolve, 250));
 		}
 	}
@@ -212,6 +245,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("writes into the real SCM input box without staging, committing, or pushing", async function () {
+		this.timeout(90_000); // DIAGNOSTIC: let the full 20s discovery budget + retries run on slow CI
 		if (isFacadeLane()) this.skip(); // host-only: needs the real git extension
 		assert.ok(repoDir, "suite setup must have created the repository");
 
@@ -239,6 +273,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("the real command drafts into the box and reports truncation and untracked files", async function () {
+		this.timeout(90_000); // DIAGNOSTIC
 		if (isFacadeLane()) this.skip(); // host-only: needs a dispatching command registry
 		if (!wiringReady) this.skip(); // the extension owns the command in this host
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -294,6 +329,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a failing model call surfaces the underlying output and leaves the box alone", async function () {
+		this.timeout(90_000); // DIAGNOSTIC
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -319,6 +355,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a missing pi binary is reported instead of attempting a draft", async function () {
+		this.timeout(90_000); // DIAGNOSTIC
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 		assert.ok(repoDir, "suite setup must have created the repository");
@@ -345,6 +382,7 @@ suite("REALHOST commit message wiring", () => {
 	});
 
 	test("a workspace outside any repository is reported without throwing", async function () {
+		this.timeout(90_000); // DIAGNOSTIC
 		if (isFacadeLane()) this.skip();
 		if (!wiringReady) this.skip();
 
