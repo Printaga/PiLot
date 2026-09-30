@@ -19,6 +19,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Fixed
 
+- CI: the REALHOST commit-message E2E suite no longer hangs on GitHub Actions runners. The suite's runtime `updateWorkspaceFolders` call raced workbench startup and was silently lost on some runs, leaving the built-in git extension with no repositories for the whole host lifetime. The test runner now `git init`s the per-run workspace before the window opens and passes its path by contract (`PILOT_TEST_WORKSPACE`); on failure the runner's VS Code logs are preserved and uploaded for post-mortem.
 - `pi-binary.ts`: bare-name `pi` lookup resolves again; PATH resolution runs without a shell.
 - `loader.cjs`: package-name typo, probe timeouts, double-hook guard, and bare imports resolved via the package `exports` map.
 - Test/CI scaffolding (`verify.mjs`, `run-node-tests.mjs`, `runTest.ts`, `dl-tmp.mjs`, `run-clean.mjs`): failed or misconfigured runs exit non-zero; VS Code discovery and paths are cross-platform and machine-independent.

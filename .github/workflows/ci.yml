@@ -83,3 +83,33 @@ jobs:
 
             - name: E2E tests (VS Code integration suite)
               run: pnpm test:e2e
+              env:
+                  # Keep each run's VS Code user-data dir so a failed step can
+                  # upload the workbench/extension-host logs for post-mortem;
+                  # without it the runner deletes them in its cleanup. Uploads
+                  # happen only on failure; the runner itself is ephemeral.
+                  PILOT_KEEP_VSCODE_LOGS: "1"
+
+            # The E2E step keeps each run's VS Code user-data dir (env var
+            # above). On failure, upload the workbench/extension-host logs for
+            # post-mortem; on success, delete them so the runner stays clean.
+            - name: Collect VS Code logs on failure
+              if: failure()
+              run: |
+                  mkdir -p vscode-logs
+                  find /tmp -maxdepth 1 -name 'pilot-test-userdata-*' -type d -mmin -30 \
+                      -exec cp -r {} vscode-logs/ \;
+                  ls -la vscode-logs/ || true
+
+            - name: Upload VS Code logs
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vscode-logs-${{ github.run_id }}
+                  path: vscode-logs/
+                  retention-days: 5
+                  if-no-files-found: ignore
+
+            - name: Clean kept VS Code dirs after a green run
+              if: success()
+              run: rm -rf /tmp/pilot-test-userdata-* /tmp/pilot-test-workspace-*
