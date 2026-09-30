@@ -8,17 +8,8 @@ out/
 *.tsbuildinfo
 coverage/
 
-# VS Code
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-.vscode-test/
-.openspec/
-openspec/
-.kilocode/
-.kilo/
+# Tool caches
+.eslintcache
 
 # VS Code extension package
 *.vsix
@@ -27,14 +18,50 @@ openspec/
 # upstream repo checkout; safe to delete at any time)
 /reference/
 
-# PI agent runtime state (generated)
+# IDEs & AI coding harnesses — local agent/IDE state, ignored even when the
+# harness is not currently used in this project
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.vscode-test/
+.idea/
+.zed/
+.cursor/
+.windsurf/
+.claude/
+.codex/
+.gemini/
+.qwen/
+.opencode/
+.amp/
+.omp/
+.crush/
+.goose/
+.cline/
+.clinerules/
+.roo/
+.continue/
+.serena/
+.aider*
+.kilocode/
+.kilo/
 .pi/
-
-# PI Lens cache/index (generated)
 .pi-lens/
-
-# FreeBuff worktrees/cache (generated, huge)
 .freebuff/
+.agents/
+
+# Harness-local MCP config (paths/tokens for local servers; negate if you
+# ever want to commit a shared one)
+.mcp.json
+
+# OpenSpec (generated)
+.openspec/
+openspec/
+
+# Fallow output (generated)
+.fallow/
 
 # Graphify output (generated)
 graphify-out/
@@ -49,8 +76,14 @@ graphify-out/
 !.env.sample
 !.env.*.example
 
-# macOS
+# OS files
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# Fallow output (generated)
-.fallow/
+# Local secrets / key material (slim safety net; the full packaging block
+# lives in .vscodeignore)
+*.pem
+*.key
+*.p12
+*.pfx

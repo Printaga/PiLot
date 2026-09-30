@@ -2,12 +2,14 @@
 
 ## Commands
 
+- Install: `pnpm install` (CI uses Node 24 and `pnpm install --frozen-lockfile`; use the pnpm version in `package.json`)
 - Build (webview + extension bundle): `pnpm run build`
 - Compile extension TS: `pnpm run compile`
 - Check (compile + webview svelte-check): `pnpm run check`
 - Test (compile + VS Code integration suite): `pnpm test` (alias: `test:e2e`)
 - Unit tests (plain Node, no VS Code host): `pnpm run test:unit`
 - Webview component tests (plain Node + jsdom, mounts real Svelte components): `pnpm run test:webview`
+- Run one Mocha file in either lane: `MOCHA_TEST_FILE=unit/git-commit-message.test.js pnpm run test:unit` (suite-relative path of the compiled `.js`)
 - Lint (extension TS + Svelte webview): `pnpm run lint` / `pnpm run lint:fix`
 - Format (Prettier): `pnpm run format` / `pnpm run format:check`
 - Fallow: `pnpm run fallow:review` (advisory) / `pnpm run fallow:audit` (changed-code gate)
@@ -18,27 +20,29 @@
 
 ## Verification policy
 
-| Change | Required feedback |
-| ------------------- | --------------------------------------------------------------------- || Any code change | `pnpm verify` (check, lint, format:check, test:unit, test:webview, fallow:audit) |
-| UI/runtime behavior | `pnpm verify:full` (verify + build + VS Code integration suite) |
-| Before commit | Husky pre-commit runs lint-staged (Prettier + ESLint on staged files) |
-| Before completion | All required checks pass; never declare done with known failures |
+| Change              | Required feedback                                                                |
+| ------------------- | -------------------------------------------------------------------------------- |
+| Any code change     | `pnpm verify` (check, lint, format:check, test:unit, test:webview, fallow:audit) |
+| UI/runtime behavior | `pnpm verify:full` (verify + build + VS Code integration suite)                  |
+| Before commit       | Husky pre-commit runs lint-staged (Prettier + ESLint on staged files)            |
+| Before completion   | All required checks pass; never declare done with known failures                 |
 
-- After a targeted edit, run the narrowest relevant check first, then `pnpm verify`; use `pnpm verify:full` for webview/UI or release-facing changes.
+- After a targeted code edit, run the narrowest relevant check first, then `pnpm verify`; use `pnpm verify:full` for webview/UI or release-facing changes.
+- For documentation-only edits, check affected Markdown with Prettier and run `git diff --check`.
 - `src/webview/` is type-checked only by `svelte-check` (part of `pnpm run check`); esbuild/Vite bundling does not type-check it.
-- `test:unit` runs the Mocha suites under plain Node against the host-independent VS Code facade (`src/test/mocks/vscode-facade.ts` via `scripts/run-node-tests.mjs`); `test:e2e` runs the same suites inside a real VS Code host — behavior differences between the two are harness gaps worth fixing at the facade, not the tests.
+- `test:unit` runs the Mocha suites under plain Node against the host-independent VS Code facade (`src/test/mocks/vscode-facade.ts` via `scripts/run-node-tests.mjs`); `test:e2e` runs the same suites inside a real VS Code host — behavior differences between the two are harness gaps worth fixing at the facade, not the tests. Host-only `realhost-*` suites self-skip in the plain-Node lane.
 - `test:webview` mounts real Svelte 5 components in jsdom (no bundler): specs live in `src/test/webview/`, compiled on the fly by `scripts/webview-test-loader.mjs`. Fix webview component gaps in the component/test, not the loader — the loader is generic harness, not behavior.
-- The Fallow audit gates changed code only (`new-only` attribution, base = `origin/main` or `$FALLOW_BASE_REF`). Inherited findings are baseline debt: fix opportunistically when touching that code, never hide them with blanket disables.
+- The Fallow audit gates changed code only (`new-only` attribution, base = `$FALLOW_BASE_REF`, the repo's default branch, or `origin/main`). Inherited findings are baseline debt recorded in `fallow-baselines/`: fix opportunistically when touching that code, never hide them with blanket disables.
 - Do not weaken checks (`|| true`, broad `eslint-disable`, ignored diagnostics) and do not convert failures into passes; distinguish real defects from environmental failures honestly.
 - Formatting is Prettier-owned: tabs/4 in extension sources (`src/**`), 2 spaces in `src/webview/**`, JSON at 2 spaces. `.editorconfig` mirrors this; do not hand-format.
 
 ## Tech Stack
 
 - VS Code extension targeting `^1.85.0`
-- TypeScript `6.0.3` with NodeNext/ESM-style resolution for extension sources
-- Svelte `5.56.2` + Vite `8.0.16` for the webview UI
-- ESLint `10.4.1`, esbuild `0.28.0`, Mocha `11.7.6`, `@vscode/test-electron` `2.5.2`
-- Runtime dependency: `@earendil-works/pi-coding-agent` `^0.84.2` devDependency (types + tests), resolved at runtime from the user's globally installed PI CLI via `src/loader.cjs`
+- TypeScript `~6.0.3` with NodeNext/ESM-style resolution for extension sources
+- Svelte `^5.56.9` + Vite `^8.2.2` for the webview UI
+- ESLint `^10.8.1`, esbuild `^0.28.2`, Mocha `^12.0.1`, `@vscode/test-electron` `^3.1.0`
+- PI SDK: `@earendil-works/pi-coding-agent` is a devDependency for types and tests; `src/loader.cjs` resolves it from the user's globally installed PI CLI at runtime
 - Package manager: `pnpm@11.8.0`
 
 ## Project Structure
@@ -55,19 +59,22 @@
 - `src/footer-manager.ts` — status bar footer data (cwd, git branch, session name)
 - `src/voice-manager.ts` — dictation lifecycle, model download, audio streaming
 - `src/binary-service.ts` — shell command execution, git branch resolution
+- `src/git-extension.ts` — minimal local typings/bridge for the built-in `vscode.git` API
+- `src/git-commit-message.ts` — staged-diff commit-message drafting via PI print mode (read-only; never touches git state)
 - `src/model-registry-handler.ts` — model list fetching and caching
 - `src/package-manager.ts` — PI package install/update/remove operations
 - `src/update-checker.ts` — extension update notification and changelog display
 - `src/commands/index.ts` — registered VS Code command handlers
+- `src/commands/diagnostics.ts` — diagnostics output channel, bounded in-memory log buffer, export helpers
 - `src/utils/native-addons.ts` — native addon ABI mismatch detection and recovery
 - `src/utils/shell.ts` — cross-platform shell helpers
 - `src/protocol/types.ts` — shared host/webview message type definitions
-- `src/webview/` — Svelte app (App.svelte + 21 components, entry `main.ts`), types, styles
-- `src/test/` — VS Code integration runner plus unit tests (18 test files under `suite/unit/`)
-- `scripts/` — install-time patching utilities
-- `patches/` — checked-in patches applied during `postinstall`
+- `src/webview/` — Svelte app (App.svelte + 23 components, entry `main.ts`), types, styles
+- `src/test/` — Mocha suites: `suite/unit/` (21 host-independent files), `suite/realhost-*.test.ts` (VS Code host-only integration), `webview/` (jsdom component specs), `mocks/` (`vscode-facade.ts`/`vscode-shim.ts`, `pi-sdk-mocks.ts`, `session-mock.ts`), `runTest.ts` (Electron host runner)
+- `scripts/` — verification and test orchestration (`verify.mjs`, `run-node-tests.mjs`, `run-e2e.mjs`, `run-webview-tests.mjs`, `fallow-audit.mjs`, `dl-vscode.mjs`) and install-time patching (`postinstall-patch.mjs`)
+- `fallow-baselines/` — checked-in Fallow baselines (dead code, dupes, health) so inherited main debt never gates new changes
 - `media/` — icons, screenshots, and bundled voice binaries
-- `.kilo/plans/` — internal planning notes, not runtime source of truth
+- `.github/workflows/ci.yml` — CI runs the same chain as `pnpm verify:full` (build before test stages; xvfb on Linux)
 - Root config: `esbuild.config.mjs`, `eslint.config.mjs`, `svelte.config.js`, `tsconfig.json`, `tsconfig.test.json`, `tsconfig.webview.json`, `vite.webview.config.mts`, `pnpm-workspace.yaml`
 
 ## Related Docs
@@ -76,17 +83,17 @@
 - [CHANGELOG.md](./CHANGELOG.md) — release history
 - [TODO.md](./TODO.md) — tracked feature/bug backlog
 - [media/voice/README.md](./media/voice/README.md) — platform/runtime notes for bundled dictation helpers
-- [skill-management-gui.md](./skill-management-gui.md) — planning document only, not implementation truth
 
 ## Conventions
 
 - Use `pnpm` exclusively; treat `pnpm-lock.yaml` as the source of truth for versions
 - Keep webview-only code inside `src/webview/`; root TS compilation excludes it and Vite builds it separately into `dist/webview/`
 - Keep extension settings and PI CLI/TUI settings synchronized through `src/pi-agent-provider.ts`
-- Preserve the message bridge contract: host messages flow through `PiAgentProvider.notifyWebview(...)`, webview messages go through `window.vscode.postMessage(...)`, and new message types must be wired on both sides
+- When changing a bridge message, update `src/message-handler.ts`, `src/protocol/types.ts`, and the webview consumer as needed. Host notifications use `PiAgentProvider.notifyWebview(...)` or the existing `webview.postMessage(...)` paths; webview messages use `window.vscode.postMessage(...)`.
 - `getWebviewContent()` owns VS Code-safe asset rewriting; do not weaken CSP or webview resource restrictions
 - Use Svelte 5 runes in the webview; top-level state lives in `App.svelte` rather than shared stores
 - Test conventions: Mocha TDD style (`suite`/`test`, not `describe`/`it`), `node:assert` for assertions, mocks via `globalThis.vscode` and `src/test/mocks/` factories
+- Child-process arguments that carry settings, paths, or user input must be shell-quoted (`quoteShellArg`) or passed on stdin — repository-derived bytes always travel via stdin, never through the shell. See the header of `src/git-commit-message.ts`; `src/test/suite/unit/argv-injection-guard.test.ts` guards this invariant
 - Lint conventions: ESLint flat config (`eslint.config.mjs`) covers TS and `.svelte`; Svelte files need `tseslint.parser` as `parserOptions.parser`; `no-undef` and `svelte/no-at-html-tags` are intentionally off for `.svelte` (svelte-check + webview CSP cover them)
 - Formatting is enforced by Prettier + prettier-plugin-svelte; Husky pre-commit runs lint-staged as a safety net, not a substitute for `pnpm verify`
 
@@ -94,29 +101,21 @@
 
 - `pnpm run webview:dev` is a Vite watch build for the webview, not the extension-host watcher
 - `pnpm run webview:serve` uses port `5173` with `strictPort: true`; it fails if that port is busy
-- Tests expect a VS Code executable or `VSCODE_PATH`; see `src/test/runTest.ts`
-- `postinstall` patches files under `node_modules` via `scripts/postinstall-patch.mjs`; reinstalling dependencies can change patched runtime behavior
+- `pnpm test` (e2e) needs a real VS Code: it picks a platform desktop install or honors `VSCODE_PATH`; download a pinned build with `node scripts/dl-vscode.mjs [version]`. A host abort after a fully green run still counts as passing — the runner treats a green `test-results.log` as authoritative and retries each file once
+- `postinstall` patches `@earendil-works/pi-coding-agent` under `node_modules` in place via `scripts/postinstall-patch.mjs` (`.agents/skills/` discovery mode plus a stub for the corrupt upstream `photon.js`); reinstalling dependencies re-applies the patches
+- Edit source files rather than generated `dist/`, `dist-tsc/`, `node_modules/`, or tool output.
 - esbuild leaves PI runtime packages external; bundled output still depends on the PI CLI/runtime being installed and configured
 - `fallow init` regenerates `.fallowrc.json` with a default `entry` list (`src/index.ts`) that does not match this repo; keep the generated file's entry override removed so Fallow auto-detects entries from `package.json`
 - Linux voice helpers may require system libraries noted in [media/voice/README.md](./media/voice/README.md)
-
-## Git Workflow
-
-- No branch naming, commit convention, or PR template is documented in-repo
-- Follow the user's instructions and nearby history instead of inventing a workflow
-- Public contribution guidance lives in [README.md](./README.md); release history is maintained in [CHANGELOG.md](./CHANGELOG.md)
 
 ## Agent Platforms
 
 - `AGENTS.md` is the only checked-in agent instruction file in this repo
 - No `.github/copilot-instructions.md`, `.github/instructions/`, `.claude/`, `.cursor/`, `.windsurf/`, or `.github/prompts/` files are present
-- `.mcp.json` exists but currently defines no checked-in MCP servers (`{"mcpServers": {}}`)
-- `src/test/mocks/pi-sdk-mocks.ts` — mock factories for PI SDK internals (memento, binary service, etc.)
-- `src/test/mocks/session-mock.ts` — mock session/runner/resource-loader factories
+- No `.mcp.json` is checked in
 
 ## Boundaries
 
-- ✅ Always: Refactor files under `src/`, improve the Svelte UI under `src/webview/`, and add focused lint/test coverage when it materially reduces risk
 - ⚠️ Ask first: Change `package.json` contributions, add dependencies, alter packaging/publishing flow, or change the public configuration surface
 - 🚫 Never: Commit secrets, bypass PI settings sync, weaken webview CSP/resource restrictions, or treat planning notes as authoritative over code
 

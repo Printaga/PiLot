@@ -2,204 +2,142 @@
 
 ![PiLot Studio logo](media/icon.png)
 
-**Your AI coding companion for VS Code**
+**A VS Code sidebar for the PI coding agent.**
 
-Bring the power of PI directly into your editor with a modern, intuitive interface. Chat with your AI assistant, navigate your coding history, and supercharge your workflow—all without leaving VS Code.
+Chat about your workspace, let PI use coding tools, revisit branched sessions, and manage models and packages without leaving your editor.
 
 [![Release](https://img.shields.io/github/v/release/Printaga/PiLot?label=Release)](https://github.com/Printaga/PiLot/releases/latest) [![GitHub Repo stars](https://img.shields.io/github/stars/Printaga/PiLot)](https://github.com/Printaga/PiLot)
 
 Official website: **[pivscode.com](https://pivscode.com/)**
 
-Works on Windows, Linux, and macOS.
+Works with VS Code 1.85 or newer on Windows, Linux, and macOS.
 
 ![PiLot Studio in action](media/screenshot.png)
 
----
+## Get started
 
-## Work smarter, not harder
+Install PI separately from the extension: PiLot Studio loads the runtime from your PI installation. The PI package used by this checkout requires Node.js 22.19 or newer and npm.
 
-PiLot Studio brings the PI coding agent into VS Code so you can:
+1. Install the PI CLI, then run `pi --version` in VS Code's integrated terminal to check that VS Code can find it:
 
-- **Code faster** — Let AI handle boilerplate, refactoring, and repetitive tasks
-- **Understand any codebase** — Get instant explanations and project analysis
-- **Stay in flow** — No context switching between your editor and browser
-- **Work your way** — Supports multiple AI providers with model selection and customizable behavior
+    ```bash
+    npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+    pi --version
+    ```
 
----
+2. Install [PiLot Studio from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=PrintagaPublishingLLC.pilots-studio) and open a folder in VS Code.
+3. Open the PiLot Studio Activity Bar view, or press `Ctrl+Shift+Alt+P` (`Cmd+Shift+Alt+P` on macOS).
+4. Open the **Providers** tab (key icon), add an API key or sign in where supported, then choose a model in the chat header.
+5. In the chat input, ask “Summarize this workspace and identify its main entry point,” then press Enter. The reply appears in the chat panel.
 
-## Key Features
+PI sends your prompt and any included workspace content to the selected model endpoint. See [Privacy and network use](#privacy-and-network-use) before attaching sensitive files.
 
-### 💬 AI Chat, right in your editor
+## Key features
 
-Interactive conversations with PI in a native VS Code panel. Ask questions, get code explanations, and iterate without breaking focus.
+### 💬 AI chat, right in your editor
+
+Ask questions and request edits in a VS Code panel. Paste files, drag in images, or type `@` to mention workspace files. Optional automatic context includes the active editor, selection, and diagnostics.
 
 ### 🌳 Navigate your history
 
-A conversation tree lets you branch, revisit, and organize past sessions. Pick up where you left off or explore different approaches.
+A conversation tree lets you branch, revisit, and organize past sessions.
 
 ### 🤖 Your choice of AI
 
-Supports Anthropic, OpenAI, Google, and compatible providers, with quick model cycling and adjustable thinking levels.
+Use Anthropic, OpenAI, Google, or a compatible provider. Switch models and adjust thinking levels in the UI.
 
 ### 🎙️ Voice dictation
 
-Talk to your AI with built-in speech-to-text powered by Whisper. Works completely offline—your audio never leaves your device.
+Dictate prompts with local speech-to-text. The model downloads once; transcription then runs on your device.
 
 ### 🔧 Full control over tools
 
-Enable, disable, or restrict PI's capabilities per session. Fine-tune what the AI can and can't do.
+Choose a tool preset such as read-only review, no tools, or a custom allowlist.
 
 ### 📦 Extend with packages
 
-Install extensions, skills, and prompt templates from the PI community to make PI even more powerful.
+Manage PI packages, extensions, skills, and prompt templates from the sidebar.
 
-### 📎 Smart context
+### 📎 Chat and Git helpers
 
-Paste files, drag-and-drop images, or type `@` to mention files in your workspace. The AI automatically understands what you're working on.
+Render Mermaid diagrams, search chat with `Ctrl+F`, and inspect the active session's system prompt. In Source Control, **Generate Commit Message** drafts a message from staged changes and fills the commit box for your review; it does not commit.
 
----
+## Recent changes
 
-## Getting Started in 5 minutes
+<details>
+<summary>Highlights from versions 2.2–2.7</summary>
 
-### 1. Install PI
+- **2.7.0** — System Prompt tab for the active session
+- **2.6.0** — Generate Commit Message from staged changes
+- **2.5.0** — PI Light Mode for local LLM setups
+- **2.4.0** — Mermaid diagrams in chat
+- **2.2.0** — Chat search with `Ctrl+F`
 
-Follow the [PI installation guide](https://pi.dev) to set up the `pi` CLI on your machine.
+</details>
 
-### 2. Install PiLot Studio
+For the full release history, see the [changelog](CHANGELOG.md).
 
-Search for **"PiLot Studio"** in the VS Code Extensions marketplace and click Install.
-
-### 3. Add your API key
-
-Set your AI provider API key as an environment variable:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-# or
-export OPENAI_API_KEY=sk-...
-```
-
-You can also configure this through the PiLot Studio settings panel.
-
-### 4. Open PiLot Studio
-
-Press `Ctrl+Shift+Alt+P` (`Cmd+Shift+Alt+P` on macOS), then start chatting.
-
-**That's it!** You're ready to code with AI.
-
----
-
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut           | Action                 |
 | ------------------ | ---------------------- |
 | `Ctrl+Shift+Alt+P` | Open PiLot Studio      |
 | `Ctrl+Shift+I`     | Focus chat input       |
+| `Ctrl+F`           | Search chat            |
 | `Ctrl+Shift+Alt+N` | New session            |
 | `Ctrl+Shift+;`     | Toggle voice dictation |
 | `Ctrl+Shift+A`     | Add file to chat       |
 
-(macOS: use `Cmd` instead of `Ctrl`)
+On macOS, use `Cmd` instead of `Ctrl`. **New session** and **Add file to chat** require the PiLot sidebar to have focus; chat search requires the chat view or editor to have focus.
 
----
+## Editor and Explorer commands
 
-## Right-Click Commands
-
-No need to memorize keyboard shortcuts—just right-click in VS Code:
-
-- **Explain Code with PI** — Highlight code, right-click, and get an instant explanation
-- **Refactor Code with PI** — Select code and let AI suggest improvements
-- **Analyze Project with PI** — Right-click any folder to analyze your entire project
-- **Add File to Chat** — Attach any file to your conversation with one click
-
----
+- Select text in an editor and right-click to **Explain Code with PI** or **Refactor Code with PI**.
+- Right-click a folder in Explorer to **Analyze Project with PI**.
+- Right-click inside a file editor to **Add File to Chat**.
+- Use the sparkle button in a Git repository's Source Control title bar to **Generate Commit Message** from staged changes. Review the result in the commit box before committing.
 
 ## Configuration
 
-Everything is configurable under `pi-agent.*` settings. Key options:
+Search for `pi-agent` in VS Code Settings. These are some useful settings; the Settings UI lists the rest.
 
-### Runtime
-
-- **Binary path** — Custom location for the `pi` executable
-- **Agent directory** — Where PI stores its data
-- **Auto-update** — Keep PI up to date automatically
-- **Offline mode** — Use PI without network access
-
-### Session
-
-- **Thinking level** — Control how deep PI reasons (off → minimal → low → medium → high → xhigh → max)
-- **Auto-compact** — Automatically manage conversation context
-- **Auto-retry** — Retry on transient errors automatically
-
-### Tools
-
-- **Tool preset** — Restrict what PI can do (default, review, none, or custom)
-
-### Context
-
-- **Auto-attach editor context** — PI automatically sees what you're working on
-- **Include diagnostics** — Surface errors and warnings to the AI
-- **Include git status** — Give PI awareness of recent changes
-
-### Dictation
-
-- **Enable microphone** — Toggle voice input on or off
-- **Choose model** — Switch between lightweight and high-accuracy Whisper models
-
----
+| Setting                           | Default   | What it controls                                                              |
+| --------------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `pi-agent.binaryPath`             | `pi`      | Command name or absolute path for the PI executable.                          |
+| `pi-agent.agentDir`               | Empty     | PI data directory; empty uses `~/.pi/agent`. Reload the window after changes. |
+| `pi-agent.toolPreset`             | `default` | Normal tools, read-only `review`, `none`, or a `custom` allowlist.            |
+| `pi-agent.context.autoAttach`     | `true`    | Include active editor context with each prompt.                               |
+| `pi-agent.context.includeGit`     | `false`   | Include Git branch and change status in automatic context.                    |
+| `pi-agent.lightMode`              | `false`   | Reduce loaded resources and tools for local LLM setups.                       |
+| `pi-agent.offline`                | `false`   | Disable PI startup network operations; model requests may still use network.  |
+| `pi-agent.voice.enabled`          | `true`    | Show and enable local dictation.                                              |
+| `pi-agent.git.commitMessageModel` | Empty     | Model for commit-message drafts; empty uses the normal PI model.              |
 
 ## Troubleshooting
 
-**PI not detected?**
-
-- Ensure `pi` is installed and available on your PATH
-- Set `pi-agent.binaryPath` if it's in a non-standard location
-
-**API requests failing?**
-
-- Verify your API key is set and correct (environment variable or PI config)
-- Restart the extension after updating keys
-
-**Dictation unavailable?**
-
-- Make sure microphone access is enabled for VS Code in your OS settings
-- Enable `pi-agent.voice.enabled` in settings
-
-**Sessions look wrong?**
-
-- Check that `pi-agent.agentDir` points to the correct directory
-- Restart the extension after changing agent directories
-
----
+- **PI not detected:** Run `pi --version` in a VS Code terminal. If it fails, install PI or set `pi-agent.binaryPath` to the executable. Restart VS Code if its PATH has changed.
+- **No model response:** Check the selected model and its credentials in the **Providers** tab. Provider API keys can also come from PI's environment or auth configuration.
+- **Dictation unavailable:** Check VS Code's microphone permission and `pi-agent.voice.enabled`. The first use needs a model download. On Linux, see the [voice helper platform notes](media/voice/README.md) for native library requirements.
+- **Sessions in the wrong location:** Check `pi-agent.agentDir` and reload the VS Code window after changing it.
 
 ## Development
 
-Built with Svelte 5, Vite 8, and TypeScript 6.
+Development uses Node.js 24 and the `pnpm` version declared in [package.json](package.json). The extension is built with Svelte 5, Vite 8, and TypeScript 6.
 
 ```bash
-# Setup
 pnpm install
-
-# Build everything
 pnpm run build
-
-# Watch mode for development
-pnpm run webview:dev
+pnpm verify
 ```
 
-Or run the full test suite with `pnpm test`.
+`pnpm verify` runs type checks, lint, formatting, unit tests, webview component tests, and the changed-code audit. `pnpm verify:full` also builds the extension and runs VS Code integration tests; it needs a desktop VS Code installation or `VSCODE_PATH`. `pnpm run webview:dev` watches the webview build.
 
----
+## Privacy and network use
 
-## Privacy First
-
-PiLot Studio respects your privacy:
-
-- **Voice dictation runs completely offline** — your audio never leaves your machine
-- **Your API keys stay yours** — managed by PI, not by us
-- **No telemetry** unless you explicitly enable diagnostics
-
----
+- Dictation downloads its model on first use, then records and transcribes audio locally.
+- PI sends chat prompts and included file content to the selected model endpoint, which may be a remote provider or a local server.
+- `pi-agent.offline` disables startup network operations, not model requests. Installing packages and checking for updates also use network access.
+- Optional `pi-agent.diagnostics.enabled` writes troubleshooting details to a local VS Code output channel. It is off by default.
 
 ## Contributing
 
@@ -208,18 +146,12 @@ Got an idea or found a bug?
 - Open an issue at [github.com/Printaga/PiLot/issues](https://github.com/Printaga/PiLot/issues)
 - Submit a pull request with improvements
 
-We welcome all contributions!
-
----
-
 ## Links
 
 - Website: [pivscode.com](https://pivscode.com/)
 - Source: [github.com/Printaga/PiLot](https://github.com/Printaga/PiLot)
 - VS Code Marketplace: [PiLot Studio](https://marketplace.visualstudio.com/items?itemName=PrintagaPublishingLLC.pilots-studio)
 - Open VSX: [PrintagaPublishingLLC.pilots-studio](https://open-vsx.org/extension/PrintagaPublishingLLC/pilots-studio)
-
----
 
 ## License
 
