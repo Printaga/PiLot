@@ -2653,7 +2653,7 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(msg.data.prompt, "You are a test agent.");
 		});
 
-		test("sendSystemPrompt is a no-op without a session", () => {
+		test("sendSystemPrompt answers an empty prompt without a session", () => {
 			const provider = buildProvider();
 			(provider as any).isInitialized = true;
 
@@ -2662,11 +2662,12 @@ suite("PiAgentProvider", () => {
 
 			provider["sendSystemPrompt"]();
 
-			assert.strictEqual(
-				messages.find((m: any) => m.type === "system-prompt"),
-				undefined,
-				"no system-prompt message should be sent without a session",
-			);
+			// The webview gates its request on session resources, which can exist
+			// before a session starts — a silent no-answer stranded the panel until
+			// its backstop timer fired, so the host now replies explicitly.
+			const msg = messages.find((m: any) => m.type === "system-prompt");
+			assert.ok(msg, "an empty system-prompt reply should be sent without a session");
+			assert.strictEqual(msg.data.prompt, "", "the reply must carry an empty prompt");
 		});
 
 		test("sendSystemPrompt survives a throwing prompt getter", () => {

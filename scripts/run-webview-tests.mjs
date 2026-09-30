@@ -34,11 +34,13 @@ for (const global of ["suite", "test", "setup", "teardown", "suiteSetup", "suite
 }
 
 try {
+	await import("../src/test/webview/messages-guard.test.mjs");
 	await import("../src/test/webview/message-bubble.test.mjs");
 	await import("../src/test/webview/chat-search.test.mjs");
 	await import("../src/test/webview/settings-commit-model.test.mjs");
 	await import("../src/test/webview/system-prompt-panel.test.mjs");
 	await import("../src/test/webview/pi-packages-panel.test.mjs");
+	await import("../src/test/webview/session-tree.test.mjs");
 } catch (err) {
 	console.error("[run-webview-tests] failed to load a webview spec:", err);
 	process.exit(1);

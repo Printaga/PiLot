@@ -3198,7 +3198,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 	 * the model actually receives. Unavailable before a session exists.
 	 */
 	sendSystemPrompt(): void {
-		if (!this.session) return;
+		// Answer even without a live session. The panel gates its request on
+		// session resources (which can exist before a session starts), and the
+		// old silent `return` left it waiting on a reply that never came — it
+		// only recovered via its backstop timer. An empty prompt makes the empty
+		// state immediate and explicit instead.
+		if (!this.session) {
+			this.notifyWebview({ type: "system-prompt", data: { prompt: "" } });
+			return;
+		}
 		try {
 			this.notifyWebview({
 				type: "system-prompt",

@@ -6,11 +6,13 @@
 // panel reads `data.installed` through parseHostMessage — which (before the fix
 // allowed arrays through) collapsed the older bare-array payload to {}. The
 // panel then rendered "No packages installed" even though packages WERE
-// installed. These tests pin the wrapped shape AND the legacy bare-array
-// tolerance so neither side can silently blank the list again.
+// installed. A sender guard that trusted only the webview's own window broke
+// the same list again (VS Code forwards host messages from the PARENT frame),
+// so the delivery helper below posts from the host page and a test pins that an
+// unrelated frame cannot blank the list.
 
 import * as assert from "node:assert";
-import { domWindow } from "./test-dom-setup.mjs";
+import { domWindow, hostMessageSource } from "./test-dom-setup.mjs";
 // Svelte loader hooks are registered by the runner before this spec imports.
 
 const { render, cleanup } = await import("@testing-library/svelte");
@@ -36,11 +38,11 @@ const PKG = {
 const flush = () => new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 
 /** Deliver an `installed` message the way the extension host would. */
-function pushInstalled(data) {
+function pushInstalled(data, source = hostMessageSource) {
 	globalThis.window.dispatchEvent(
 		new domWindow.MessageEvent("message", {
 			data: { type: "installed", data },
-			source: domWindow,
+			source,
 		}),
 	);
 }
@@ -97,5 +99,19 @@ suite("PiPackagesPanel installed-list contract", () => {
 		const names = [...mounted.container.querySelectorAll(".package-name")];
 		assert.strictEqual(names.length, 1, "only well-formed entries render");
 		assert.ok(names[0].textContent.includes("pi-lean-ctx"));
+	});
+
+	test("a message from an unrelated frame cannot replace the installed list", async () => {
+		const mounted = render(PiPackagesPanel, {});
+		pushInstalled({ installed: [PKG] });
+		await flush();
+
+		pushInstalled({ installed: [] }, { name: "unrelated-frame" });
+		await flush();
+
+		assert.ok(
+			mounted.container.querySelector(".package-name")?.textContent.includes("pi-lean-ctx"),
+			"only the host page may change the visible package list",
+		);
 	});
 });

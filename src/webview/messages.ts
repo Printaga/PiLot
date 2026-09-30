@@ -14,9 +14,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * True for the senders a host message may legitimately come from.
+ *
+ * VS Code delivers host messages through the PARENT frame, never this window:
+ * the webview host page owns an inner `#active-frame` iframe (this window) and
+ * forwards every host message into it with
+ * `contentWindow.postMessage(message, origin)`, so the `message` event carries
+ * `source === window.parent`. A source of `window` only happens for same-window
+ * dispatches (tests, other scripts in this document) and `null` for events
+ * constructed in-process.
+ *
+ * An earlier hardening pass rejected everything but `window`, which silently
+ * dropped EVERY real host message: the packages, sessions, and system-prompt
+ * panels all kept rendering their empty state while the host was answering
+ * correctly. Only a genuinely foreign sender (a sibling/opener frame) is
+ * rejected here; the per-field guards in each consumer stay the real
+ * validation boundary.
+ */
+function isTrustedMessageSource(source: MessageEvent["source"]): boolean {
+  if (!source) return true;
+  if (source === window) return true;
+  return source === window.parent;
+}
+
+/**
  * Runtime shape guard for messages posted from the extension host.
  * Returns a normalized `{ type, data }` view, or null when the event is not a
- * well-formed host message (wrong envelope or a primitive payload).
+ * well-formed host message (foreign sender, wrong envelope, primitive payload).
  *
  * `data` may be an object or an array — some host broadcasts (e.g. `installed`,
  * `sessions-list`) have historically carried a bare list, and collapsing an
@@ -27,11 +51,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseHostMessage(
   event: MessageEvent,
 ): { type: string; data: Record<string, unknown> | unknown[] } | null {
+  if (!isTrustedMessageSource(event.source)) return null;
   const envelope: unknown = event.data;
-  // Defense-in-depth against forged events: reject anything not dispatched by
-  // this window itself (the host bridge posts with the webview window as
-  // source; a devtools snippet or injected frame typically does not).
-  if (typeof event.source !== "undefined" && event.source !== window) return null;
   if (!isRecord(envelope) || typeof envelope.type !== "string") return null;
   const data: unknown = envelope.data;
   return { type: envelope.type, data: isRecord(data) || Array.isArray(data) ? data : {} };

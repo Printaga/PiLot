@@ -7,7 +7,7 @@
 // and keep degrading gracefully when no session prompt is available.
 
 import * as assert from "node:assert";
-import { domWindow } from "./test-dom-setup.mjs";
+import { domWindow, hostMessageSource } from "./test-dom-setup.mjs";
 // Svelte loader hooks are registered by the runner before this spec imports.
 
 const { render, cleanup } = await import("@testing-library/svelte");
@@ -20,11 +20,11 @@ const PROMPT = "You are a helpful coding agent.";
 const flush = () => new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 
 /** Deliver a `system-prompt` message the way the extension host would. */
-function pushSystemPrompt(prompt) {
+function pushSystemPrompt(prompt, source = hostMessageSource) {
 	globalThis.window.dispatchEvent(
 		new domWindow.MessageEvent("message", {
 			data: { type: "system-prompt", data: { prompt } },
-			source: domWindow,
+			source,
 		}),
 	);
 }
@@ -68,6 +68,31 @@ suite("SystemPromptPanel", () => {
 		assert.ok(meta, "metadata line should render");
 		assert.ok(meta.textContent.includes("chars"), "should report char count");
 		assert.ok(meta.textContent.includes("lines"), "should report line count");
+	});
+
+	test("renders the reply to a live session's request (host-page sender)", async () => {
+		// A live session means session resources; the panel then asks the host
+		// for the prompt and renders whatever it answers. VS Code forwards that
+		// reply from the parent frame, which an earlier guard rejected outright.
+		const mounted = render(SystemPromptPanel, { sessionResources: { sessionId: "s-1" } });
+		pushSystemPrompt(PROMPT);
+		await flush();
+
+		const pre = mounted.container.querySelector(".prompt-view");
+		assert.ok(pre, "a live-session reply must render the prompt");
+		assert.strictEqual(pre.textContent, PROMPT);
+	});
+
+	test("a message from an unrelated frame cannot fake a prompt", async () => {
+		const mounted = render(SystemPromptPanel, {});
+		pushSystemPrompt("forged", { name: "unrelated-frame" });
+		await flush();
+
+		assert.strictEqual(
+			mounted.container.querySelector(".prompt-view"),
+			null,
+			"only the host page may supply the system prompt",
+		);
 	});
 
 	test("renders an empty state when no prompt is available", async () => {
