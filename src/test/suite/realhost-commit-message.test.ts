@@ -138,11 +138,29 @@ suite("REALHOST commit message wiring", () => {
 
 		// The facade has no workspace-folder API, so the folder is only added in the
 		// real host. The host-only tests skip in the other lane anyway.
+		//
+		// DIAGNOSTIC: on CI the git API reported repositories=[] forever, so this
+		// block now proves whether the folder actually entered the workspace.
+		// updateWorkspaceFolders returns false when the workbench refuses the
+		// update (e.g. called before startup finished) — suspected on the slow
+		// CI runner — so retry until the folder is really present.
 		if (!isFacadeLane()) {
-			vscode.workspace.updateWorkspaceFolders(0, null, {
-				uri: vscode.Uri.file(candidate),
-				name: "commit-message-repo",
-			});
+			const folderUri = vscode.Uri.file(candidate);
+			const foldersNow = () =>
+				(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+			console.log(`[diag] workspace folders before add: ${JSON.stringify(foldersNow())}`);
+			for (let attempt = 1; attempt <= 20; attempt++) {
+				if (foldersNow().includes(candidate)) break;
+				const accepted = vscode.workspace.updateWorkspaceFolders(0, null, {
+					uri: folderUri,
+					name: "commit-message-repo",
+				});
+				console.log(
+					`[diag] updateWorkspaceFolders attempt ${attempt} returned ${accepted}; folders now: ${JSON.stringify(foldersNow())}`,
+				);
+				if (foldersNow().includes(candidate)) break;
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
 		}
 
 		// Register the real command handlers once. If the extension under
@@ -230,7 +248,8 @@ suite("REALHOST commit message wiring", () => {
 				? (gitExt.isActive ? gitExt.exports : await gitExt.activate())?.getAPI?.(1)
 				: undefined;
 			const roots = (api?.repositories ?? []).map((r: any) => r.rootUri?.fsPath);
-			return `git API repository roots: ${JSON.stringify(roots)}`;
+			const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+			return `git API repository roots: ${JSON.stringify(roots)}; workspace folders: ${JSON.stringify(folders)}`;
 		} catch (error) {
 			return `git API dump failed: ${String(error)}`;
 		}
