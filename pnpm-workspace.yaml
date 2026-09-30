@@ -3,7 +3,10 @@ overrides:
   'js-yaml@<4.3.2': '4.3.2'
   # Security: GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8 (fast-uri < 3.1.6, high)
   #           GHSA-58mr-gqgx-xq4g (fast-uri 3.1.6, host confusion via unclosed bracket in the URI authority)
-  'fast-uri@<3.1.7': '3.1.7'
+  #           GHSA-hrr3-gc8f-f4qj (fast-uri < 3.1.8, inconsistent host case normalization)
+  'fast-uri@<3.1.8': '3.1.8'
+  # Security: GHSA-9rgm-9g3h-6x36 (devalue < 5.9.2, DoS via malformed input)
+  'devalue@<5.9.2': '5.9.2'
   # Security: qs DoS advisories (patched in 6.16.0, moderate)
   'qs@<6.16.0': '6.16.0'
   # Security: GHSA-q2hr-2g5m-vwhr (brace-expansion quadratic DoS, patched in 5.0.12)

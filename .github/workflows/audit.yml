@@ -1,0 +1,92 @@
+# Supply-chain gate: fail CI when any locked dependency has a known
+# vulnerability instead of waiting for Dependabot to open an alert on main.
+#
+# Two independent scanners on purpose:
+#   - pnpm audit: the npm security advisory database (GitHub's database, the
+#     same source Dependabot uses — usually indexed within hours).
+#   - osv-scanner: OSV.dev, which often indexes new advisories earlier and
+#     covers gaps in the GitHub database.
+# Either scanner failing fails the job; both must pass to merge.
+name: Audit
+
+on:
+    push:
+        branches: [main]
+    pull_request: null
+    # Advisories can be published at any time; rescan the unchanged lockfile
+    # daily so main never rots between commits (like devalue 5.9.1, which was
+    # patched to 5.9.2 the same day it shipped).
+    schedule:
+        - cron: "20 4 * * *"
+    workflow_dispatch: null
+
+# Least privilege: read-only. No SARIF upload — a finding must fail the run,
+# not merely appear in the Security tab.
+permissions:
+    contents: read
+
+# Distinct prefix from ci.yml on purpose: concurrency groups are global per
+# repository, so a shared `ci-` group would make the two workflows cancel
+# each other on every push to main.
+concurrency:
+    group: audit-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    pnpm-audit:
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  # Read-only audit; never leave the job token in .git/config
+                  # where a later step could read it.
+                  persist-credentials: false
+
+            - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
+              with:
+                  # Read from packageManager in package.json (11.8.0) so the
+                  # toolchain can't drift from the lockfile.
+                  package_json_file: package.json
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+
+            # pnpm audit resolves the lockfile's dependency graph itself, so
+            # no node_modules install is needed. Unfiltered on purpose: in
+            # pnpm 11 the `--prod --dev` combination intersects to an EMPTY
+            # dependency set and always passes (verified locally against a
+            # tree with a known-critical advisory), silently hiding exactly
+            # what this job exists to catch.
+            - name: Audit lockfile against the npm advisory database
+              run: pnpm audit
+
+    osv-scan:
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  persist-credentials: false
+
+            # Release binary instead of `pnpm dlx`/npx so no install step can
+            # slip past the gate; the checksum file pins the exact bytes.
+            - name: Download osv-scanner (checksum-verified)
+              run: |
+                  version=v2.6.0
+                  case "$(uname -m)" in
+                      x86_64) asset=osv-scanner_linux_amd64 ;;
+                      aarch64) asset=osv-scanner_linux_arm64 ;;
+                      *) echo "Unsupported runner arch: $(uname -m)" >&2; exit 1 ;;
+                  esac
+                  base="https://github.com/google/osv-scanner/releases/download/${version}"
+                  curl -fsSL --retry 3 -o osv-scanner "${base}/${asset}"
+                  curl -fsSL --retry 3 -o SHA256SUMS "${base}/osv-scanner_SHA256SUMS"
+                  grep " ${asset}\$" SHA256SUMS | sha256sum -c -
+                  chmod +x osv-scanner
+
+            # Scans only pnpm-lock.yaml — the exact resolved tree Dependabot
+            # alerts on. Exit code 1 on any known vulnerability fails the job.
+            - name: Scan pnpm-lock.yaml against OSV.dev
+              run: ./osv-scanner --lockfile=pnpm-lock.yaml
