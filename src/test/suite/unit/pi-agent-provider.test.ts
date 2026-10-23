@@ -1,6 +1,11 @@
 import * as assert from "node:assert";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 import {
+	ModelRegistry,
+	ModelRuntime,
 	SessionManager,
 	DefaultResourceLoader,
 	type SessionManager as SessionManagerType,
@@ -232,6 +237,69 @@ function buildProvider(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/**
+ * Replace the agent-directory filesystem seams with an in-memory map so auth
+ * credential writes never touch the real home directory. `getAgentDir()` is
+ * stubbed to "/fake/agent-dir" by setupPiSdkMocks().
+ */
+function installMemoryAgentFs(initial: Record<string, string> = {}) {
+	const files = new Map<string, string>(Object.entries(initial));
+	const authPath = path.join("/fake/agent-dir", "auth.json");
+	const saved = {
+		existsFile: piAgentProviderInternals.existsFile,
+		readFile: piAgentProviderInternals.readFile,
+		writeFile: piAgentProviderInternals.writeFile,
+		renameFile: piAgentProviderInternals.renameFile,
+		mkdir: piAgentProviderInternals.mkdir,
+		unlinkFile: piAgentProviderInternals.unlinkFile,
+	};
+	piAgentProviderInternals.existsFile = (filePath: string) => files.has(filePath);
+	piAgentProviderInternals.readFile = async (filePath: string) => {
+		const value = files.get(filePath);
+		if (value === undefined) {
+			throw Object.assign(new Error(`ENOENT: ${filePath}`), { code: "ENOENT" });
+		}
+		return value;
+	};
+	piAgentProviderInternals.writeFile = async (filePath: string, data: string) => {
+		files.set(filePath, data);
+	};
+	piAgentProviderInternals.renameFile = async (from: string, to: string) => {
+		const value = files.get(from);
+		if (value === undefined) throw new Error(`ENOENT: ${from}`);
+		files.delete(from);
+		files.set(to, value);
+	};
+	piAgentProviderInternals.mkdir = async () => {};
+	piAgentProviderInternals.unlinkFile = async (filePath: string) => {
+		files.delete(filePath);
+	};
+	return {
+		files,
+		authPath,
+		/** Raw auth.json content (undefined when it has not been written). */
+		readRaw: () => files.get(authPath),
+		read: () => {
+			const raw = files.get(authPath);
+			return raw === undefined ? undefined : JSON.parse(raw);
+		},
+		/** Paths written through the temp-file + rename path. */
+		writtenPaths: () => [...files.keys()],
+		restore: () => Object.assign(piAgentProviderInternals, saved),
+	};
+}
+
+/** Keep model-list refresh off the real CLI/binary path for auth tests. */
+function stubModelListRefresh(provider: any) {
+	provider.modelRegistryHandler = {
+		refreshAvailableModels: async () => {},
+		getAvailableModels: () => [],
+		buildModelList: (m: any) => m,
+		getMergedModels: async () => [],
+		invalidateCliModelIdsCache: () => {},
+	};
+}
 
 /**
  * buildProvider() starts a background initialize(); let it settle before
@@ -1324,73 +1392,254 @@ suite("PiAgentProvider", () => {
 
 	suite("setApiKey / removeAuth", () => {
 		test("setApiKey calls ModelRuntime.setRuntimeApiKey and refreshes models", async () => {
-			const provider = buildProvider();
-			(provider as any).isInitialized = true;
+			const memoryFs = installMemoryAgentFs();
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
 
-			const setCalls: any[] = [];
-			(provider as any).modelRuntime = {
-				setRuntimeApiKey: async (provider: string, apiKey: string) => {
-					setCalls.push({ provider, apiKey });
-				},
-				removeRuntimeApiKey: async () => {},
-				refresh: async () => ({}),
-				getProviders: () => [],
-				getRegisteredProviderIds: () => [],
-			} as any;
+				const setCalls: any[] = [];
+				(provider as any).modelRuntime = {
+					setRuntimeApiKey: async (provider: string, apiKey: string) => {
+						setCalls.push({ provider, apiKey });
+					},
+					removeRuntimeApiKey: async () => {},
+					refresh: async () => ({}),
+					getProviders: () => [],
+					getRegisteredProviderIds: () => [],
+				} as any;
 
-			const refreshCalls: any[] = [];
-			(provider as any).modelRegistryHandler = {
-				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
-				},
-				getAvailableModels: () => [],
-				buildModelList: (m: any) => m,
-				getMergedModels: async () => [],
-				invalidateCliModelIdsCache: () => {},
-			} as any;
+				const refreshCalls: any[] = [];
+				(provider as any).modelRegistryHandler = {
+					refreshAvailableModels: async () => {
+						refreshCalls.push("refresh");
+					},
+					getAvailableModels: () => [],
+					buildModelList: (m: any) => m,
+					getMergedModels: async () => [],
+					invalidateCliModelIdsCache: () => {},
+				} as any;
 
-			await provider["setApiKey"]("openai", "sk-123");
+				await provider["setApiKey"]("openai", "sk-123");
 
-			assert.ok(
-				setCalls.some((c) => c.provider === "openai" && c.apiKey === "sk-123"),
-				"ModelRuntime.setRuntimeApiKey should be called with openai/sk-123",
-			);
-			assert.ok(refreshCalls.includes("refresh"), "refreshAvailableModels should be called");
+				assert.ok(
+					setCalls.some((c) => c.provider === "openai" && c.apiKey === "sk-123"),
+					"ModelRuntime.setRuntimeApiKey should be called with openai/sk-123",
+				);
+				assert.ok(
+					refreshCalls.includes("refresh"),
+					"refreshAvailableModels should be called",
+				);
+			} finally {
+				memoryFs.restore();
+			}
+		});
+
+		test("setApiKey persists the key to auth.json so it survives a reload", async () => {
+			const memoryFs = installMemoryAgentFs();
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				(provider as any).modelRuntime = createMockModelRuntime();
+				stubModelListRefresh(provider);
+
+				await provider["setApiKey"]("opencode-go", "ocg-secret");
+
+				assert.deepStrictEqual(
+					memoryFs.read(),
+					{ "opencode-go": { type: "api_key", key: "ocg-secret" } },
+					"the key should be written to the SDK credential store",
+				);
+				assert.deepStrictEqual(
+					memoryFs.writtenPaths().filter((p) => p.endsWith(".tmp")),
+					[],
+					"the temp file from the atomic write should be renamed away",
+				);
+			} finally {
+				memoryFs.restore();
+			}
+		});
+
+		test("setApiKey replaces the provider key and preserves other credentials/env", async () => {
+			const memoryFs = installMemoryAgentFs({
+				[path.join("/fake/agent-dir", "auth.json")]: JSON.stringify({
+					anthropic: { type: "api_key", key: "sk-ant" },
+					"cloudflare-workers-ai": {
+						type: "api_key",
+						key: "old-key",
+						env: { CLOUDFLARE_ACCOUNT_ID: "account-1" },
+					},
+				}),
+			});
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				(provider as any).modelRuntime = createMockModelRuntime();
+				stubModelListRefresh(provider);
+
+				await provider["setApiKey"]("cloudflare-workers-ai", "new-key");
+
+				assert.deepStrictEqual(memoryFs.read(), {
+					anthropic: { type: "api_key", key: "sk-ant" },
+					"cloudflare-workers-ai": {
+						type: "api_key",
+						key: "new-key",
+						env: { CLOUDFLARE_ACCOUNT_ID: "account-1" },
+					},
+				});
+			} finally {
+				memoryFs.restore();
+			}
+		});
+
+		test("setApiKey refuses to clobber an unparseable auth.json", async () => {
+			const authPath = path.join("/fake/agent-dir", "auth.json");
+			const memoryFs = installMemoryAgentFs({ [authPath]: "{ not json" });
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				const setCalls: any[] = [];
+				(provider as any).modelRuntime = {
+					setRuntimeApiKey: async (p: string, k: string) => setCalls.push([p, k]),
+					removeRuntimeApiKey: async () => {},
+					refresh: async () => ({}),
+					getProviders: () => [],
+					getRegisteredProviderIds: () => [],
+				} as any;
+
+				await assert.rejects(
+					() => provider["setApiKey"]("openai", "sk-123"),
+					/auth\.json/,
+					"a malformed credential store should surface an error",
+				);
+				assert.strictEqual(
+					memoryFs.readRaw(),
+					"{ not json",
+					"the file must be left untouched",
+				);
+				assert.deepStrictEqual(setCalls, [], "no in-memory key should be set");
+			} finally {
+				memoryFs.restore();
+			}
 		});
 
 		test("removeAuth calls ModelRuntime.removeRuntimeApiKey and refreshes models", async () => {
-			const provider = buildProvider();
-			(provider as any).isInitialized = true;
+			const memoryFs = installMemoryAgentFs();
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
 
-			const removeCalls: string[] = [];
-			(provider as any).modelRuntime = {
-				setRuntimeApiKey: async () => {},
-				removeRuntimeApiKey: async (provider: string) => {
-					removeCalls.push(provider);
-				},
-				refresh: async () => ({}),
-				getProviders: () => [],
-				getRegisteredProviderIds: () => [],
-			} as any;
+				const removeCalls: string[] = [];
+				(provider as any).modelRuntime = {
+					setRuntimeApiKey: async () => {},
+					removeRuntimeApiKey: async (provider: string) => {
+						removeCalls.push(provider);
+					},
+					refresh: async () => ({}),
+					getProviders: () => [],
+					getRegisteredProviderIds: () => [],
+				} as any;
 
-			const refreshCalls: any[] = [];
-			(provider as any).modelRegistryHandler = {
-				refreshAvailableModels: async () => {
-					refreshCalls.push("refresh");
-				},
-				getAvailableModels: () => [],
-				buildModelList: (m: any) => m,
-				getMergedModels: async () => [],
-				invalidateCliModelIdsCache: () => {},
-			} as any;
+				const refreshCalls: any[] = [];
+				(provider as any).modelRegistryHandler = {
+					refreshAvailableModels: async () => {
+						refreshCalls.push("refresh");
+					},
+					getAvailableModels: () => [],
+					buildModelList: (m: any) => m,
+					getMergedModels: async () => [],
+					invalidateCliModelIdsCache: () => {},
+				} as any;
 
-			await provider["removeAuth"]("openai");
+				await provider["removeAuth"]("openai");
 
-			assert.ok(
-				removeCalls.includes("openai"),
-				"ModelRuntime.removeRuntimeApiKey should be called",
-			);
-			assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
+				assert.ok(
+					removeCalls.includes("openai"),
+					"ModelRuntime.removeRuntimeApiKey should be called",
+				);
+				assert.ok(refreshCalls.includes("refresh"), "refresh should be called");
+			} finally {
+				memoryFs.restore();
+			}
+		});
+
+		test("a key saved through PiLot is still configured after an extension-host reload", async () => {
+			// End-to-end regression check against the real SDK: a fresh ModelRuntime
+			// reading the same agent directory must see the key written by setApiKey.
+			// With the previous implementation (runtime override only) the reloaded
+			// runtime reported the provider as unconfigured.
+			const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "pilot-auth-reload-"));
+			const savedAgentDir = piAgentProviderInternals.getAgentDir;
+			piAgentProviderInternals.getAgentDir = () => agentDir;
+			try {
+				// Boot the same pieces initialize() builds, over the temp agent dir.
+				const bootProvider = async () => {
+					const runtime = await ModelRuntime.create({
+						authPath: path.join(agentDir, "auth.json"),
+						modelsPath: null,
+						modelsStorePath: path.join(agentDir, "models-store.json"),
+					});
+					await runtime.refresh({ allowNetwork: false });
+					const provider = buildProvider();
+					(provider as any).modelRuntime = runtime;
+					(provider as any).modelRegistry = new ModelRegistry(runtime);
+					// Keep the test off the user's real models.json.
+					(provider as any).readModelsJsonConfig = async () => ({});
+					(provider as any).readModelsJsonConfigSync = () => ({});
+					stubModelListRefresh(provider);
+					return provider;
+				};
+
+				const beforeReload = await bootProvider();
+				await beforeReload["setApiKey"]("opencode-go", "ocg-regression-key");
+				const savedEntry = (await beforeReload["getProviderAuthData"]()).find(
+					(p: any) => p.provider === "opencode-go",
+				);
+				assert.strictEqual(
+					savedEntry?.configured,
+					true,
+					"the key should apply immediately",
+				);
+
+				// Simulated reload: new runtime and registry, same agent directory.
+				const afterReload = await bootProvider();
+				const reloadedEntry = (await afterReload["getProviderAuthData"]()).find(
+					(p: any) => p.provider === "opencode-go",
+				);
+				assert.ok(reloadedEntry, "opencode-go should still be listed after the reload");
+				assert.strictEqual(
+					reloadedEntry.configured,
+					true,
+					"the saved key should still be configured after the reload",
+				);
+				assert.strictEqual(reloadedEntry.credentialType, "api_key");
+				assert.strictEqual(reloadedEntry.status, "stored");
+			} finally {
+				piAgentProviderInternals.getAgentDir = savedAgentDir;
+				await fs.rm(agentDir, { recursive: true, force: true });
+			}
+		});
+
+		test("removeAuth deletes the stored api-key credential and keeps the rest", async () => {
+			const memoryFs = installMemoryAgentFs({
+				[path.join("/fake/agent-dir", "auth.json")]: JSON.stringify({
+					openai: { type: "api_key", key: "sk-123" },
+					anthropic: { type: "api_key", key: "sk-ant" },
+				}),
+			});
+			try {
+				const provider = buildProvider();
+				(provider as any).isInitialized = true;
+				(provider as any).modelRuntime = createMockModelRuntime();
+				stubModelListRefresh(provider);
+
+				await provider["removeAuth"]("openai");
+
+				assert.deepStrictEqual(memoryFs.read(), {
+					anthropic: { type: "api_key", key: "sk-ant" },
+				});
+			} finally {
+				memoryFs.restore();
+			}
 		});
 	});
 

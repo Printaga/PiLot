@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- API keys saved from the Providers panel (e.g. OpenCode Go) no longer disappear after a window reload. The key was only set as a `ModelRuntime` in-memory override, which the PI SDK never persists; it is now also written to PI's credential store (`auth.json`), the same place a CLI `/login` uses. Existing entries for other providers and provider-scoped fields (such as Cloudflare account/gateway IDs) are preserved, the file is written atomically with `0600` permissions, and an unparseable `auth.json` is left untouched instead of being overwritten. **Remove auth** and **Remove provider** now delete the stored credential as well, so removal survives a reload.
+
 ## [2.7.0] - 2026-09-30
 
 ### Added

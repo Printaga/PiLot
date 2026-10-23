@@ -105,8 +105,10 @@ export const piAgentProviderInternals = {
 	unlinkFile: (path: string) => fs.unlink(path),
 	// Tests stub filesystem access through this seam; ESM namespaces are frozen.
 	existsFile: (path: string) => existsSync(path),
+	readFile: (path: string) => fs.readFile(path, "utf-8"),
+	renameFile: (from: string, to: string) => fs.rename(from, to),
 	mkdir: (dir: string, options?: { recursive?: boolean }) => fs.mkdir(dir, options),
-	writeFile: (path: string, data: string, options?: { flag?: string } | string) =>
+	writeFile: (path: string, data: string, options?: { flag?: string; mode?: number } | string) =>
 		fs.writeFile(path, data, options as any),
 	listSessions: (cwd: string, sessionDir?: string) => SessionManager.list(cwd, sessionDir),
 	// Construct the canonical model/auth runtime from SDK 0.80.x. Replaces the
@@ -2241,12 +2243,100 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 		if (!this.modelRuntime) throw new Error("Model runtime not initialized");
 
+		// Persist first: `setRuntimeApiKey()` is an in-memory override that the
+		// SDK drops on reload, so a key saved only there disappears when the
+		// window (or the extension host) restarts.
+		await this.persistApiKeyCredential(provider, apiKey);
 		await this.modelRuntime.setRuntimeApiKey(provider, apiKey);
 		await this.refreshModels();
 		this.notifyWebview({
 			type: "provider-auth",
 			data: await this.getProviderAuthData(),
 		});
+	}
+
+	/** Path to the SDK credential store (PI's auth.json). */
+	private getAuthJsonPath(): string {
+		return path.join(piAgentProviderInternals.getAgentDir(), "auth.json");
+	}
+
+	/**
+	 * Read auth.json, returning an empty object when it does not exist yet.
+	 * Throws on unreadable/malformed content so a credential write never
+	 * clobbers a file we could not understand (that file holds OAuth tokens).
+	 */
+	private async readAuthJsonConfig(): Promise<Record<string, unknown>> {
+		const filePath = this.getAuthJsonPath();
+		if (!piAgentProviderInternals.existsFile(filePath)) return {};
+		let raw: string;
+		try {
+			raw = await piAgentProviderInternals.readFile(filePath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+			throw error;
+		}
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (error) {
+			this.logError("[PI] Failed to parse auth.json; cannot save credentials", error);
+			throw new Error(
+				`Cannot update ${filePath}: it is not valid JSON. Fix or remove the file, then try again.`,
+				{ cause: error },
+			);
+		}
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+		return parsed as Record<string, unknown>;
+	}
+
+	/** Write auth.json atomically, keeping the file mode user-only (0600). */
+	private async writeAuthJsonConfig(config: Record<string, unknown>): Promise<void> {
+		const filePath = this.getAuthJsonPath();
+		await piAgentProviderInternals.mkdir(path.dirname(filePath), { recursive: true });
+		// Sibling temp file + rename: readers (the SDK watcher, the PI CLI) never
+		// observe a half-written credential store.
+		const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+		try {
+			await piAgentProviderInternals.writeFile(tempPath, JSON.stringify(config, null, 2), {
+				mode: 0o600,
+			});
+			await piAgentProviderInternals.renameFile(tempPath, filePath);
+		} catch (error) {
+			await piAgentProviderInternals.unlinkFile(tempPath).catch(() => undefined);
+			throw error;
+		}
+	}
+
+	/**
+	 * Store an API key in auth.json — the credential store shared by the SDK and
+	 * the PI CLI, so the key survives reloads exactly like a CLI `/login`.
+	 * Fields already on the provider's entry (e.g. provider-scoped `env` values
+	 * for Cloudflare) are preserved.
+	 */
+	private async persistApiKeyCredential(provider: string, apiKey: string): Promise<void> {
+		const config = await this.readAuthJsonConfig();
+		const existing = config[provider];
+		const entry =
+			existing && typeof existing === "object" && !Array.isArray(existing)
+				? { ...(existing as Record<string, unknown>) }
+				: {};
+		entry.type = "api_key";
+		entry.key = apiKey;
+		config[provider] = entry;
+		await this.writeAuthJsonConfig(config);
+	}
+
+	/**
+	 * Drop a stored API-key credential for `provider` (the "remove auth" path).
+	 * OAuth entries are left alone: only `logout()` may remove those.
+	 */
+	private async clearStoredApiKeyCredential(provider: string): Promise<void> {
+		const config = await this.readAuthJsonConfig();
+		const existing = config[provider];
+		if (!existing || typeof existing !== "object" || Array.isArray(existing)) return;
+		if ((existing as { type?: unknown }).type !== "api_key") return;
+		delete config[provider];
+		await this.writeAuthJsonConfig(config);
 	}
 
 	/** Path to the user's models.json (PI's provider/model config store). */
@@ -2503,8 +2593,10 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			throw new Error(`Cannot delete built-in provider "${id}"`);
 		}
 
-		// Drop any in-memory runtime API key for this provider.
+		// Drop any in-memory runtime API key and stored credential for this
+		// provider, so removing it cannot be undone by a leftover auth.json entry.
 		await this.modelRuntime.removeRuntimeApiKey(id);
+		await this.clearStoredApiKeyCredential(id);
 
 		// Remove from models.json if present (custom providers persist here).
 		const config = await this.readModelsJsonConfig();
@@ -2534,7 +2626,8 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 
 		// OAuth credentials live in the SDK credential store (auth.json); only
 		// logout() removes them — parity with the PI CLI's /logout. API-key
-		// providers keep the previous behavior (drop the runtime override).
+		// providers drop both the runtime override and the stored credential so
+		// the removal survives a reload.
 		const runtime = this.modelRuntime as ModelRuntime & {
 			logout?: (providerId: string) => Promise<void>;
 		};
@@ -2545,6 +2638,7 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			await runtime.logout(provider);
 		} else {
 			await this.modelRuntime.removeRuntimeApiKey(provider);
+			await this.clearStoredApiKeyCredential(provider);
 		}
 		await this.refreshModels();
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
