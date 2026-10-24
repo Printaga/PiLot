@@ -24,6 +24,7 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ### Fixed
 
+- Cleared all open Dependabot advisories and the daily Audit failures they caused: vite 8.3.5, fallow 3.35.0, and refreshed pnpm override pins (undici 7.30.1/8.12.2, fast-uri 3.1.9, devalue 5.9.3, markdown-it 14.3.3, dompurify 3.4.17, serialize-javascript 7.1.3, postcss-selector-parser 7.1.6, source-map-js 1.2.2, katex 0.18.2, zod 4.6.6, @azure/msal-node 7.1.0). `pnpm audit` and `osv-scanner` both pass.
 - Editing a custom provider in the GUI no longer strips PI 1.4 per-model metadata (`contextWindow`, `cost`, `reasoning`, `thinkingLevelMap`, `input`, `headers`, etc.): entries with the same model id keep fields the form does not edit.
 - API keys saved from the Providers panel (e.g. OpenCode Go) no longer disappear after a window reload: the key is now also written to PI's credential store (`auth.json`), preserving other providers and provider-scoped fields, writing atomically with `0600` permissions, and leaving an unparseable file untouched. **Remove auth** and **Remove provider** delete the stored credential too.
 
