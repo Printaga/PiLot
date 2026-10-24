@@ -30,6 +30,48 @@ function withTmpDir(prefix: string, fn: (tmpDir: string) => void) {
 	}
 }
 
+/** Create `<dir>/.bin/pi` (the launcher layout npm/pnpm/mise use) and return it. */
+function writeLauncher(dir: string): string {
+	const binDir = path.join(dir, ".bin");
+	fs.mkdirSync(binDir, { recursive: true });
+	const launcher = path.join(binDir, process.platform === "win32" ? "pi.cmd" : "pi");
+	fs.writeFileSync(launcher, "#!/bin/sh\nexit 0\n");
+	if (process.platform !== "win32") fs.chmodSync(launcher, 0o755);
+	return launcher;
+}
+
+/** Publish `nodeModules` the way loader.cjs does, then restore the prior value. */
+function withSdkInstall(nodeModules: string, fn: () => void) {
+	const globals = globalThis as { __pillotSdkNodeModules?: string };
+	const previous = globals.__pillotSdkNodeModules;
+	globals.__pillotSdkNodeModules = nodeModules;
+	try {
+		fn();
+	} finally {
+		if (previous === undefined) delete globals.__pillotSdkNodeModules;
+		else globals.__pillotSdkNodeModules = previous;
+	}
+}
+
+/**
+ * A `getConfiguration` that honours the documented default value. The bundled
+ * plain-Node facade returns `undefined` regardless of it, which makes
+ * `findPiBinary()` throw on a missing `pi-agent.binaryPath`; installing this for
+ * the suite keeps the file self-contained instead of inheriting a settings stub
+ * some other test file happened to leave behind in the shared process.
+ */
+function installDefaultSettings(): () => void {
+	const original = vscodeModule.workspace.getConfiguration as any;
+	(vscodeModule.workspace.getConfiguration as any) = (_section?: string) => ({
+		get: (_key: string, defaultValue?: any) => defaultValue,
+		update: async () => {},
+		inspect: () => undefined,
+	});
+	return () => {
+		(vscodeModule.workspace.getConfiguration as any) = original;
+	};
+}
+
 // ---------------------------------------------------------------------------
 // resolvePiBinaryFromSetting
 // ---------------------------------------------------------------------------
@@ -221,10 +263,65 @@ suite("pi-binary: Windows .exe/.cmd suffix fallback", () => {
 // ---------------------------------------------------------------------------
 
 suite("pi-binary: findPiBinary", () => {
+	let restoreSettings: () => void;
+	suiteSetup(() => {
+		restoreSettings = installDefaultSettings();
+	});
+	suiteTeardown(() => {
+		restoreSettings();
+	});
+
 	test("returns a non-empty string", () => {
 		const result = findPiBinary();
 		assert.strictEqual(typeof result, "string");
 		assert.ok(result.length > 0, "expected non-empty string");
+	});
+
+	test("prefers the launcher from the install whose SDK was loaded", () => {
+		withTmpDir("pilot-sdk-install-", (tmpDir) => {
+			const launcher = writeLauncher(tmpDir);
+
+			withSdkInstall(tmpDir, () => {
+				assert.strictEqual(findPiBinary(), launcher);
+			});
+		});
+	});
+
+	test("falls back to the platform candidates when that install ships no launcher", () => {
+		withTmpDir("pilot-sdk-install-empty-", (tmpDir) => {
+			withSdkInstall(tmpDir, () => {
+				const result = findPiBinary();
+				assert.ok(result.length > 0, "expected the previous resolution to keep working");
+				assert.ok(
+					!result.startsWith(tmpDir + path.sep),
+					`must not point into a launcher-less install: ${result}`,
+				);
+			});
+		});
+	});
+
+	test("an explicit binaryPath still outranks the SDK's install", () => {
+		withTmpDir("pilot-sdk-install-setting-", (tmpDir) => {
+			const sdkInstall = path.join(tmpDir, "sdk-install");
+			writeLauncher(sdkInstall);
+			const configured = writeLauncher(path.join(tmpDir, "configured"));
+
+			const origConfig = vscodeModule.workspace.getConfiguration as any;
+			(vscodeModule.workspace.getConfiguration as any) = (_section?: string) =>
+				({
+					get: (_key: string, defaultValue?: any) =>
+						_key === "binaryPath" ? configured : defaultValue,
+					update: async () => {},
+				}) as any;
+
+			try {
+				withSdkInstall(sdkInstall, () => {
+					assert.strictEqual(findPiBinary(), configured);
+				});
+			} finally {
+				(vscodeModule.workspace.getConfiguration as any) = origConfig;
+			}
+		});
 	});
 });
 

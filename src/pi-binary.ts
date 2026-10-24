@@ -139,6 +139,49 @@ export function resolvePiBinaryFromSetting(rawPath: string): string | null {
 	return trimmed;
 }
 
+/**
+ * The install directory the CommonJS loader loaded the PI SDK from, or null.
+ * loader.cjs publishes it on globalThis because it runs before the bundle and
+ * discovers the SDK on its own (deliberately without consulting PATH).
+ */
+function sdkInstallNodeModules(): string | null {
+	const value = (globalThis as { __pillotSdkNodeModules?: unknown }).__pillotSdkNodeModules;
+	return typeof value === "string" && path.isAbsolute(value) ? value : null;
+}
+
+/**
+ * The `pi` launcher shipped by the install whose SDK was loaded, or null when
+ * that install has none.
+ *
+ * The loader picks the newest discovered install; probing well-known CLI paths
+ * separately can land on a different (older) installation, which would leave the
+ * in-process SDK and the spawned CLI on different PI versions. Preferring the
+ * launcher from the SDK's own install keeps the two together, and returning null
+ * when it is missing leaves the previous resolution untouched.
+ */
+function findPiBinaryInSdkInstall(): string | null {
+	const nodeModules = sdkInstallNodeModules();
+	if (!nodeModules) return null;
+	// npm, pnpm, bun and the mise/aube install all expose the CLI this way.
+	const suffixes = process.platform === "win32" ? [".cmd", ".exe", ""] : [""];
+	for (const suffix of suffixes) {
+		const candidate = path.join(nodeModules, ".bin", "pi" + suffix);
+		// The same rule the settings path follows: refuse a value the shell would
+		// reinterpret instead of spawning it as the program name.
+		if (!isSafeBinaryPath(candidate)) continue;
+		try {
+			piBinaryInternals.accessSync(
+				candidate,
+				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+			);
+			return candidate;
+		} catch {
+			continue;
+		}
+	}
+	return null;
+}
+
 /** Find the pi binary using VS Code settings, workspace node_modules, and well-known paths. */
 export function findPiBinary(): string {
 	const settingPath = vscode.workspace
@@ -147,6 +190,13 @@ export function findPiBinary(): string {
 	const settingResult = resolvePiBinaryFromSetting(settingPath);
 	if (settingResult) {
 		return settingResult;
+	}
+
+	// Before the generic probes: the launcher from the install whose SDK was
+	// loaded, so the spawned CLI cannot be a different PI version.
+	const sdkInstallBinary = findPiBinaryInSdkInstall();
+	if (sdkInstallBinary) {
+		return sdkInstallBinary;
 	}
 
 	const home = process.env.HOME || process.env.USERPROFILE || "";

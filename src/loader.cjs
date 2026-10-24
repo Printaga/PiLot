@@ -9,6 +9,9 @@
  *
  * How it works:
  * 1. Finds the global PI SDK by checking ~/.pi/, pnpm global, npm global, etc.
+ *    Explicit locations (the pi-agent.binaryPath setting, PI_HOME, PI_AGENT_DIR)
+ *    win in declared order; otherwise the newest installed version wins, because
+ *    mise/pnpm keep every version they ever installed side by side.
  * 2. Hooks Node.js module resolution to intercept @earendil-works/pi-coding-agent
  *    requires, reading package.json directly and resolving to the main file.
  *    This bypasses the ESM-only exports map (which has only "import", no "require"),
@@ -20,7 +23,7 @@
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
-const { MIN_PI_SDK_VERSION, isVersionAtLeast } = require("./loader-version.cjs");
+const { MIN_PI_SDK_VERSION, isVersionAtLeast, pickNewestVersion } = require("./loader-version.cjs");
 
 // ── Constants (previously inlined strings scattered through the file) ──────
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -87,10 +90,14 @@ function findPiSdkAtPath(nodeModulesPath) {
 	// Check direct @earendil-works/pi-coding-agent path
 	const directSdkPath = path.join(nodeModulesPath, "@earendil-works", "pi-coding-agent");
 	if (fs.existsSync(directSdkPath)) {
-		// Resolve to real path for pnpm store symlinks, then find the real node_modules.
-		// Use lastIndexOf so that for mise's nested layout
-		// (outer node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules/@earendil-works/pi-coding-agent)
-		// we extract the outer node_modules, not the inner .mise/.../node_modules.
+		// Resolve to real path for pnpm store symlinks, then find the real
+		// node_modules. lastIndexOf deliberately takes the INNERMOST one: in
+		// package-manager layouts (mise's
+		// node_modules/.mise/@earendil-works+pi-coding-agent@ver/node_modules,
+		// pnpm's .pnpm/<pkg>@<ver>/node_modules) that is the package's own install
+		// tree, which keeps the SDK beside the @earendil-works/* packages it
+		// resolves and is the root the extension must load from. When that tree is
+		// absent or incomplete the probed directory is returned instead.
 		try {
 			const realSdkPath = fs.realpathSync(directSdkPath);
 			const normalizedReal = realSdkPath.replace(/\\/g, "/");
@@ -126,7 +133,7 @@ function findPiSdkAtPath(nodeModulesPath) {
 		if (entry.name.startsWith(".pi-coding-agent-") && entry.isSymbolicLink()) {
 			try {
 				const linkTarget = fs.realpathSync(path.join(nodeModulesPath, entry.name));
-				// Same derivation used everywhere else: take the outermost
+				// Same derivation used everywhere else: take the innermost
 				// /node_modules/ segment of a plausible CLI path inside the package,
 				// instead of a hard-coded and fragile multi-level ".." walk-up.
 				const sdkNodeModules = extractNodeModulesPath(
@@ -222,12 +229,105 @@ function runGlobalRootProbes() {
 }
 
 /**
+ * The candidate `node_modules` directory the chosen SDK came from, published for
+ * the extension (see load()). It is not always the SDK root: mise/pnpm resolve
+ * to the package's own nested tree, while the directory handed to the extension
+ * has to be one where the install keeps its `.bin/pi` launcher.
+ */
+let selectedInstallNodeModules = null;
+
+/**
+ * Locations the user (or the shell that launched VS Code) pointed at
+ * explicitly. These outrank discovery: the user named the install, so its
+ * version is the answer even when another version on disk is newer.
+ * Highest priority first: binaryPath setting, PI_HOME, PI_AGENT_DIR.
+ */
+function explicitSdkPaths() {
+	const explicit = [];
+	const settingSdkPath = findPiSdkFromSetting();
+	if (settingSdkPath) {
+		explicit.push(settingSdkPath);
+	}
+	if (process.env.PI_HOME) {
+		explicit.push(
+			path.join(process.env.PI_HOME, "node_modules"),
+			path.join(process.env.PI_HOME, "agent", "npm", "node_modules"),
+		);
+	}
+	if (process.env.PI_AGENT_DIR) {
+		explicit.push(
+			path.join(process.env.PI_AGENT_DIR, "node_modules"),
+			path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"),
+		);
+	}
+	return explicit;
+}
+
+/**
+ * Resolve one candidate node_modules directory to an SDK root, recording the
+ * ones that carried no SDK so the "not found" report can list them. A broken
+ * candidate (EACCES, ELOOP, ENOTDIR...) only skips itself; it must never abort
+ * the whole search with a raw stack trace.
+ */
+function resolveCandidate(piNodeModules, attemptedPaths) {
+	let found;
+	try {
+		found = findPiSdkAtPath(piNodeModules);
+	} catch (_e) {
+		found = null;
+	}
+	if (!found) {
+		attemptedPaths.push(piNodeModules);
+	}
+	return found;
+}
+
+/** First candidate in declaration order that resolves, or null. */
+function firstResolvable(paths, attemptedPaths) {
+	for (const piNodeModules of paths) {
+		const found = resolveCandidate(piNodeModules, attemptedPaths);
+		if (found) {
+			selectedInstallNodeModules = piNodeModules;
+			return found;
+		}
+	}
+	return null;
+}
+
+/**
+ * Resolve every candidate and return the newest SDK root, or null.
+ *
+ * A discovery is not a decision: package managers keep every version they ever
+ * installed side by side (mise one directory per version, pnpm one per Node
+ * version) and directory iteration order is arbitrary, so taking the first SDK
+ * found can pin the stale copy a `mise upgrade` already replaced.
+ */
+function newestResolvable(paths, attemptedPaths) {
+	const candidates = [];
+	for (const piNodeModules of paths) {
+		const found = resolveCandidate(piNodeModules, attemptedPaths);
+		if (found) {
+			candidates.push({
+				path: found,
+				version: readPiSdkVersion(found),
+				nodeModules: piNodeModules,
+			});
+		}
+	}
+	const best = pickNewestVersion(candidates);
+	if (!best) return null;
+	selectedInstallNodeModules = best.nodeModules;
+	return best.path;
+}
+
+/**
  * Find the global PI installation directory
  * Checks multiple possible locations across different platforms and installation methods
  */
 function findGlobalPiInstallation() {
 	const homeDir = getHomeDir();
 	const possiblePaths = [];
+	selectedInstallNodeModules = null;
 
 	if (homeDir) {
 		// Standard PI installation locations
@@ -326,51 +426,18 @@ function findGlobalPiInstallation() {
 		}
 	}
 
-	// Check environment variable overrides (below the user setting, above the
-	// generic filesystem candidates).
-	if (process.env.PI_AGENT_DIR) {
-		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "npm", "node_modules"));
-		possiblePaths.unshift(path.join(process.env.PI_AGENT_DIR, "node_modules"));
-	}
-
-	if (process.env.PI_HOME) {
-		possiblePaths.unshift(path.join(process.env.PI_HOME, "agent", "npm", "node_modules"));
-		possiblePaths.unshift(path.join(process.env.PI_HOME, "node_modules"));
-	}
-
-	// Try each possible path. The user-configured binaryPath setting is resolved
-	// last and unshifted, so it ends up at index 0 (highest priority).
-	const settingSdkPath = findPiSdkFromSetting();
-	if (settingSdkPath) {
-		possiblePaths.unshift(settingSdkPath);
-	}
-
 	const attemptedPaths = [];
-	const tryPaths = (paths) => {
-		for (const piNodeModules of paths) {
-			// A broken candidate (EACCES, ELOOP, ENOTDIR...) must only skip that
-			// candidate, never abort the whole search with a raw stack trace.
-			let found;
-			try {
-				found = findPiSdkAtPath(piNodeModules);
-			} catch (_e) {
-				found = null;
-			}
-			if (found) {
-				return found;
-			}
-			attemptedPaths.push(piNodeModules);
-		}
-		return null;
-	};
-
-	let found = tryPaths(possiblePaths);
+	// Explicit locations first, then the newest discovered install.
+	let found = firstResolvable(explicitSdkPaths(), attemptedPaths);
+	if (!found) {
+		found = newestResolvable(possiblePaths, attemptedPaths);
+	}
 
 	// The probes below spawn subprocesses and block the extension host for up
 	// to 3 × PATH_PROBE_TIMEOUT_MS, so they only run when every cheap
 	// filesystem candidate missed.
 	if (!found) {
-		found = tryPaths(runGlobalRootProbes());
+		found = newestResolvable(runGlobalRootProbes(), attemptedPaths);
 	}
 
 	if (!found) {
@@ -934,6 +1001,21 @@ function load() {
 		);
 		return createUnsupportedPiSdkExtension(piSdkVersion, piNodeModules);
 	}
+
+	// The extension spawns the `pi` CLI for its package/MCP/commit commands. Hand
+	// it the install this SDK came from so the spawned CLI and the in-process SDK
+	// cannot come from different installations (the SDK may have been discovered
+	// without ever consulting PATH). pi-binary.ts prefers that install's launcher
+	// and falls back to its own probing when the install ships none. Resolved to
+	// its real path so a mutable alias (mise keeps `0`/`1`/`latest` links) is not
+	// what gets published.
+	let sdkInstallNodeModules = selectedInstallNodeModules;
+	try {
+		if (sdkInstallNodeModules) sdkInstallNodeModules = fs.realpathSync(sdkInstallNodeModules);
+	} catch (_e) {
+		// Keep the probed path: a launcher there is still the right one.
+	}
+	globalThis.__pillotSdkNodeModules = sdkInstallNodeModules;
 
 	// Add global PI node_modules to module resolution paths as secondary fallback.
 	// Unshift only when absent: repeated activation previously grew the list and
