@@ -70,6 +70,32 @@ function createMockProvider(): {
 		addProvider: () => undefined,
 		removeProvider: () => undefined,
 		openConfigFile: () => undefined,
+		openMcpConfig: async () => {},
+		listMcpServers: async () => ({
+			servers: [],
+			errors: [],
+			files: {
+				global: "/agent/mcp.json",
+				project: "/w/.pi/mcp.json",
+				projectExists: false,
+				projectTrusted: false,
+			},
+		}),
+		checkMcpServers: async () => ({
+			servers: [],
+			errors: [],
+			files: {
+				global: "/agent/mcp.json",
+				project: "/w/.pi/mcp.json",
+				projectExists: false,
+				projectTrusted: false,
+			},
+		}),
+		addMcpServer: async () => {},
+		removeMcpServer: async () => {},
+		updateMcpServerConfig: async () => {},
+		loginMcpServer: async () => {},
+		logoutMcpServer: async () => {},
 		toggleFavorite: async () => [],
 		listSessions: async () => [],
 		getSettings: async () => ({
@@ -98,6 +124,11 @@ function createMockProvider(): {
 		sendSkillsList: () => undefined,
 		getLightMode: () => false,
 		setLightMode: () => Promise.resolve(),
+		getCacheWarmingMode: async () => "streaming",
+		setCacheWarmingMode: async () => {},
+		getDefaultToolsCodemodeEnabled: async () => ({ enabled: false, globalEnabled: false }),
+		setDefaultToolsCodemodeEnabled: async () => ({ enabled: true, globalEnabled: true }),
+		getMediaModels: async () => ({ image: [], classifier: [] }),
 		getCommitMessageModel: () => "",
 		setCommitMessageModel: () => Promise.resolve(),
 		restartSessionPreservingHistory: () => Promise.resolve(),
@@ -1545,6 +1576,335 @@ suite("MessageHandler", () => {
 		});
 		assert.ok(result.error, "expected error for invalid file");
 		assert.strictEqual(provider.calls.openConfigFile, undefined);
+	});
+
+	test("openConfigFile accepts mcp", async () => {
+		const result = await handler.handle({
+			type: "openConfigFile",
+			data: { file: "mcp" },
+		});
+		assert.deepStrictEqual(provider.calls.openConfigFile[0], ["mcp"]);
+		assert.strictEqual(result.success, true);
+	});
+
+	test("openMcpConfig routes global and project scopes", async () => {
+		await handler.handle({ type: "openMcpConfig", data: { scope: "global" } });
+		await handler.handle({ type: "openMcpConfig", data: { scope: "project" } });
+		assert.deepStrictEqual(provider.calls.openMcpConfig, [["global"], ["project"]]);
+
+		const invalid = await handler.handle({ type: "openMcpConfig", data: { scope: "other" } });
+		assert.ok(invalid.error);
+	});
+
+	test("getMcpServers posts the configured list", async () => {
+		provider.listMcpServers = async () => ({
+			servers: [
+				{
+					name: "filesystem",
+					scope: "global",
+					source: "/agent/mcp.json",
+					enabled: true,
+					exposure: "codemode",
+					transport: "npx fs",
+					description: "Files",
+					state: "unknown",
+					tools: [],
+				},
+			],
+			errors: [],
+			files: {
+				global: "/agent/mcp.json",
+				project: "/w/.pi/mcp.json",
+				projectExists: false,
+				projectTrusted: true,
+			},
+		});
+		const result = await handler.handle({ type: "getMcpServers" });
+		assert.strictEqual(result.success, true);
+		const posted = webviewMessages.find((m: any) => m.type === "mcp-servers");
+		assert.ok(posted);
+		assert.strictEqual(posted.data.servers[0].name, "filesystem");
+	});
+
+	test("checkMcpServers posts live state", async () => {
+		provider.checkMcpServers = async () => ({
+			servers: [
+				{
+					name: "filesystem",
+					scope: "global",
+					source: "/agent/mcp.json",
+					enabled: true,
+					exposure: "codemode",
+					transport: "npx fs",
+					description: "",
+					state: "connected",
+					tools: ["read_file"],
+				},
+			],
+			errors: [],
+			files: {
+				global: "/agent/mcp.json",
+				project: "/w/.pi/mcp.json",
+				projectExists: false,
+				projectTrusted: true,
+			},
+			checkedAt: 123,
+		});
+		const result = await handler.handle({ type: "checkMcpServers" });
+		assert.strictEqual(result.success, true);
+		const posted = webviewMessages.find((m: any) => m.type === "mcp-servers");
+		assert.strictEqual(posted.data.servers[0].state, "connected");
+		assert.strictEqual(posted.data.checkedAt, 123);
+	});
+
+	test("getCodemodeSettings posts the current settings", async () => {
+		const settings = {
+			mode: "only" as const,
+			inlineBudget: 1200,
+			autoEnableCodemode: false,
+			sources: {
+				mode: "project" as const,
+				inlineBudget: "global" as const,
+				autoEnableCodemode: "default" as const,
+			},
+			projectFile: "/w/.pi/settings.json",
+			projectStatus: "applied" as const,
+		};
+		provider.getCodemodeSettings = async () => settings;
+		const result = await handler.handle({ type: "getCodemodeSettings" });
+		assert.strictEqual(result.success, true);
+		const posted = webviewMessages.find((m: any) => m.type === "codemode-settings");
+		assert.deepStrictEqual(posted.data, settings);
+	});
+
+	test("does not post an incomplete codemode payload", async () => {
+		provider.getCodemodeSettings = async () => ({
+			mode: "only",
+			inlineBudget: 1200,
+			autoEnableCodemode: false,
+		});
+		await handler.handle({ type: "getCodemodeSettings" });
+
+		assert.strictEqual(
+			webviewMessages.some((m: any) => m.type === "codemode-settings"),
+			false,
+			"a payload without sources must not replace the displayed settings",
+		);
+	});
+
+	test("does not post a codemode payload when reading fails", async () => {
+		provider.getCodemodeSettings = async () => {
+			throw new Error("settings.json is invalid");
+		};
+		await handler.handle({ type: "getCodemodeSettings" });
+
+		assert.ok(
+			webviewMessages.some((m: any) => m.type === "error"),
+			"the failure must reach the webview as an error",
+		);
+		assert.strictEqual(
+			webviewMessages.some((m: any) => m.type === "codemode-settings"),
+			false,
+			"an error result must not overwrite the displayed settings",
+		);
+	});
+
+	test("setCodemodeSettings validates and floors the patch", async () => {
+		provider.setCodemodeSettings = async () => ({
+			mode: "only",
+			inlineBudget: 1499,
+			autoEnableCodemode: false,
+			sources: {
+				mode: "project",
+				inlineBudget: "project",
+				autoEnableCodemode: "global",
+			},
+		});
+		const result = await handler.handle({
+			type: "setCodemodeSettings",
+			data: { mode: "only", inlineBudget: 1499.9, autoEnableCodemode: false },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.setCodemodeSettings[0][0], {
+			mode: "only",
+			inlineBudget: 1499,
+			autoEnableCodemode: false,
+		});
+		const posted = webviewMessages.find((m: any) => m.type === "codemode-settings");
+		assert.strictEqual(posted.data.inlineBudget, 1499);
+	});
+
+	test("setCodemodeSettings rejects invalid values before calling the provider", async () => {
+		const badMode = await handler.handle({
+			type: "setCodemodeSettings",
+			data: { mode: "sometimes" },
+		});
+		assert.ok(badMode.error);
+
+		const badBudget = await handler.handle({
+			type: "setCodemodeSettings",
+			data: { inlineBudget: -1 },
+		});
+		assert.ok(badBudget.error);
+
+		const badAuto = await handler.handle({
+			type: "setCodemodeSettings",
+			data: { autoEnableCodemode: "yes" },
+		});
+		assert.ok(badAuto.error);
+
+		const empty = await handler.handle({ type: "setCodemodeSettings", data: {} });
+		assert.ok(empty.error);
+		assert.strictEqual(provider.calls.setCodemodeSettings?.length ?? 0, 0);
+	});
+
+	test("getCacheWarming posts the current mode", async () => {
+		provider.getCacheWarmingMode = async () => "idle";
+		const result = await handler.handle({ type: "getCacheWarming" });
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(
+			webviewMessages.find((m: any) => m.type === "cache-warming-changed")?.data,
+			{ mode: "idle" },
+		);
+	});
+
+	test("setCacheWarming validates the mode before calling the provider", async () => {
+		const bad = await handler.handle({
+			type: "setCacheWarming",
+			data: { mode: "sometimes" },
+		});
+		assert.ok(bad.error);
+		assert.strictEqual(provider.calls.setCacheWarmingMode?.length ?? 0, 0);
+
+		const result = await handler.handle({
+			type: "setCacheWarming",
+			data: { mode: "off" },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.setCacheWarmingMode[0], ["off"]);
+	});
+
+	test("default-tools codemode get/set round-trip through the provider", async () => {
+		provider.getDefaultToolsCodemodeEnabled = async () => ({
+			enabled: false,
+			globalEnabled: false,
+		});
+		const got = await handler.handle({ type: "getDefaultToolsCodemode" });
+		assert.strictEqual(got.success, true);
+		assert.strictEqual(
+			webviewMessages.find((m: any) => m.type === "default-tools-codemode")?.data.enabled,
+			false,
+		);
+
+		const bad = await handler.handle({
+			type: "setDefaultToolsCodemode",
+			data: { enabled: "yes" },
+		});
+		assert.ok(bad.error);
+
+		provider.setDefaultToolsCodemodeEnabled = async () => ({
+			enabled: true,
+			globalEnabled: true,
+		});
+		const set = await handler.handle({
+			type: "setDefaultToolsCodemode",
+			data: { enabled: true },
+		});
+		assert.strictEqual(set.success, true);
+		assert.deepStrictEqual(provider.calls.setDefaultToolsCodemodeEnabled[0], [true]);
+	});
+
+	test("getMediaModels posts the catalog summary", async () => {
+		provider.getMediaModels = async () => ({
+			image: [{ provider: "openai", id: "img", name: "Img", available: false }],
+			classifier: [],
+		});
+		const result = await handler.handle({ type: "getMediaModels" });
+		assert.strictEqual(result.success, true);
+		assert.strictEqual(
+			webviewMessages.find((m: any) => m.type === "media-models")?.data.image.length,
+			1,
+		);
+	});
+
+	test("refreshModels forwards the online flag", async () => {
+		provider.refreshModels = async () => {};
+		const result = await handler.handle({
+			type: "refreshModels",
+			data: { allowNetwork: true },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.refreshModels[0], [true, { allowNetwork: true }]);
+	});
+
+	test("addMcpServer validates and forwards the form", async () => {
+		const invalid = await handler.handle({
+			type: "addMcpServer",
+			data: { name: "", transport: "stdio", command: "npx" },
+		});
+		assert.ok(invalid.error);
+
+		const result = await handler.handle({
+			type: "addMcpServer",
+			data: {
+				name: "filesystem",
+				transport: "stdio",
+				command: "npx",
+				args: ["-y"],
+				env: { API_KEY: "x" },
+				exposure: "direct",
+				description: "Files",
+				local: true,
+			},
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.addMcpServer[0][0], {
+			name: "filesystem",
+			transport: "stdio",
+			command: "npx",
+			args: ["-y"],
+			cwd: undefined,
+			url: undefined,
+			env: { API_KEY: "x" },
+			headers: undefined,
+			bearerTokenEnvVar: undefined,
+			oauthClientId: undefined,
+			oauthClientSecret: undefined,
+			exposure: "direct",
+			description: "Files",
+			local: true,
+		});
+	});
+
+	test("updateMcpServerConfig validates exposure and supports disabling", async () => {
+		const bad = await handler.handle({
+			type: "updateMcpServerConfig",
+			data: { name: "server", patch: { exposure: "loud" } },
+		});
+		assert.ok(bad.error);
+
+		const result = await handler.handle({
+			type: "updateMcpServerConfig",
+			data: { name: "server", patch: { enabled: false }, scope: "project" },
+		});
+		assert.strictEqual(result.success, true);
+		assert.deepStrictEqual(provider.calls.updateMcpServerConfig[0], [
+			"server",
+			{ enabled: false },
+			"project",
+		]);
+	});
+
+	test("remove, login and logout route to the provider", async () => {
+		await handler.handle({
+			type: "removeMcpServer",
+			data: { name: "server", scope: "project" },
+		});
+		await handler.handle({ type: "loginMcpServer", data: { name: "server" } });
+		await handler.handle({ type: "logoutMcpServer", data: { name: "server" } });
+		assert.deepStrictEqual(provider.calls.removeMcpServer[0], ["server", "project"]);
+		assert.deepStrictEqual(provider.calls.loginMcpServer[0], ["server"]);
+		assert.deepStrictEqual(provider.calls.logoutMcpServer[0], ["server"]);
 	});
 
 	test("getCurrentModel returns current model id", async () => {

@@ -10,13 +10,13 @@ Chat about your workspace, let PI use coding tools, revisit branched sessions, a
 
 Official website: **[pivscode.com](https://pivscode.com/)**
 
-Works with VS Code 1.85 or newer on Windows, Linux, and macOS.
+Works with VS Code 1.105 or newer on Windows, Linux, and macOS. Requires PI CLI 1.4.0 or newer.
 
 ![PiLot Studio in action](media/screenshot.png)
 
 ## Get started
 
-Install PI separately from the extension: PiLot Studio loads the runtime from your PI installation. The PI package used by this checkout requires Node.js 22.19 or newer and npm.
+Install PI separately from the extension: PiLot Studio loads the runtime from your PI installation. PI 1.4 requires Node.js 22.19 or newer and npm; VS Code 1.105 is the first release that bundles a Node version new enough.
 
 1. Install the PI CLI, then run `pi --version` in VS Code's integrated terminal to check that VS Code can find it:
 
@@ -57,6 +57,10 @@ Choose a tool preset such as read-only review, no tools, or a custom allowlist.
 ### 📦 Extend with packages
 
 Manage PI packages, extensions, skills, and prompt templates from the sidebar.
+
+### 🔌 Manage MCP servers
+
+The **MCP** tab lists servers from PI's global `mcp.json` and, in trusted projects, `.pi/mcp.json`. It shows connection state, available tools, user vs project scope and project overrides, and lets you add or remove servers, change enabled/exposure, and sign in to OAuth servers. **Open main mcp.json** (the global user config, also reachable from Settings) and **Open project mcp.json** edit the underlying files directly. Settings → **MCP & Codemode** controls codemode's mode, inline tool budget and automatic activation, labels each value with its source (Project, Global or Default), and explains when to use each per-server exposure. A trusted project's `.pi/settings.json` and `.pi/mcp.json` overrides are reflected; ignored or malformed project settings are called out.
 
 ### 📎 Chat and Git helpers
 
@@ -119,6 +123,7 @@ Search for `pi-agent` in VS Code Settings. These are some useful settings; the S
 - **No model response:** Check the selected model and its credentials in the **Providers** tab. Provider API keys can also come from PI's environment or auth configuration.
 - **Dictation unavailable:** Check VS Code's microphone permission and `pi-agent.voice.enabled`. The first use needs a model download. On Linux, see the [voice helper platform notes](media/voice/README.md) for native library requirements.
 - **Sessions in the wrong location:** Check `pi-agent.agentDir` and reload the VS Code window after changing it.
+- **MCP server not listed:** Project servers in `.pi/mcp.json` load only after the workspace is trusted. The MCP tab says when a project file is being ignored; trust the workspace to load it.
 
 ## Development
 
@@ -130,7 +135,7 @@ pnpm run build
 pnpm verify
 ```
 
-`pnpm verify` runs type checks, lint, formatting, unit tests, webview component tests, and the changed-code audit. `pnpm verify:full` also builds the extension and runs VS Code integration tests; it needs a desktop VS Code installation or `VSCODE_PATH`. `pnpm run webview:dev` watches the webview build.
+`pnpm verify` runs type checks, lint, formatting, unit tests, webview component tests, and the changed-code audit. `pnpm verify:full` also builds the extension and runs VS Code integration tests; it needs a desktop VS Code installation or `VSCODE_PATH`. On Linux, the integration runner uses `xvfb-run` when available, so test windows stay off the desktop. `pnpm run webview:dev` watches the webview build.
 
 ## Privacy and network use
 

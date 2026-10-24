@@ -52,6 +52,19 @@
   // `error` can be attributed instead of clearing every check flag.
   let lastAuthProvider = $state<string | null>(null);
 
+  // Image/classifier catalog (PI 1.x lists them separately from chat models
+  // via getModelsOfType). Read-only summary so non-chat models are visible;
+  // the chat model picker is unchanged.
+  interface MediaModelEntry {
+    provider: string;
+    id: string;
+    name: string;
+    available: boolean;
+  }
+  let imageModels = $state<MediaModelEntry[]>([]);
+  let classifierModels = $state<MediaModelEntry[]>([]);
+  let mediaLoaded = $state(false);
+
   let showAddForm = $state(false);
   let editingProviderId = $state<string | null>(null);
   let newProviderId = $state("");
@@ -92,6 +105,7 @@
 
   onMount(() => {
     sendMessage({ type: "getProviderAuth" });
+    sendMessage({ type: "getMediaModels" });
     // React only to replies correlated with our in-flight addProvider request:
     // a success `provider-added` ack resets the form; a correlated `error`
     // shows the server message and clears the pending state so the user retries.
@@ -242,11 +256,20 @@
       }
     };
     window.addEventListener("message", onLoginMessage);
+    const onMediaMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg || msg.type !== "media-models" || !msg.data) return;
+      if (Array.isArray(msg.data.image)) imageModels = msg.data.image;
+      if (Array.isArray(msg.data.classifier)) classifierModels = msg.data.classifier;
+      mediaLoaded = true;
+    };
+    window.addEventListener("message", onMediaMessage);
     return () => {
       window.removeEventListener("message", onHostMessage);
       window.removeEventListener("message", onCheckResult);
       window.removeEventListener("message", onLoginMessage);
       window.removeEventListener("message", onFetchModelsMessage);
+      window.removeEventListener("message", onMediaMessage);
     };
   });
 
@@ -519,7 +542,7 @@
         <button
           class="btn small icon-btn"
           onclick={() => sendMessage({ type: "refreshModels" })}
-          title="Refresh provider list"
+          title="Refresh provider list (offline catalog)"
         >
           <svg
             width="14"
@@ -533,6 +556,13 @@
               d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
             />
           </svg>
+        </button>
+        <button
+          class="btn small"
+          onclick={() => sendMessage({ type: "refreshModels", data: { allowNetwork: true } })}
+          title="Refresh with the personalized network catalog (OpenRouter key scoping, remote models)"
+        >
+          Refresh (online)
         </button>
         <button class="btn small" onclick={openAddForm} title="Add a custom provider">
           + Add provider
@@ -1124,6 +1154,45 @@
         {/if}
       </div>
     {/each}
+
+    {#if mediaLoaded && (imageModels.length > 0 || classifierModels.length > 0)}
+      <div class="separator" role="separator">
+        <span>Media Models (non-chat)</span>
+      </div>
+      <p class="media-note">
+        Image and classifier models from the PI catalog. They run through codemode scripts and
+        classification — the chat picker above only lists chat models.
+      </p>
+      {#each imageModels as m (`${m.provider}/${m.id}`)}
+        <div class="auth-card media-card">
+          <div class="auth-main">
+            <div class="auth-info">
+              <span class="auth-name">{m.name}</span>
+              <span class="media-badge">Image</span>
+              <span class="auth-status" class:configured={m.available}>
+                {m.available ? "Available" : m.provider}
+              </span>
+            </div>
+          </div>
+        </div>
+      {/each}
+      {#each classifierModels as m (`${m.provider}/${m.id}`)}
+        <div class="auth-card media-card">
+          <div class="auth-main">
+            <div class="auth-info">
+              <span class="auth-name">{m.name}</span>
+              <span class="media-badge">Classifier</span>
+              {#if m.provider === "typesafe"}
+                <span class="media-badge classifier-only">Classifier-only provider</span>
+              {/if}
+              <span class="auth-status" class:configured={m.available}>
+                {m.available ? "Available" : m.provider}
+              </span>
+            </div>
+          </div>
+        </div>
+      {/each}
+    {/if}
   </div>
 </div>
 
@@ -1436,6 +1505,29 @@
   .auth-badge.api-key {
     color: var(--color-warning);
     background: oklch(from var(--color-warning) l c h / 0.12);
+  }
+
+  .media-note {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.5;
+  }
+
+  .media-badge {
+    margin-left: var(--space-2);
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+  .media-badge.classifier-only {
+    color: var(--color-warning);
+    border-color: oklch(from var(--color-warning) l c h / 0.4);
   }
 
   /* ── OAuth login cards ─────────────────────────────────────────────── */

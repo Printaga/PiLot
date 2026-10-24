@@ -1,5 +1,13 @@
 <script lang="ts">
   import type { OpenConfigFileKey, Model, ThinkingLevel } from "../types/index";
+  import type {
+    CodemodeMode,
+    CodemodeProjectStatus,
+    CodemodeSettings,
+    CodemodeSettingsPatch,
+    CodemodeSource,
+    CodemodeSources,
+  } from "../../protocol/types";
   import HelpTooltip from "./HelpTooltip.svelte";
 
   // Single source for the fallback level list (mirrors the prop default; both
@@ -175,6 +183,258 @@
     if (systemPromptOverrides.appendSystemPrompts) names.push("pi-agent.appendSystemPrompts");
     return names;
   });
+
+  // ── MCP & Codemode ─────────────────────────────────────────────────────
+  // The host resolves global settings plus a trusted project's .pi/settings.json
+  // for `codemode.mode`/`inlineBudget`. `autoEnableCodemode` comes from mcp.json
+  // (main or project). This panel only displays effective values and sends
+  // patches; edits always target the global files.
+  const CODEMODE_MODES: ReadonlyArray<{ value: CodemodeMode; label: string }> = [
+    { value: "on", label: "On — keep declared tools declared" },
+    { value: "only", label: "Only — route every tool through codemode" },
+  ];
+
+  const CODEMODE_MODE_HELP: Record<CodemodeMode, string> = {
+    on: "Declared tools stay declared and gain a note on calling them from scripts; codemode lists only the tools that are not declared.",
+    only: "Codemode lists every tool scripts can call, and active built-in and extension tools are hidden from the model.",
+  };
+
+  const SOURCE_LABELS: Record<CodemodeSource, string> = {
+    project: "Project",
+    global: "Global",
+    default: "Default",
+  };
+
+  const SOURCE_TITLES: Record<"settings" | "mcp", Record<CodemodeSource, string>> = {
+    settings: {
+      project: "Set by .pi/settings.json",
+      global: "Set by the global settings.json",
+      default: "PI default (no config value)",
+    },
+    mcp: {
+      project: "Set by .pi/mcp.json",
+      global: "Set by the main mcp.json",
+      default: "PI default (no config value)",
+    },
+  };
+
+  const CODEMODE_PROJECT_STATUSES: readonly CodemodeProjectStatus[] = [
+    "none",
+    "applied",
+    "ignored",
+    "invalid",
+  ];
+
+  const EXPOSURE_GUIDE: ReadonlyArray<{ name: string; title: string; copy: string }> = [
+    {
+      name: "Codemode",
+      title: "Best default for many tools",
+      copy: "The model writes a script that discovers and calls tools as needed. Good for servers with many tools and workflows involving several calls.",
+    },
+    {
+      name: "Deferred",
+      title: "Discover, then call directly",
+      copy: "The model searches for a relevant tool, which PI exposes for a subsequent model call. Useful with a large catalog when you prefer ordinary direct calls after discovery.",
+    },
+    {
+      name: "Direct",
+      title: "Always visible to the model",
+      copy: "Tools are declared like built-in tools. Best for a small set of frequently used tools; large tool lists consume more prompt tokens.",
+    },
+    {
+      name: "Hidden",
+      title: "Configured but unreachable",
+      copy: "Registered but unreachable by the model. Useful for keeping a server configured while preventing any use.",
+    },
+  ];
+
+  let codemode = $state<CodemodeSettings>({
+    mode: "on",
+    inlineBudget: 3000,
+    autoEnableCodemode: true,
+    sources: {
+      mode: "default",
+      inlineBudget: "default",
+      autoEnableCodemode: "default",
+    },
+    projectStatus: "none",
+  });
+
+  const hasProjectSettingsOverride = $derived(
+    codemode.sources.mode === "project" || codemode.sources.inlineBudget === "project",
+  );
+  const hasProjectMcpOverride = $derived(codemode.sources.autoEnableCodemode === "project");
+  const projectErrorSuffix = $derived(codemode.projectError ? `: ${codemode.projectError}` : ".");
+
+  // Small coercers keep the payload guard under the complexity gate; an error
+  // result never reaches here (the host omits the codemode-settings message).
+  function codemodeMode(value: unknown): CodemodeMode {
+    return value === "only" ? "only" : "on";
+  }
+
+  function codemodeBudget(value: unknown): number {
+    return typeof value === "number" ? value : 3000;
+  }
+
+  function codemodeAutoEnable(value: unknown): boolean {
+    return value !== false;
+  }
+
+  function codemodeSource(value: unknown): CodemodeSource {
+    return value === "project" ? "project" : value === "global" ? "global" : "default";
+  }
+
+  function codemodeSources(value: unknown): CodemodeSources {
+    const record =
+      typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+    return {
+      mode: codemodeSource(record.mode),
+      inlineBudget: codemodeSource(record.inlineBudget),
+      autoEnableCodemode: codemodeSource(record.autoEnableCodemode),
+    };
+  }
+
+  function codemodeProjectStatus(value: unknown): CodemodeProjectStatus | undefined {
+    return typeof value === "string" &&
+      CODEMODE_PROJECT_STATUSES.includes(value as CodemodeProjectStatus)
+      ? (value as CodemodeProjectStatus)
+      : undefined;
+  }
+
+  function codemodeProjectInfo(record: Record<string, unknown>): Partial<CodemodeSettings> {
+    const status = codemodeProjectStatus(record.projectStatus);
+    return {
+      ...(typeof record.projectFile === "string" ? { projectFile: record.projectFile } : {}),
+      ...(status ? { projectStatus: status } : {}),
+      ...(typeof record.projectError === "string" ? { projectError: record.projectError } : {}),
+    };
+  }
+
+  function nextCodemodeSettings(data: unknown): CodemodeSettings | undefined {
+    if (typeof data !== "object" || data === null) return undefined;
+    const record = data as Record<string, unknown>;
+    return {
+      mode: codemodeMode(record.mode),
+      inlineBudget: codemodeBudget(record.inlineBudget),
+      autoEnableCodemode: codemodeAutoEnable(record.autoEnableCodemode),
+      sources: codemodeSources(record.sources),
+      ...codemodeProjectInfo(record),
+    };
+  }
+
+  function handleCodemodeMessage(event: MessageEvent) {
+    const message = event.data;
+    if (message?.type !== "codemode-settings") return;
+    const next = nextCodemodeSettings(message.data);
+    if (next) codemode = next;
+  }
+
+  $effect(() => {
+    const vscode = getVsCodeApi();
+    if (!vscode) return;
+    window.addEventListener("message", handleCodemodeMessage);
+    vscode.postMessage({ type: "getCodemodeSettings" });
+    // Project settings can change in an editor or another window while this
+    // panel stays mounted; refresh the effective values when it regains focus.
+    const refetch = () => vscode.postMessage({ type: "getCodemodeSettings" });
+    window.addEventListener("focus", refetch);
+    return () => {
+      window.removeEventListener("message", handleCodemodeMessage);
+      window.removeEventListener("focus", refetch);
+    };
+  });
+
+  function sendCodemodePatch(patch: CodemodeSettingsPatch) {
+    getVsCodeApi()?.postMessage({ type: "setCodemodeSettings", data: patch });
+  }
+
+  function handleCodemodeModeChange(event: Event) {
+    const mode = (event.currentTarget as HTMLSelectElement).value as CodemodeMode;
+    sendCodemodePatch({ mode });
+  }
+
+  function handleCodemodeBudgetChange(event: Event) {
+    const budget = Number((event.currentTarget as HTMLInputElement).value);
+    if (Number.isFinite(budget) && budget >= 0) {
+      sendCodemodePatch({ inlineBudget: Math.floor(budget) });
+    }
+  }
+
+  function handleAutoEnableCodemodeChange() {
+    sendCodemodePatch({ autoEnableCodemode: !codemode.autoEnableCodemode });
+  }
+
+  // ── Cache warming ────────────────────────────────────────────────────
+  type CacheWarmingMode = "off" | "streaming" | "idle";
+  const CACHE_WARMING_MODES: ReadonlyArray<{ value: CacheWarmingMode; label: string }> = [
+    { value: "streaming", label: "Streaming" },
+    { value: "idle", label: "Idle" },
+    { value: "off", label: "Off" },
+  ];
+  let cacheWarming = $state<CacheWarmingMode>("streaming");
+
+  function handleCacheWarmingMessage(event: MessageEvent) {
+    const message = event.data;
+    if (message?.type !== "cache-warming-changed") return;
+    const mode = message.data?.mode;
+    if (mode === "off" || mode === "streaming" || mode === "idle") cacheWarming = mode;
+  }
+
+  $effect(() => {
+    const vscode = getVsCodeApi();
+    if (!vscode) return;
+    window.addEventListener("message", handleCacheWarmingMessage);
+    vscode.postMessage({ type: "getCacheWarming" });
+    const refetch = () => vscode.postMessage({ type: "getCacheWarming" });
+    window.addEventListener("focus", refetch);
+    return () => {
+      window.removeEventListener("message", handleCacheWarmingMessage);
+      window.removeEventListener("focus", refetch);
+    };
+  });
+
+  function handleCacheWarmingChange(event: Event) {
+    const mode = (event.currentTarget as HTMLSelectElement).value;
+    if (mode === "off" || mode === "streaming" || mode === "idle") {
+      cacheWarming = mode;
+      getVsCodeApi()?.postMessage({ type: "setCacheWarming", data: { mode } });
+    }
+  }
+
+  // ── defaultTools codemode ────────────────────────────────────────────
+  let defaultToolsCodemode = $state({ enabled: false, globalEnabled: false });
+
+  function handleDefaultToolsCodemodeMessage(event: MessageEvent) {
+    const message = event.data;
+    if (message?.type !== "default-tools-codemode") return;
+    const data = message.data;
+    if (typeof data?.enabled === "boolean") {
+      defaultToolsCodemode = {
+        enabled: data.enabled,
+        globalEnabled: data.globalEnabled === true,
+      };
+    }
+  }
+
+  $effect(() => {
+    const vscode = getVsCodeApi();
+    if (!vscode) return;
+    window.addEventListener("message", handleDefaultToolsCodemodeMessage);
+    vscode.postMessage({ type: "getDefaultToolsCodemode" });
+    const refetch = () => vscode.postMessage({ type: "getDefaultToolsCodemode" });
+    window.addEventListener("focus", refetch);
+    return () => {
+      window.removeEventListener("message", handleDefaultToolsCodemodeMessage);
+      window.removeEventListener("focus", refetch);
+    };
+  });
+
+  function handleDefaultToolsCodemodeChange() {
+    getVsCodeApi()?.postMessage({
+      type: "setDefaultToolsCodemode",
+      data: { enabled: !defaultToolsCodemode.enabled },
+    });
+  }
 </script>
 
 <div class="settings-panel">
@@ -261,6 +521,29 @@
       <div class="setting-item">
         <div class="setting-info">
           <div class="setting-label-row">
+            <span class="setting-label">Cache Warming</span>
+            <HelpTooltip
+              text="Keep valuable prompt cache warm so repeated runs reuse it. Streaming warms while you work, idle warms when the session is idle, off disables it. Applies to new sessions; the live session is updated too."
+              title="Cache Warming"
+            />
+          </div>
+          <span class="setting-description"> Keep prompt cache warm between runs </span>
+        </div>
+        <select
+          class="codemode-select"
+          aria-label="Cache Warming"
+          value={cacheWarming}
+          onchange={handleCacheWarmingChange}
+        >
+          {#each CACHE_WARMING_MODES as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
             <span class="setting-label">Cache Miss Notices</span>
             <HelpTooltip
               text="When enabled, PI surfaces cache-miss notices so you can see when a cached response could not be reused."
@@ -278,6 +561,159 @@
           />
           <span class="toggle-slider"></span>
         </label>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h4>MCP &amp; Codemode</h4>
+      <p class="section-description">
+        PI routes MCP tools through codemode by default. These controls show the effective values
+        from PI's global config and a trusted project's <code>.pi/settings.json</code>. Edits write
+        the global config and apply to new sessions.
+      </p>
+
+      {#snippet sourceBadge(source: CodemodeSource, kind: "settings" | "mcp")}
+        <span
+          class="source-badge"
+          class:project={source === "project"}
+          title={SOURCE_TITLES[kind][source]}>{SOURCE_LABELS[source]}</span
+        >
+      {/snippet}
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
+            <span class="setting-label">Auto-enable Codemode</span>
+            {@render sourceBadge(codemode.sources.autoEnableCodemode, "mcp")}
+            <HelpTooltip
+              text="When a server with codemode exposure connects, PI activates the codemode tool automatically. Turn this off to keep codemode inactive unless you enable it yourself (for example with defaultTools). Writes autoEnableCodemode to the main mcp.json."
+              title="Auto-enable Codemode"
+            />
+          </div>
+          <span class="setting-description">
+            Activate codemode when a codemode server connects. A project-level value overrides this
+            one.
+          </span>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={codemode.autoEnableCodemode}
+            onchange={handleAutoEnableCodemodeChange}
+            aria-label="Auto-enable Codemode"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
+            <span class="setting-label">Enable Codemode by default</span>
+            <HelpTooltip
+              text="Adds +codemode to the global defaultTools so every new session starts with the codemode tool available. A project-level defaultTools still layers on top. Applies to new sessions."
+              title="Enable Codemode by default"
+            />
+          </div>
+          <span class="setting-description">
+            {#if defaultToolsCodemode.globalEnabled}On — +codemode is in the global defaultTools{:else}Off
+              — codemode activates via MCP or per-session tools{/if}
+          </span>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={defaultToolsCodemode.enabled}
+            onchange={handleDefaultToolsCodemodeChange}
+            aria-label="Enable Codemode by default"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
+            <span class="setting-label">Codemode mode</span>
+            {@render sourceBadge(codemode.sources.mode, "settings")}
+            <HelpTooltip
+              text="With 'on', declared tools stay declared and their descriptions explain how to call them from scripts; codemode lists only tools that are not declared. With 'only', every tool is listed in the codemode description and hidden from the model, so all calls go through scripts."
+              title="Codemode Mode"
+            />
+          </div>
+          <span class="setting-description">{CODEMODE_MODE_HELP[codemode.mode]}</span>
+        </div>
+        <select
+          class="codemode-select"
+          aria-label="Codemode mode"
+          value={codemode.mode}
+          onchange={handleCodemodeModeChange}
+        >
+          {#each CODEMODE_MODES as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label-row">
+            <span class="setting-label">Inline tool budget</span>
+            {@render sourceBadge(codemode.sources.inlineBudget, "settings")}
+            <HelpTooltip
+              text="Estimated tokens (characters / 4) the codemode description may spend on TypeScript tool declarations. Tools that do not fit are left out and found with searchTools(). 0 lists only namespaces. Writes codemode.inlineBudget to settings.json."
+              title="Inline Tool Budget"
+            />
+          </div>
+          <span class="setting-description">
+            Tokens for tool declarations before tools move behind searchTools()
+          </span>
+        </div>
+        <input
+          class="number-input"
+          type="number"
+          min="0"
+          step="100"
+          value={codemode.inlineBudget}
+          onchange={handleCodemodeBudgetChange}
+          aria-label="Inline tool budget"
+        />
+      </div>
+
+      {#if codemode.projectStatus === "ignored"}
+        <p class="source-note warning" role="status">
+          Project .pi/settings.json is ignored because this project is not trusted. Only global
+          values are shown.
+        </p>
+      {:else if codemode.projectStatus === "invalid"}
+        <p class="source-note warning" role="status">
+          Could not read .pi/settings.json{projectErrorSuffix} Global values are shown.
+        </p>
+      {/if}
+      {#if hasProjectSettingsOverride}
+        <p class="source-note">
+          Values marked Project come from .pi/settings.json. Saving here updates your global
+          settings, but the project override still wins in this workspace.
+        </p>
+      {/if}
+      {#if hasProjectMcpOverride}
+        <p class="source-note">
+          Auto-enable is overridden by .pi/mcp.json. Saving here updates the main mcp.json, but the
+          project value still wins in this workspace.
+        </p>
+      {/if}
+
+      <h5>MCP tool exposure</h5>
+      <p class="section-description">
+        Exposure is set per server, not globally. Change it in the MCP tab or in mcp.json.
+      </p>
+      <div class="exposure-guide">
+        {#each EXPOSURE_GUIDE as item (item.name)}
+          <div class="exposure-item">
+            <span class="exposure-name">{item.name} <span>— {item.title}</span></span>
+            <span class="exposure-copy">{item.copy}</span>
+          </div>
+        {/each}
       </div>
     </section>
 
@@ -403,6 +839,7 @@
         <button class="config-btn" onclick={() => openConfigFile("models")}>
           Open models.json
         </button>
+        <button class="config-btn" onclick={() => openConfigFile("mcp")}> Open mcp.json </button>
       </div>
       <p class="section-description" style="margin-top: var(--space-3);">
         Customize PI's system prompt. Applies to new sessions.
@@ -553,7 +990,36 @@
   .setting-label-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-2);
+  }
+
+  .source-badge {
+    padding: 1px var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .source-badge.project {
+    border-color: color-mix(in oklch, var(--color-primary) 45%, transparent);
+    background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+    color: var(--color-primary);
+  }
+
+  .source-note {
+    margin-top: var(--space-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+  }
+
+  .source-note.warning {
+    color: var(--color-warning);
   }
 
   .setting-label {
@@ -583,6 +1049,74 @@
 
   .model-select:hover {
     background: var(--color-surface-2);
+  }
+
+  .codemode-select {
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    max-width: 60%;
+  }
+
+  .codemode-select:hover {
+    background: var(--color-surface-2);
+  }
+
+  .number-input {
+    width: 96px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    text-align: right;
+  }
+
+  .number-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+  }
+
+  h5 {
+    margin: var(--space-4) 0 var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .exposure-guide {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .exposure-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .exposure-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .exposure-name span {
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+
+  .exposure-copy {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.5;
   }
 
   .toggle {

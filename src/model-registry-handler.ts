@@ -145,7 +145,7 @@ export class ModelRegistryHandler {
 			.sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
 	}
 
-	async refreshAvailableModels(): Promise<void> {
+	async refreshAvailableModels(options: { allowNetwork?: boolean } = {}): Promise<void> {
 		const modelRegistry = this.deps.getModelRegistry();
 		if (!modelRegistry) return;
 		// Reload models from disk (re-reads models.json and re-applies registered providers).
@@ -155,9 +155,11 @@ export class ModelRegistryHandler {
 		// A failure here (corrupt models.json, disk error) must keep the previous
 		// list and still reach callers as a logged no-op instead of an unhandled
 		// rejection that leaves the webview without any feedback.
+		// `allowNetwork` performs the PI 1.2+ personalized catalog refresh and
+		// is only passed for explicit user refreshes; startup stays offline.
 		let models: RegistryModel[];
 		try {
-			await modelRegistry.refresh();
+			await modelRegistry.refresh(options.allowNetwork ? { allowNetwork: true } : undefined);
 			models = await this.getMergedModels();
 		} catch (err) {
 			this.deps.logError("[PI] Failed to refresh available models:", err);

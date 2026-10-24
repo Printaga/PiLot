@@ -2,7 +2,17 @@ import * as vscode from "vscode";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { type ProviderApi, type ConfigFileKey } from "./protocol/types.js";
+import {
+	type ProviderApi,
+	type CacheWarmingMode,
+	type CodemodeMode,
+	type CodemodeSettings,
+	type CodemodeSettingsPatch,
+	type CodemodeSource,
+	type CodemodeSources,
+	type ConfigFileKey,
+	type McpConfigPatch,
+} from "./protocol/types.js";
 import { canPassModelArg } from "./git-commit-message.js";
 
 /** How long a diff-preview temp file is kept before cleanup. */
@@ -13,6 +23,32 @@ function toErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function isCodemodeSource(value: unknown): value is CodemodeSource {
+	return value === "default" || value === "global" || value === "project";
+}
+
+function isCodemodeSources(value: unknown): value is CodemodeSources {
+	if (typeof value !== "object" || value === null) return false;
+	const sources = value as Record<string, unknown>;
+	return (
+		isCodemodeSource(sources.mode) &&
+		isCodemodeSource(sources.inlineBudget) &&
+		isCodemodeSource(sources.autoEnableCodemode)
+	);
+}
+
+/** True only for a complete codemode settings payload (not an error result). */
+function isCodemodeSettings(value: unknown): value is CodemodeSettings {
+	if (typeof value !== "object" || value === null) return false;
+	const settings = value as Record<string, unknown>;
+	return (
+		(settings.mode === "on" || settings.mode === "only") &&
+		typeof settings.inlineBudget === "number" &&
+		typeof settings.autoEnableCodemode === "boolean" &&
+		isCodemodeSources(settings.sources)
+	);
+}
+
 /** Keys openConfigFile accepts; must mirror ConfigFileKey. */
 const OPEN_CONFIG_FILES: readonly string[] = [
 	"auth",
@@ -20,6 +56,7 @@ const OPEN_CONFIG_FILES: readonly string[] = [
 	"settings",
 	"system-prompt",
 	"append-system-prompt",
+	"mcp",
 ] satisfies readonly ConfigFileKey[];
 
 export class MessageHandler {
@@ -168,8 +205,82 @@ export class MessageHandler {
 					break;
 
 				case "refreshModels":
-					result = await this.withErrorReporting(() => this.provider.refreshModels());
+					result = await this.withErrorReporting(() =>
+						this.provider.refreshModels(
+							payload.refreshCredentials !== false,
+							payload.allowNetwork === true ? { allowNetwork: true } : undefined,
+						),
+					);
 					break;
+
+				case "getCacheWarming": {
+					const mode = await this.withErrorReporting(
+						() => this.provider.getCacheWarmingMode(),
+						message.id,
+					);
+					if (typeof mode === "string") {
+						this.provider.webview?.postMessage({
+							type: "cache-warming-changed",
+							data: { mode },
+						});
+					}
+					result = { success: true };
+					break;
+				}
+
+				case "setCacheWarming": {
+					const mode = payload.mode as CacheWarmingMode;
+					if (mode !== "off" && mode !== "streaming" && mode !== "idle") {
+						result = { error: `Invalid cache warming mode: ${String(mode)}` };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.setCacheWarmingMode(mode),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "getDefaultToolsCodemode": {
+					const data = await this.withErrorReporting(
+						() => this.provider.getDefaultToolsCodemodeEnabled(),
+						message.id,
+					);
+					this.provider.webview?.postMessage({
+						type: "default-tools-codemode",
+						data,
+					});
+					result = { success: true };
+					break;
+				}
+
+				case "setDefaultToolsCodemode": {
+					if (typeof payload.enabled !== "boolean") {
+						result = { error: "setDefaultToolsCodemode requires enabled" };
+						break;
+					}
+					const data = await this.withErrorReporting(
+						() => this.provider.setDefaultToolsCodemodeEnabled(payload.enabled),
+						message.id,
+					);
+					this.provider.webview?.postMessage({
+						type: "default-tools-codemode",
+						data,
+					});
+					result = { success: true };
+					break;
+				}
+
+				case "getMediaModels": {
+					const data = await this.withErrorReporting(
+						() => this.provider.getMediaModels(),
+						message.id,
+					);
+					this.provider.webview?.postMessage({ type: "media-models", data });
+					result = { success: true };
+					break;
+				}
 
 				case "getProviderAuth":
 					result = await this.provider.getProviderAuthData();
@@ -346,6 +457,214 @@ export class MessageHandler {
 					}
 					await this.withErrorReporting(() =>
 						this.provider.openConfigFile(file as ConfigFileKey),
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "openMcpConfig": {
+					const scope = payload.scope;
+					if (scope !== "global" && scope !== "project") {
+						result = { error: `Invalid MCP scope: ${String(scope)}` };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.openMcpConfig(scope),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "getMcpServers": {
+					const data = await this.withErrorReporting(
+						() => this.provider.listMcpServers(),
+						message.id,
+					);
+					this.provider.webview?.postMessage({ type: "mcp-servers", data });
+					result = { success: true };
+					break;
+				}
+
+				case "checkMcpServers": {
+					const data = await this.withErrorReporting(
+						() => this.provider.checkMcpServers(),
+						message.id,
+					);
+					this.provider.webview?.postMessage({ type: "mcp-servers", data });
+					result = { success: true };
+					break;
+				}
+
+				case "getCodemodeSettings": {
+					const data = await this.withErrorReporting(
+						() => this.provider.getCodemodeSettings(),
+						message.id,
+					);
+					if (isCodemodeSettings(data)) {
+						this.provider.webview?.postMessage({ type: "codemode-settings", data });
+					}
+					result = { success: true };
+					break;
+				}
+
+				case "setCodemodeSettings": {
+					const patch: CodemodeSettingsPatch = {};
+					if (payload.mode !== undefined) {
+						const mode = payload.mode as CodemodeMode;
+						if (mode !== "on" && mode !== "only") {
+							result = { error: `Invalid codemode mode: ${String(mode)}` };
+							break;
+						}
+						patch.mode = mode;
+					}
+					if (payload.inlineBudget !== undefined) {
+						const budget = payload.inlineBudget;
+						if (typeof budget !== "number" || !Number.isFinite(budget) || budget < 0) {
+							result = { error: "inlineBudget must be a non-negative number" };
+							break;
+						}
+						patch.inlineBudget = Math.floor(budget);
+					}
+					if (payload.autoEnableCodemode !== undefined) {
+						if (typeof payload.autoEnableCodemode !== "boolean") {
+							result = { error: "autoEnableCodemode must be a boolean" };
+							break;
+						}
+						patch.autoEnableCodemode = payload.autoEnableCodemode;
+					}
+					if (Object.keys(patch).length === 0) {
+						result = { error: "No codemode setting to update" };
+						break;
+					}
+					const data = await this.withErrorReporting(
+						() => this.provider.setCodemodeSettings(patch),
+						message.id,
+					);
+					if (isCodemodeSettings(data)) {
+						this.provider.webview?.postMessage({ type: "codemode-settings", data });
+					}
+					result = { success: true };
+					break;
+				}
+
+				case "addMcpServer": {
+					if (typeof payload.name !== "string" || !payload.name.trim()) {
+						result = { error: "An MCP server name is required" };
+						break;
+					}
+					if (payload.transport !== "stdio" && payload.transport !== "http") {
+						result = { error: `Invalid MCP transport: ${String(payload.transport)}` };
+						break;
+					}
+					await this.withErrorReporting(
+						() =>
+							this.provider.addMcpServer({
+								name: payload.name,
+								transport: payload.transport,
+								command:
+									typeof payload.command === "string"
+										? payload.command
+										: undefined,
+								args: Array.isArray(payload.args)
+									? payload.args.filter(
+											(v: unknown): v is string => typeof v === "string",
+										)
+									: undefined,
+								cwd: typeof payload.cwd === "string" ? payload.cwd : undefined,
+								url: typeof payload.url === "string" ? payload.url : undefined,
+								env: payload.env,
+								headers: payload.headers,
+								bearerTokenEnvVar:
+									typeof payload.bearerTokenEnvVar === "string"
+										? payload.bearerTokenEnvVar
+										: undefined,
+								oauthClientId:
+									typeof payload.oauthClientId === "string"
+										? payload.oauthClientId
+										: undefined,
+								oauthClientSecret:
+									typeof payload.oauthClientSecret === "string"
+										? payload.oauthClientSecret
+										: undefined,
+								exposure: payload.exposure,
+								description:
+									typeof payload.description === "string"
+										? payload.description
+										: undefined,
+								local: payload.local === true,
+							}),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "removeMcpServer": {
+					const scope = payload.scope === "project" ? "project" : "global";
+					if (typeof payload.name !== "string" || !payload.name) {
+						result = { error: "An MCP server name is required" };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.removeMcpServer(payload.name, scope),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "updateMcpServerConfig": {
+					const scope = payload.scope === "project" ? "project" : undefined;
+					const patch: McpConfigPatch = {};
+					if (typeof payload.patch?.enabled === "boolean") {
+						patch.enabled = payload.patch.enabled;
+					}
+					if (payload.patch?.exposure !== undefined) {
+						const exposure = payload.patch.exposure;
+						if (!["codemode", "deferred", "direct", "hidden"].includes(exposure)) {
+							result = { error: `Invalid MCP exposure: ${String(exposure)}` };
+							break;
+						}
+						patch.exposure = exposure;
+					}
+					if (patch.enabled === undefined && patch.exposure === undefined) {
+						result = { error: "No MCP setting to update" };
+						break;
+					}
+					if (typeof payload.name !== "string" || !payload.name) {
+						result = { error: "An MCP server name is required" };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.updateMcpServerConfig(payload.name, patch, scope),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "loginMcpServer": {
+					if (typeof payload.name !== "string" || !payload.name) {
+						result = { error: "An MCP server name is required" };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.loginMcpServer(payload.name),
+						message.id,
+					);
+					result = { success: true };
+					break;
+				}
+
+				case "logoutMcpServer": {
+					if (typeof payload.name !== "string" || !payload.name) {
+						result = { error: "An MCP server name is required" };
+						break;
+					}
+					await this.withErrorReporting(
+						() => this.provider.logoutMcpServer(payload.name),
+						message.id,
 					);
 					result = { success: true };
 					break;

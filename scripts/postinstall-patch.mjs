@@ -12,7 +12,7 @@
 // Implementation notes: everything runs through node:fs (no shell), so paths from
 // any source are inert and the script also works on Windows.
 
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +52,11 @@ function findFilesUnder(dir, relativePattern, depth = 0, out = []) {
 }
 
 function findFiles(pattern) {
+	// pnpm can expose the package through a symlink, which the directory walk
+	// below deliberately does not follow (it avoids cycles). Resolve the direct
+	// path first so a hoisted and a symlinked layout both get patched.
+	const direct = path.join(root, "node_modules", pattern);
+	if (existsSync(direct)) return [direct];
 	return findFilesUnder(path.join(root, "node_modules"), pattern);
 }
 

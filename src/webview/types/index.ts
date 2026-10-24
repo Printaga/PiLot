@@ -124,7 +124,7 @@ export interface VoiceModelDef {
  * the host's OPEN_CONFIG_FILES allowlist in src/message-handler.ts; this union
  * must stay identical or the webview cannot open the new file. */
 export type OpenConfigFileKey =
-  "auth" | "models" | "settings" | "system-prompt" | "append-system-prompt";
+  "auth" | "models" | "settings" | "system-prompt" | "append-system-prompt" | "mcp";
 
 /**
  * Thinking level enumeration.

@@ -1,8 +1,8 @@
 // run-e2e.mjs — portable entry for the VS Code integration suite.
 // Replaces POSIX-only shell syntax in the `test` package script (cmd.exe
 // cannot run `if ...; then ... fi`), so `pnpm test` works on Windows too.
-// When no display server exists (Linux CI) and xvfb-run is available, the
-// suite runs under a virtual display; otherwise the host is used directly.
+// On Linux, prefer a virtual display whenever xvfb-run is available so test
+// windows never appear over the developer's desktop; otherwise use the host.
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 

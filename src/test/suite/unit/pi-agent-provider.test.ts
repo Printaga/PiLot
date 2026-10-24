@@ -557,6 +557,7 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(rlOptions.noThemes, true);
 			assert.deepStrictEqual(opts.tools, ["read", "bash", "edit", "write"]);
 			assert.strictEqual(opts.noTools, undefined);
+			assert.deepStrictEqual((opts.resourceLoader as any).extensionFactories, []);
 		});
 
 		test("lightMode keeps explicit tool preset behavior", async () => {
@@ -573,6 +574,62 @@ suite("PiAgentProvider", () => {
 			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
 			assert.deepStrictEqual(opts.tools, ["read", "grep", "find", "ls"]);
 			assert.strictEqual(opts.noTools, undefined);
+		});
+
+		test("default preset loads the built-in MCP, codemode and tool_search factories", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "lightMode") return false;
+					if (key === "toolPreset") return "default";
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
+			const loader = opts.resourceLoader as any;
+			assert.strictEqual(loader.extensionFactories.length, 3);
+			assert.strictEqual(loader.getExtensions().extensions.length, 3);
+			assert.deepStrictEqual(loader.getExtensions().errors, []);
+		});
+
+		test("disableExtensionDiscovery suppresses the built-in factories too", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (key: string, def: any) => {
+					if (key === "disableExtensionDiscovery") return true;
+					return def;
+				},
+				update: async () => {},
+			});
+
+			const opts = await (provider as any).buildSessionOptions("/fake/workspace");
+			assert.deepStrictEqual((opts.resourceLoader as any).extensionFactories, []);
+		});
+
+		test("passes a project-trust resolver to the resource loader", async () => {
+			const provider = buildProvider();
+			(vscode.workspace as any).getConfiguration = (_section?: string) => ({
+				get: (_key: string, def: any) => def,
+				update: async () => {},
+			});
+
+			const reloadCalls: any[] = [];
+			const originalReload = (DefaultResourceLoader.prototype as any).reload;
+			(DefaultResourceLoader.prototype as any).reload = async function (options: any) {
+				reloadCalls.push(options);
+			};
+			try {
+				await (provider as any).buildSessionOptions("/fake/workspace");
+			} finally {
+				(DefaultResourceLoader.prototype as any).reload = originalReload;
+			}
+
+			assert.strictEqual(reloadCalls.length, 1);
+			assert.strictEqual(typeof reloadCalls[0].resolveProjectTrust, "function");
+			// /fake/workspace has no project-local .pi resources, so no prompt is needed.
+			assert.strictEqual(await reloadCalls[0].resolveProjectTrust(), true);
 		});
 
 		test("lightMode off leaves discovery and tools untouched", async () => {
@@ -652,6 +709,92 @@ suite("PiAgentProvider", () => {
 			assert.strictEqual(filtered.getExtensions().extensions.length, 1);
 			assert.strictEqual(filtered.getPrompts().prompts.length, 1);
 			assert.strictEqual(filtered.getThemes().themes.length, 1);
+		});
+	});
+
+	suite("Azure provider migration", () => {
+		test("moves credentials, defaults, scoped models and persisted ids", async () => {
+			const agentFs = installMemoryAgentFs({
+				[path.join("/fake/agent-dir", "auth.json")]: JSON.stringify({
+					"azure-openai-responses": { type: "api_key", key: "azure-key" },
+					openai: { type: "api_key", key: "openai-key" },
+				}),
+			});
+			try {
+				const provider: any = buildProvider();
+				const settings: any = createMockSettingsManager();
+				const settingCalls: string[] = [];
+				let defaultProvider = "azure-openai-responses";
+				let defaultModel = "gpt-5.6";
+				let enabledModels = ["openai/gpt-5.6", "azure-openai-responses/gpt-5.6"];
+				settings.getDefaultModel = () => defaultModel;
+				settings.getDefaultProvider = () => defaultProvider;
+				settings.setDefaultModelAndProvider = async (
+					providerId: string,
+					modelId: string,
+				) => {
+					settingCalls.push(`default:${providerId}/${modelId}`);
+					defaultProvider = providerId;
+					defaultModel = modelId;
+				};
+				settings.getEnabledModels = () => enabledModels;
+				settings.setEnabledModels = async (ids: string[]) => {
+					settingCalls.push(`enabled:${ids.join(",")}`);
+					enabledModels = ids;
+				};
+				settings.flush = async () => {
+					settingCalls.push("flush");
+				};
+				provider.settingsManager = settings;
+
+				const state: Record<string, unknown> = {
+					favoriteModels: ["azure-openai-responses/gpt-5.6", "openai/gpt-5.6"],
+					currentModelId: "azure-openai-responses/gpt-5.6",
+				};
+				provider.context.globalState = {
+					get: (key: string, def: unknown) => (key in state ? state[key] : def),
+					update: async (key: string, value: unknown) => {
+						state[key] = value;
+					},
+				};
+
+				await provider.migrateAzureProviderState();
+
+				assert.deepStrictEqual(agentFs.read(), {
+					azure: { type: "api_key", key: "azure-key" },
+					openai: { type: "api_key", key: "openai-key" },
+				});
+				assert.deepStrictEqual(settingCalls, [
+					"default:azure/gpt-5.6",
+					"enabled:openai/gpt-5.6,azure/gpt-5.6",
+					"flush",
+				]);
+				assert.deepStrictEqual(state.favoriteModels, ["azure/gpt-5.6", "openai/gpt-5.6"]);
+				assert.strictEqual(state.currentModelId, "azure/gpt-5.6");
+
+				// A second run must not rewrite anything.
+				const rawAfterFirstRun = agentFs.readRaw();
+				settingCalls.length = 0;
+				await provider.migrateAzureProviderState();
+				assert.strictEqual(agentFs.readRaw(), rawAfterFirstRun);
+				assert.deepStrictEqual(settingCalls, []);
+			} finally {
+				agentFs.restore();
+			}
+		});
+
+		test("leaves unrelated auth entries untouched", async () => {
+			const original = JSON.stringify({ openai: { type: "api_key", key: "openai-key" } });
+			const agentFs = installMemoryAgentFs({
+				[path.join("/fake/agent-dir", "auth.json")]: original,
+			});
+			try {
+				const provider: any = buildProvider();
+				await provider.migrateAzureProviderState();
+				assert.strictEqual(agentFs.readRaw(), original);
+			} finally {
+				agentFs.restore();
+			}
 		});
 	});
 
@@ -1971,6 +2114,57 @@ suite("PiAgentProvider", () => {
 			);
 		});
 
+		test("addProvider preserves per-model 1.4 fields for matching ids", async () => {
+			const provider = buildProvider();
+			await settleInitialize(provider);
+			(provider as any).modelRuntime = {
+				setRuntimeApiKey: async () => {},
+				removeRuntimeApiKey: async () => {},
+				refresh: async () => ({}),
+				getProviders: () => [],
+				getRegisteredProviderIds: () => [],
+				registerProvider: () => {},
+				unregisterProvider: () => {},
+				reloadConfig: async () => {},
+				isUsingOAuth: () => false,
+			} as any;
+			(provider as any).modelRegistry = {
+				getAll: () => [],
+				getProviderAuthStatus: () => ({ configured: false }),
+				getProviderDisplayName: (id: string) => id,
+			} as any;
+			(provider as any).modelRegistryHandler = {
+				refreshAvailableModels: async () => {},
+				getAvailableModels: () => [],
+				invalidateCliModelIdsCache: () => {},
+			} as any;
+			let written: any = null;
+			(provider as any).readModelsJsonConfig = async () => ({
+				providers: {
+					kilocode: {
+						baseUrl: "https://x",
+						models: [
+							{ id: "kilo-large", contextWindow: 200000, cost: { input: 1 } },
+							{ id: "stale", reasoning: true },
+						],
+					},
+				},
+			});
+			(provider as any).readModelsJsonConfigSync = () => ({ providers: {} });
+			(provider as any).writeModelsJsonConfig = async (cfg: any) => {
+				written = cfg;
+			};
+
+			await provider["addProvider"]({
+				provider: "kilocode",
+				models: [{ id: "kilo-large", name: "Kilo Large" }],
+			});
+
+			assert.deepStrictEqual(written.providers.kilocode.models, [
+				{ id: "kilo-large", contextWindow: 200000, cost: { input: 1 }, name: "Kilo Large" },
+			]);
+		});
+
 		test("removeProvider deletes models.json entry and unregisters", async () => {
 			const provider = buildProvider();
 			await settleInitialize(provider);
@@ -2490,6 +2684,36 @@ suite("PiAgentProvider", () => {
 				assert.strictEqual(calls.writes[0].content, "");
 				assert.ok(calls.writes[0].p.endsWith("APPEND_SYSTEM.md"));
 				assert.ok(calls.opened[0].endsWith("APPEND_SYSTEM.md"));
+			} finally {
+				restore();
+			}
+		});
+
+		test("creates mcp.json with an mcpServers object", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig();
+			try {
+				await provider["openConfigFile"]("mcp");
+				assert.strictEqual(calls.writes.length, 1);
+				assert.deepStrictEqual(JSON.parse(calls.writes[0].content), {
+					mcpServers: {},
+				});
+				assert.ok(calls.writes[0].p.endsWith("mcp.json"));
+				assert.ok(calls.opened[0].endsWith("mcp.json"));
+			} finally {
+				restore();
+			}
+		});
+
+		test("opens the global or project MCP config", async () => {
+			const provider = buildInitializedProvider();
+			const { calls, restore } = stubOpenConfig();
+			try {
+				await provider["openMcpConfig"]("global");
+				await provider["openMcpConfig"]("project");
+				assert.strictEqual(calls.writes.length, 2);
+				assert.ok(calls.opened[0].endsWith("mcp.json"));
+				assert.ok(calls.opened[1].endsWith(path.join(".pi", "mcp.json")));
 			} finally {
 				restore();
 			}
@@ -3417,6 +3641,62 @@ suite("PiAgentProvider", () => {
 						m.type === "pi-settings-changed" && m.data.showCacheMissNotices === true,
 				),
 			);
+		});
+
+		test("cache warming get/set round-trips through the settings manager", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			const setCalls: unknown[] = [];
+			const sessionCalls: unknown[] = [];
+			(provider as any).settingsManager = {
+				getCacheWarmingMode: () => "idle",
+				setCacheWarmingMode: (m: unknown) => setCalls.push(m),
+				flush: async () => {},
+			} as any;
+			(provider as any).session = {
+				setCacheWarmingMode: (m: unknown) => sessionCalls.push(m),
+			} as any;
+			const webviewMessages: any[] = [];
+			(provider as any).notifyWebview = (m: any) => webviewMessages.push(m);
+
+			assert.strictEqual(await provider["getCacheWarmingMode"](), "idle");
+			await provider["setCacheWarmingMode"]("off");
+			assert.deepStrictEqual(setCalls, ["off"]);
+			assert.deepStrictEqual(sessionCalls, ["off"]);
+			assert.ok(
+				webviewMessages.some(
+					(m: any) => m.type === "cache-warming-changed" && m.data.mode === "off",
+				),
+			);
+		});
+
+		test("getMediaModels summarizes image and classifier entries", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRegistry = {
+				getModelsOfType: (type: string) =>
+					type === "image"
+						? [{ provider: "openai", id: "img", name: "Img" }]
+						: [{ provider: "typesafe", id: "jev-latest" }],
+				getAvailableSnapshot: () => [{ provider: "openai", id: "img" }],
+			} as any;
+			const result = await provider["getMediaModels"]();
+			assert.deepStrictEqual(result.image, [
+				{ provider: "openai", id: "img", name: "Img", available: true },
+			]);
+			assert.deepStrictEqual(result.classifier, [
+				{ provider: "typesafe", id: "jev-latest", name: "jev-latest", available: false },
+			]);
+		});
+
+		test("getMediaModels returns empty lists without a registry", async () => {
+			const provider = buildProvider();
+			(provider as any).isInitialized = true;
+			(provider as any).modelRegistry = undefined;
+			assert.deepStrictEqual(await provider["getMediaModels"](), {
+				image: [],
+				classifier: [],
+			});
 		});
 
 		test("setPiUISetting throws when settings manager missing", async () => {

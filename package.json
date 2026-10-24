@@ -12,7 +12,8 @@
   },
   "packageManager": "pnpm@11.8.0",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.105.0",
+    "node": ">=22.19.0"
   },
   "categories": [
     "AI",
@@ -718,14 +719,14 @@
     "run-e2e": "node scripts/run-e2e.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-coding-agent": "^1.4.0",
     "@eslint/js": "^10.0.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@testing-library/svelte": "^5.4.2",
     "@tsconfig/svelte": "^5.0.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.105.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",

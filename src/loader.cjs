@@ -20,11 +20,13 @@
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
+const { MIN_PI_SDK_VERSION, isVersionAtLeast } = require("./loader-version.cjs");
 
 // ── Constants (previously inlined strings scattered through the file) ──────
 const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 const PI_SDK_DOCS_URL = "https://github.com/earendil-works/pi-coding-agent";
 const PI_SDK_INSTALL_COMMAND = "npm install -g --ignore-scripts " + PI_SDK_PACKAGE;
+const PI_SDK_UPDATE_COMMAND = "pi update";
 /** Timeout for the `which pi` / `where pi` probes: a wedged PATH lookup must
  * not stall extension activation indefinitely. */
 const PATH_PROBE_TIMEOUT_MS = 3000;
@@ -792,6 +794,60 @@ function assertRequireEsmSupported() {
 	);
 }
 
+/** Version of the PI SDK that was actually resolved, or null when unreadable. */
+function readPiSdkVersion(piNodeModules) {
+	try {
+		const pkgPath = path.join(
+			piNodeModules,
+			"@earendil-works",
+			"pi-coding-agent",
+			"package.json",
+		);
+		const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+		return typeof pkg.version === "string" ? pkg.version : null;
+	} catch (_e) {
+		return null;
+	}
+}
+
+/**
+ * The extension bundle imports APIs added in PI 1.4. Loading it against an
+ * older global install fails later with confusing "not a function" errors, so
+ * stop here and tell the user how to update.
+ */
+function createUnsupportedPiSdkExtension(version, piNodeModules) {
+	const found = version ? "Found PI " + version : "Could not determine the installed PI version";
+	const message =
+		"PiLot Studio requires PI " +
+		MIN_PI_SDK_VERSION +
+		" or newer.\n\n" +
+		found +
+		" at " +
+		piNodeModules +
+		'.\n\nRun "' +
+		PI_SDK_UPDATE_COMMAND +
+		'" (or reinstall the PI CLI), then reload VS Code.';
+	return {
+		activate(_context) {
+			const vscode = require("vscode");
+			console.error("[PiLot] " + message);
+			void vscode.window
+				.showErrorMessage(message, "Copy Update Command")
+				.then(function (selection) {
+					if (selection === "Copy Update Command") {
+						vscode.env.clipboard.writeText(PI_SDK_UPDATE_COMMAND);
+						vscode.window.showInformationMessage("Update command copied to clipboard!");
+					}
+				})
+				.catch(function () {
+					/* dialog unavailable */
+				});
+			return { subscriptions: [] };
+		},
+		deactivate() {},
+	};
+}
+
 /**
  * Main loader function
  */
@@ -861,6 +917,23 @@ function load() {
 
 	// NOTE: runs before VS Code extension host — no logDebug() available here.
 	console.log("[PiLot] Using global PI SDK from: " + piNodeModules);
+
+	// Require the version the extension bundle was built against. The SDK is
+	// resolved from the user's global PI install, so package.json's devDependency
+	// alone cannot guarantee what actually loads at runtime.
+	const piSdkVersion = readPiSdkVersion(piNodeModules);
+	if (!isVersionAtLeast(piSdkVersion, MIN_PI_SDK_VERSION)) {
+		console.error(
+			"[PiLot] Unsupported PI SDK version " +
+				(piSdkVersion || "(unknown)") +
+				" at " +
+				piNodeModules +
+				"; need " +
+				MIN_PI_SDK_VERSION +
+				"+",
+		);
+		return createUnsupportedPiSdkExtension(piSdkVersion, piNodeModules);
+	}
 
 	// Add global PI node_modules to module resolution paths as secondary fallback.
 	// Unshift only when absent: repeated activation previously grew the list and

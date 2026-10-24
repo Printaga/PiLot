@@ -3,6 +3,7 @@ import { PiAgentProvider, validateThinkingLevel } from "./pi-agent-provider.js";
 import { disposeDiagnosticsChannel } from "./commands/diagnostics.js";
 import { registerCommands } from "./commands/index.js";
 import { startUpdateChecker } from "./update-checker.js";
+import { isNodeVersionSupported, nodeVersionErrorMessage } from "./runtime-guard.js";
 
 /**
  * Read the `pi-agent.*` provider options from a configuration section.
@@ -34,6 +35,16 @@ function applyAgentDirEnv(agentDir: string): void {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+	// PI 1.4 requires Node >= 22.19; VS Code only bundles that from 1.105.
+	// VS Code does not enforce Node engines for extensions, so fail with an
+	// actionable message instead of an opaque SDK module-load error.
+	if (!isNodeVersionSupported(process.versions.node)) {
+		const message = nodeVersionErrorMessage(process.versions.node);
+		console.error(`[PiLot] ${message}`);
+		void vscode.window.showErrorMessage(message);
+		return;
+	}
+
 	const config = vscode.workspace.getConfiguration("pi-agent");
 
 	applyAgentDirEnv(config.get<string>("agentDir", "").trim());

@@ -40,14 +40,13 @@ const buildOptions = {
 };
 
 // The extension entry point is dist/loader.cjs (see package.json `main`), which
-// requires ./extension.cjs.
+// requires ./loader-version.cjs and then ./extension.cjs.
 function copyLoader() {
 	fs.mkdirSync(path.join(projectRoot, "dist"), { recursive: true });
-	fs.copyFileSync(
-		path.join(projectRoot, "src", "loader.cjs"),
-		path.join(projectRoot, "dist", "loader.cjs"),
-	);
-	console.log("[esbuild] Copied loader.cjs to dist/");
+	for (const file of ["loader.cjs", "loader-version.cjs"]) {
+		fs.copyFileSync(path.join(projectRoot, "src", file), path.join(projectRoot, "dist", file));
+	}
+	console.log("[esbuild] Copied loader.cjs + loader-version.cjs to dist/");
 }
 
 async function main() {

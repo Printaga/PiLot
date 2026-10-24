@@ -6,6 +6,7 @@
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import ToolsPanel from "./components/ToolsPanel.svelte";
   import PiPackagesPanel from "./components/PiPackagesPanel.svelte";
+  import McpPanel from "./components/McpPanel.svelte";
   import SkillsPanel from "./components/SkillsPanel.svelte";
   import SystemPromptPanel from "./components/SystemPromptPanel.svelte";
   import ProviderSettings from "./components/ProviderSettings.svelte";
@@ -24,6 +25,7 @@
     | "tools"
     | "settings"
     | "packages"
+    | "mcp"
     | "skills"
     | "prompt"
   >("chat");
@@ -232,6 +234,10 @@
           break;
         case "9":
           activeTab = "settings";
+          e.preventDefault();
+          break;
+        case "0":
+          activeTab = "mcp";
           e.preventDefault();
           break;
       }
@@ -958,6 +964,62 @@
         }
         break;
 
+      case "agent_settled":
+        // The run settled (success, abort or error after retries): stop the
+        // streaming indicator even when no terminal agent_end arrives.
+        isStreaming = false;
+        break;
+
+      case "entry_appended":
+        // Persisted entries re-sync in bulk on agent_end with entryIds for
+        // fork support; nothing to render per entry here.
+        break;
+
+      case "summarization_retry_scheduled":
+        showToast({
+          type: "info",
+          title: "Summarization retry scheduled",
+          message: event.message,
+        });
+        break;
+
+      case "summarization_attempt_start":
+        break;
+
+      case "summarization_retry_finished":
+        if (event.errorMessage) {
+          showToast({
+            type: "warning",
+            title: "Summarization retry failed",
+            message: event.errorMessage,
+            persistent: true,
+          });
+        }
+        break;
+
+      case "bash_execution_update":
+        // Streaming bash output: flip the matching tool call to streaming so
+        // long-running commands show progress. Unknown shapes are ignored.
+        if (event.toolCallId && activeToolCalls.has(event.toolCallId)) {
+          const updateBashIdx = messages.findLastIndex(
+            (m) =>
+              m.role === "system" && m.toolCalls?.some((tc) => tc.toolCallId === event.toolCallId),
+          );
+          if (updateBashIdx >= 0) {
+            messages = [
+              ...messages.slice(0, updateBashIdx),
+              {
+                ...messages[updateBashIdx],
+                toolCalls: messages[updateBashIdx].toolCalls!.map((tc) =>
+                  tc.toolCallId === event.toolCallId ? { ...tc, status: "streaming" } : tc,
+                ),
+              },
+              ...messages.slice(updateBashIdx + 1),
+            ];
+          }
+        }
+        break;
+
       case "tool_execution_start":
         activeToolCalls.set(event.toolCallId, {
           toolName: event.toolName,
@@ -1399,6 +1461,24 @@
         </button>
 
         <button
+          onclick={() => (activeTab = "mcp")}
+          class:active={activeTab === "mcp"}
+          title="MCP Servers"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M8 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3M6 8h12v3a6 6 0 0 1-12 0V8z" />
+            <path d="M12 17v5M8 22h8" />
+          </svg>
+        </button>
+
+        <button
           onclick={() => (activeTab = "skills")}
           class:active={activeTab === "skills"}
           title="Skills"
@@ -1510,6 +1590,8 @@
         <ToolsPanel {toolPreset} {customTools} {lightMode} />
       {:else if activeTab === "packages"}
         <PiPackagesPanel {lightMode} />
+      {:else if activeTab === "mcp"}
+        <McpPanel />
       {:else if activeTab === "skills"}
         <SkillsPanel {sessionResources} {lightMode} />
       {:else if activeTab === "prompt"}

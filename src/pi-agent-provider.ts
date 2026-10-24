@@ -5,21 +5,30 @@ import * as path from "node:path";
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import {
 	createAgentSession,
+	createCodemodeExtension,
+	createMcpExtension,
+	createToolSearchExtension,
 	SessionManager,
 	ModelRegistry,
 	ModelRuntime,
 	SettingsManager,
+	ProjectTrustStore,
 	getAgentDir,
 	AgentSession,
 	AgentSessionEvent,
 	DefaultResourceLoader,
 	type ResourceLoader,
+	type ExtensionFactory,
 	type Skill,
 	type Extension,
 	type PromptTemplate,
 } from "@earendil-works/pi-coding-agent";
 import { MessageHandler } from "./message-handler.js";
-import { type ConfigFileKey } from "./protocol/types.js";
+import {
+	type CodemodeSettings,
+	type CodemodeSettingsPatch,
+	type ConfigFileKey,
+} from "./protocol/types.js";
 import { VoiceManager } from "./voice-manager.js";
 import {
 	type ImageContent,
@@ -38,6 +47,14 @@ import { FooterManager } from "./footer-manager.js";
 import { ExtensionUIContext } from "./extension-ui-context.js";
 import { ModelRegistryHandler, type ModelItem, THINKING_LEVELS } from "./model-registry-handler.js";
 import { PackageManager } from "./package-manager.js";
+import { McpManager } from "./mcp-manager.js";
+import {
+	CODEMODE_DEFAULT_TOOL,
+	globalDefaultToolsEnableCodemode,
+	readEffectiveCodemodeSettings,
+	writeCodemodeSettings,
+	writeDefaultToolsCodemode,
+} from "./pi-settings.js";
 import {
 	SessionListManager,
 	type SessionItem,
@@ -47,6 +64,14 @@ import {
 import { type EnrichedPackage } from "./pi-binary.js";
 import { SessionResources, areImagesValid } from "./session-resources.js";
 import { serializeMessages } from "./message-serializer.js";
+import { ProjectTrustManager } from "./project-trust.js";
+import {
+	AZURE_PROVIDER_ID,
+	LEGACY_AZURE_PROVIDER_ID,
+	migrateAzureAuthConfig,
+	migrateAzureModelId,
+	migrateAzureModelIds,
+} from "./provider-migration.js";
 
 // THINKING_LEVELS is imported from ./model-registry-handler.js so the host and
 // webview share a single ordered source of truth for the thinking-level list.
@@ -59,6 +84,7 @@ const CONFIG_FILES: Record<
 	auth: { fileName: "auth.json", initialContent: "{}" },
 	models: { fileName: "models.json", initialContent: "{}" },
 	settings: { fileName: "settings.json", initialContent: "{}" },
+	mcp: { fileName: "mcp.json", initialContent: '{\n  "mcpServers": {}\n}\n' },
 	// Creating it empty replaces pi's built-in system prompt, so confirm.
 	"system-prompt": { fileName: "SYSTEM.md", initialContent: "", confirmCreate: true },
 	"append-system-prompt": { fileName: "APPEND_SYSTEM.md", initialContent: "" },
@@ -127,6 +153,96 @@ export function validateThinkingLevel(value: unknown): ThinkingLevel {
 	return "medium";
 }
 
+interface SessionSettings {
+	extraExtensions: string[];
+	extraSkills: string[];
+	extraPromptTemplates: string[];
+	disableExtensions: boolean;
+	disableSkills: boolean;
+	disablePromptTemplates: boolean;
+	disableContextFiles: boolean;
+	lightMode: boolean;
+	systemPrompt: string | null;
+	appendSystemPrompts: string[];
+	toolPreset: string;
+	customTools: string[];
+}
+
+function readSessionSettings(): SessionSettings {
+	const config = vscode.workspace.getConfiguration("pi-agent");
+	return {
+		extraExtensions: config.get<string[]>("extraExtensions", []),
+		extraSkills: config.get<string[]>("extraSkills", []),
+		extraPromptTemplates: config.get<string[]>("extraPromptTemplates", []),
+		disableExtensions: config.get<boolean>("disableExtensionDiscovery", false),
+		disableSkills: config.get<boolean>("disableSkillDiscovery", false),
+		disablePromptTemplates: config.get<boolean>("disablePromptTemplateDiscovery", false),
+		disableContextFiles: config.get<boolean>("disableContextFiles", false),
+		lightMode: config.get<boolean>("lightMode", false),
+		systemPrompt: config.get<string | null>("systemPrompt", null),
+		appendSystemPrompts: config.get<string[]>("appendSystemPrompts", []),
+		toolPreset: config.get<string>("toolPreset", "default"),
+		customTools: config.get<string[]>("customTools", []),
+	};
+}
+
+function resolveToolOptions(settings: SessionSettings): {
+	tools?: string[];
+	noTools?: "all" | "builtin";
+} {
+	switch (settings.toolPreset) {
+		case "none":
+			return { noTools: "all" };
+		case "review":
+			return { tools: ["read", "grep", "find", "ls"] };
+		case "custom":
+			return settings.customTools.length > 0 ? { tools: settings.customTools } : {};
+		case "default":
+			// Default: no restrictions, use built-in tools — unless light mode
+			// restricts to the core tools (matches `--tools read,bash,edit,write`).
+			return settings.lightMode ? { tools: ["read", "bash", "edit", "write"] } : {};
+		default:
+			return {};
+	}
+}
+
+function optionalPaths(paths: string[]): string[] | undefined {
+	return paths.length > 0 ? paths : undefined;
+}
+
+function builtinExtensionFactories(settings: SessionSettings): ExtensionFactory[] {
+	if (settings.lightMode || settings.disableExtensions) return [];
+	// PI 1.4 ships MCP, codemode and tool_search as built-in extension
+	// factories; the SDK does not register them for SDK consumers. Loading them
+	// here is what makes `defaultTools: ["+codemode"]`, tool_search and mcp.json
+	// servers work in PiLot the way they do in the CLI. Their tools stay inactive
+	// until selected (or, for MCP, until a codemode/deferred server connects).
+	return [createCodemodeExtension(), createToolSearchExtension(), createMcpExtension()];
+}
+
+function resourceLoaderOptions(
+	cwd: string,
+	settings: SessionSettings,
+	settingsManager?: SettingsManager,
+) {
+	return {
+		cwd,
+		agentDir: piAgentProviderInternals.getAgentDir(),
+		settingsManager,
+		additionalExtensionPaths: optionalPaths(settings.extraExtensions),
+		additionalSkillPaths: optionalPaths(settings.extraSkills),
+		additionalPromptTemplatePaths: optionalPaths(settings.extraPromptTemplates),
+		extensionFactories: builtinExtensionFactories(settings),
+		noExtensions: settings.disableExtensions || settings.lightMode,
+		noSkills: settings.disableSkills || settings.lightMode,
+		noPromptTemplates: settings.disablePromptTemplates || settings.lightMode,
+		noContextFiles: settings.disableContextFiles || settings.lightMode,
+		noThemes: settings.lightMode,
+		systemPrompt: settings.systemPrompt || undefined,
+		appendSystemPrompt: optionalPaths(settings.appendSystemPrompts),
+	};
+}
+
 // PiAgentConfig is imported from ./webview/types/index.js so host and webview
 // share one definition (the duplicated host-side copy drifted from the
 // webview's). Re-exported for existing consumers.
@@ -157,6 +273,7 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 	private extensionUIContext!: ExtensionUIContext;
 	private modelRegistryHandler!: ModelRegistryHandler;
 	private packageManager!: PackageManager;
+	private mcpManager!: McpManager;
 	private sessionListManager!: SessionListManager;
 	private modelRefreshTimer?: ReturnType<typeof setInterval>;
 	private configFileWatcher?: FSWatcher;
@@ -229,6 +346,15 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 		this.packageManager = new PackageManager({
 			getResourceLoader: () => this.session?.resourceLoader,
 			getConfiguredPackages: () => this.sessionResources.getConfiguredPackages(),
+			binaryService: this.binaryService,
+			notifyWebview: (msg) => this.notifyWebview(msg),
+			logDebug: this.logDebug.bind(this),
+			logError: this.logError.bind(this),
+		});
+		this.mcpManager = new McpManager({
+			agentDir: piAgentProviderInternals.getAgentDir(),
+			getCwd: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
+			isProjectTrusted: () => this.isProjectTrustedForResources(),
 			binaryService: this.binaryService,
 			notifyWebview: (msg) => this.notifyWebview(msg),
 			logDebug: this.logDebug.bind(this),
@@ -324,11 +450,14 @@ export class PiAgentProvider implements vscode.WebviewViewProvider, vscode.Dispo
 		this.binaryService.prependToPath();
 
 		try {
-			this.modelRuntime = await piAgentProviderInternals.createModelRuntime();
-			this.modelRegistry = piAgentProviderInternals.createModelRegistry(this.modelRuntime);
 			this.settingsManager = piAgentProviderInternals.createSettingsManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
+			// Migrate before constructing the runtime: it reads auth.json/models.json
+			// at creation time, so a renamed provider must already be on disk.
+			await this.migrateAzureProviderState();
+			this.modelRuntime = await piAgentProviderInternals.createModelRuntime();
+			this.modelRegistry = piAgentProviderInternals.createModelRegistry(this.modelRuntime);
 			this.sessionManager = piAgentProviderInternals.createSessionManager(
 				vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
 			);
@@ -737,11 +866,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Build createAgentSession options from VS Code settings to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
 
-		const { session } = await piAgentProviderInternals.createAgentSession({
-			...sessionOpts,
-			sessionManager,
-			modelRuntime,
-		});
+		const { session, modelFallbackMessage } = await piAgentProviderInternals.createAgentSession(
+			{
+				...sessionOpts,
+				sessionManager,
+				modelRuntime,
+			},
+		);
+		this.noteModelFallback(modelFallbackMessage);
 
 		this.session = session;
 		this.session.subscribe(this.handleSessionEvent.bind(this));
@@ -898,80 +1030,47 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		cwd: string;
 		agentDir: string;
 		resourceLoader: ResourceLoader;
+		settingsManager?: SettingsManager;
 		tools?: string[];
 		noTools?: "all" | "builtin";
 	}> {
-		const config = vscode.workspace.getConfiguration("pi-agent");
+		const settings = readSessionSettings();
+		const { tools, noTools } = resolveToolOptions(settings);
+		const resourceLoader = new DefaultResourceLoader(
+			resourceLoaderOptions(cwd, settings, this.settingsManager),
+		);
 
-		// Read extra resource paths
-		const extraExtensions = config.get<string[]>("extraExtensions", []);
-		const extraSkills = config.get<string[]>("extraSkills", []);
-		const extraPromptTemplates = config.get<string[]>("extraPromptTemplates", []);
-
-		// Read discovery flags
-		const disableExtensions = config.get<boolean>("disableExtensionDiscovery", false);
-		const disableSkills = config.get<boolean>("disableSkillDiscovery", false);
-		const disablePromptTemplates = config.get<boolean>("disablePromptTemplateDiscovery", false);
-		const disableContextFiles = config.get<boolean>("disableContextFiles", false);
-
-		// Light mode: run pi with all discovery disabled and only core tools,
-		// matching `pi --no-skills --no-extensions --no-context-files --no-prompt-templates --no-themes --tools read,bash,edit,write`.
-		const lightMode = config.get<boolean>("lightMode", false);
-
-		// Read system prompt settings
-		const systemPrompt = config.get<string | null>("systemPrompt", null);
-		const appendSystemPrompts = config.get<string[]>("appendSystemPrompts", []);
-
-		// Read tool preset settings
-		const toolPreset = config.get<string>("toolPreset", "default");
-		const customTools = config.get<string[]>("customTools", []);
-
-		// Build tools array based on preset
-		let tools: string[] | undefined;
-		let noTools: "all" | "builtin" | undefined;
-
-		switch (toolPreset) {
-			case "none":
-				noTools = "all";
-				break;
-			case "review":
-				tools = ["read", "grep", "find", "ls"];
-				break;
-			case "custom":
-				tools = customTools.length > 0 ? customTools : undefined;
-				break;
-			case "default":
-				// Default: no restrictions, use built-in tools — unless light mode
-				// restricts to the core tools (matches `--tools read,bash,edit,write`).
-				if (lightMode) {
-					tools = ["read", "bash", "edit", "write"];
-				}
-				break;
-		}
-
-		// Create a resource loader with VS Code settings applied
-		const resourceLoader = new DefaultResourceLoader({
-			cwd,
-			agentDir: piAgentProviderInternals.getAgentDir(),
-			settingsManager: this.settingsManager,
-			additionalExtensionPaths: extraExtensions.length > 0 ? extraExtensions : undefined,
-			additionalSkillPaths: extraSkills.length > 0 ? extraSkills : undefined,
-			additionalPromptTemplatePaths:
-				extraPromptTemplates.length > 0 ? extraPromptTemplates : undefined,
-			noExtensions: disableExtensions || lightMode,
-			noSkills: disableSkills || lightMode,
-			noPromptTemplates: disablePromptTemplates || lightMode,
-			noContextFiles: disableContextFiles || lightMode,
-			noThemes: lightMode,
-			systemPrompt: systemPrompt || undefined,
-			appendSystemPrompt: appendSystemPrompts.length > 0 ? appendSystemPrompts : undefined,
+		// Resolve project trust before resources load: reload() runs a pre-trust
+		// pass, asks this callback, then reloads settings for the decision. The
+		// decision is shared with the PI CLI through ~/.pi/agent/trust.json.
+		const projectTrust = new ProjectTrustManager({
+			store: new ProjectTrustStore(piAgentProviderInternals.getAgentDir()),
+			getDefaultProjectTrust: () => this.settingsManager?.getDefaultProjectTrust() ?? "ask",
+			prompt: (workspaceCwd, options) => this.promptForProjectTrust(workspaceCwd, options),
+			logError: (message, error) => this.logError(message, error),
 		});
 
 		// Load skills, extensions, prompts, and context files from settings
-		await resourceLoader.reload();
+		await resourceLoader.reload({
+			resolveProjectTrust: () => projectTrust.resolve(cwd),
+		});
 		const filteredResourceLoader = this.applyResourceToggles(resourceLoader);
+		this.logResourceDiagnostics(resourceLoader);
 
-		// DIAGNOSTIC: Log extension count after reload
+		return {
+			cwd,
+			agentDir: piAgentProviderInternals.getAgentDir(),
+			resourceLoader: filteredResourceLoader,
+			// Share the trust-adjusted settings manager with the session so
+			// `ctx.isProjectTrusted()` agrees with what the loader loaded.
+			...(this.settingsManager ? { settingsManager: this.settingsManager } : {}),
+			tools,
+			noTools,
+		};
+	}
+
+	/** DIAGNOSTIC: log what the resource loader discovered after reload. */
+	private logResourceDiagnostics(resourceLoader: DefaultResourceLoader): void {
 		const extResult = resourceLoader.getExtensions();
 		this.logDebug(
 			`[PiLot DIAGNOSTIC] After resourceLoader.reload(): ${extResult.extensions.length} extensions loaded`,
@@ -988,14 +1087,92 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 				this.logDebug(`  [${i}] ${err.path}: ${err.error}`);
 			});
 		}
+	}
 
-		return {
-			cwd,
-			agentDir: piAgentProviderInternals.getAgentDir(),
-			resourceLoader: filteredResourceLoader,
-			tools,
-			noTools,
-		};
+	/** Ask the user whether a workspace may load project-local PI resources. */
+	private async promptForProjectTrust(
+		cwd: string,
+		options: readonly string[],
+	): Promise<string | undefined> {
+		return vscode.window.showInformationMessage(
+			"PiLot Studio: trust this workspace?",
+			{
+				modal: true,
+				detail: `${cwd}\n\nTrusting allows project .pi settings, MCP servers, packages, and extensions to load.`,
+			},
+			...options,
+		);
+	}
+
+	/**
+	 * PI 1.4 renamed the Azure provider id. Move provider-keyed state (credentials,
+	 * default provider/model, scoped models, PiLot favorites/current model) so an
+	 * existing setup keeps working after the upgrade. Idempotent; failures are
+	 * logged and never block startup.
+	 */
+	private async migrateAzureProviderState(): Promise<void> {
+		try {
+			if (piAgentProviderInternals.existsFile(this.getAuthJsonPath())) {
+				const config = await this.readAuthJsonConfig();
+				const migrated = migrateAzureAuthConfig(config);
+				if (migrated.changed) {
+					await this.writeAuthJsonConfig(migrated.config);
+					this.logDebug(
+						`[PI] Migrated ${LEGACY_AZURE_PROVIDER_ID} credentials to ${AZURE_PROVIDER_ID}`,
+					);
+				}
+			}
+		} catch (error) {
+			this.logError("[PI] Failed to migrate Azure credentials in auth.json", error);
+		}
+
+		try {
+			if (this.settingsManager) {
+				let changed = false;
+				const model = this.settingsManager.getDefaultModel();
+				if (
+					this.settingsManager.getDefaultProvider() === LEGACY_AZURE_PROVIDER_ID &&
+					model
+				) {
+					this.settingsManager.setDefaultModelAndProvider(AZURE_PROVIDER_ID, model);
+					changed = true;
+				}
+				const enabled = this.settingsManager.getEnabledModels();
+				if (enabled) {
+					const migrated = migrateAzureModelIds(enabled);
+					if (migrated.changed) {
+						this.settingsManager.setEnabledModels(migrated.values);
+						changed = true;
+					}
+				}
+				if (changed) {
+					await this.settingsManager.flush();
+					this.logDebug("[PI] Migrated Azure provider settings");
+				}
+			}
+		} catch (error) {
+			this.logError("[PI] Failed to migrate Azure provider settings", error);
+		}
+
+		try {
+			const savedFavorites = this.context.globalState.get<string[]>("favoriteModels", []);
+			const migratedFavorites = migrateAzureModelIds(savedFavorites);
+			if (migratedFavorites.changed) {
+				await this.context.globalState.update("favoriteModels", migratedFavorites.values);
+			}
+			const currentModelId = this.context.globalState.get<string | null>(
+				"currentModelId",
+				null,
+			);
+			if (currentModelId) {
+				const migratedId = migrateAzureModelId(currentModelId);
+				if (migratedId !== currentModelId) {
+					await this.context.globalState.update("currentModelId", migratedId);
+				}
+			}
+		} catch (error) {
+			this.logError("[PI] Failed to migrate Azure favorites/current model", error);
+		}
 	}
 
 	async newSession() {
@@ -1222,11 +1399,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Build session options from VS Code configuration to match PI CLI behavior
 		const sessionOpts = await this.buildSessionOptions(cwd);
 
-		const { session } = await piAgentProviderInternals.createAgentSession({
-			...sessionOpts,
-			sessionManager,
-			modelRuntime: this.modelRuntime,
-		});
+		const { session, modelFallbackMessage } = await piAgentProviderInternals.createAgentSession(
+			{
+				...sessionOpts,
+				sessionManager,
+				modelRuntime: this.modelRuntime,
+			},
+		);
+		this.noteModelFallback(modelFallbackMessage);
 
 		this.sessionManager = sessionManager;
 		this.session = session;
@@ -1337,11 +1517,14 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Build session options from VS Code configuration
 		const sessionOpts = await this.buildSessionOptions(cwd);
 
-		const { session } = await piAgentProviderInternals.createAgentSession({
-			...sessionOpts,
-			sessionManager: forkedManager,
-			modelRuntime: this.modelRuntime,
-		});
+		const { session, modelFallbackMessage } = await piAgentProviderInternals.createAgentSession(
+			{
+				...sessionOpts,
+				sessionManager: forkedManager,
+				modelRuntime: this.modelRuntime,
+			},
+		);
+		this.noteModelFallback(modelFallbackMessage);
 
 		this.sessionManager = forkedManager;
 		this.session = session;
@@ -1429,6 +1612,155 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			type: "pi-settings-changed",
 			data: { [key]: value },
 		});
+	}
+
+	/** Prompt cache-warming mode (`off` | `streaming` | `idle`). */
+	async getCacheWarmingMode(): Promise<"off" | "streaming" | "idle"> {
+		if (!this.isInitialized) await this.initialize();
+		try {
+			return this.settingsManager?.getCacheWarmingMode() ?? "streaming";
+		} catch (error) {
+			this.logError("[PI] Could not read cache warming mode", error);
+			return "streaming";
+		}
+	}
+
+	async setCacheWarmingMode(mode: "off" | "streaming" | "idle"): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		if (!this.settingsManager) throw new Error("Settings manager not initialized");
+		this.settingsManager.setCacheWarmingMode(mode);
+		await this.settingsManager.flush();
+		try {
+			this.session?.setCacheWarmingMode(mode);
+		} catch (error) {
+			this.logDebug("[PI] Live session cache-warming update skipped:", error);
+		}
+		this.notifyWebview({ type: "cache-warming-changed", data: { mode } });
+	}
+
+	/** Whether the global `defaultTools` opts into codemode (`+codemode`). */
+	async getDefaultToolsCodemodeEnabled(): Promise<{
+		enabled: boolean;
+		globalEnabled: boolean;
+		tools?: string[];
+	}> {
+		if (!this.isInitialized) await this.initialize();
+		const globalEnabled = globalDefaultToolsEnableCodemode(
+			piAgentProviderInternals.getAgentDir(),
+		);
+		let tools: string[] | undefined;
+		try {
+			tools = this.settingsManager?.getDefaultTools() ?? undefined;
+		} catch (error) {
+			this.logError("[PI] Could not read defaultTools", error);
+		}
+		return {
+			enabled: tools?.includes(CODEMODE_DEFAULT_TOOL) ?? globalEnabled,
+			globalEnabled,
+			...(tools ? { tools } : {}),
+		};
+	}
+
+	/** Toggle the global `+codemode` defaultTools entry (applies to new sessions). */
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async setDefaultToolsCodemodeEnabled(enabled: boolean): Promise<{
+		enabled: boolean;
+		globalEnabled: boolean;
+		tools?: string[];
+	}> {
+		if (!this.isInitialized) await this.initialize();
+		writeDefaultToolsCodemode(piAgentProviderInternals.getAgentDir(), enabled);
+		await this.settingsManager?.reload();
+		return this.getDefaultToolsCodemodeEnabled();
+	}
+
+	/** Image/classifier catalog summary so the GUI can label non-chat models. */
+	async getMediaModels(): Promise<{
+		image: Array<{ provider: string; id: string; name: string; available: boolean }>;
+		classifier: Array<{ provider: string; id: string; name: string; available: boolean }>;
+	}> {
+		if (!this.isInitialized) await this.initialize();
+		const registry = this.modelRegistry;
+		if (!registry) return { image: [], classifier: [] };
+		const summarize = (
+			type: "image" | "classifier",
+		): Array<{ provider: string; id: string; name: string; available: boolean }> => {
+			try {
+				const all = (
+					registry as unknown as {
+						getModelsOfType?: (
+							t: string,
+						) => Array<{ provider: string; id: string; name?: string }>;
+					}
+				).getModelsOfType?.(type) as
+					Array<{ provider: string; id: string; name?: string }> | undefined;
+				if (!Array.isArray(all)) return [];
+				const available = new Set<string>();
+				try {
+					const reg = registry as unknown as {
+						getAvailableSnapshot?: () => Array<{ provider: string; id: string }>;
+						getAvailable?: () => Array<{ provider: string; id: string }>;
+					};
+					const snapshot = reg.getAvailableSnapshot?.() ?? reg.getAvailable?.() ?? [];
+					for (const m of snapshot) available.add(`${m.provider}/${m.id}`);
+				} catch {
+					/* availability is best-effort; the catalog list is authoritative */
+				}
+				return all.map((m) => ({
+					provider: m.provider,
+					id: m.id,
+					name: m.name || m.id,
+					available: available.has(`${m.provider}/${m.id}`),
+				}));
+			} catch (error) {
+				this.logDebug(`[PI] Could not list ${type} models:`, error);
+				return [];
+			}
+		};
+		return { image: summarize("image"), classifier: summarize("classifier") };
+	}
+
+	/** Surface a resumed-session model fallback instead of silently switching. */
+	private noteModelFallback(message: string | undefined): void {
+		if (!message) return;
+		this.logDebug(`[PI] ${message}`);
+		this.notifyWebview({ type: "system-message", data: { message } });
+	}
+
+	/**
+	 * Effective codemode settings: global + trusted project settings.json, with
+	 * mcp.json's auto-enable flag and the source of each value.
+	 */
+	async getCodemodeSettings(): Promise<CodemodeSettings> {
+		if (!this.isInitialized) await this.initialize();
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const { sources, ...fileSettings } = readEffectiveCodemodeSettings(
+			piAgentProviderInternals.getAgentDir(),
+			cwd,
+			this.isProjectTrustedForResources(),
+		);
+		const autoEnable = this.mcpManager.getAutoEnableCodemodeInfo();
+		return {
+			...fileSettings,
+			autoEnableCodemode: autoEnable.value,
+			sources: { ...sources, autoEnableCodemode: autoEnable.source },
+		};
+	}
+
+	/** Persist codemode changes; they apply to new sessions, like PI's own settings. */
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async setCodemodeSettings(patch: CodemodeSettingsPatch): Promise<CodemodeSettings> {
+		if (!this.isInitialized) await this.initialize();
+		if (patch.mode !== undefined || patch.inlineBudget !== undefined) {
+			writeCodemodeSettings(piAgentProviderInternals.getAgentDir(), patch);
+			await this.settingsManager?.reload();
+		}
+		if (patch.autoEnableCodemode !== undefined) {
+			this.mcpManager.setAutoEnableCodemode(patch.autoEnableCodemode);
+		}
+		// Re-resolve instead of echoing the patch: a trusted project file may
+		// still override the global value that was just written.
+		return this.getCodemodeSettings();
 	}
 
 	async navigateTree(nodeId: string) {
@@ -2210,18 +2542,26 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		}
 	}
 
-	async refreshModels(refreshCredentials: boolean = true): Promise<void> {
+	async refreshModels(
+		refreshCredentials: boolean = true,
+		options: { allowNetwork?: boolean } = {},
+	): Promise<void> {
 		// Re-read auth.json + models.json from disk so external edits (the
 		// "Open auth.json" workflow, package providers, parallel CLI use)
 		// propagate even when the directory watcher hasn't fired (e.g. the
 		// user hit the manual refresh button or the 5-min periodic timer
 		// ticked). In SDK 0.80 the `ModelRuntime` is the single source of
-		// truth for both auth.json and models.json.
+		// truth for both auth.json and models.json. `allowNetwork` performs
+		// the PI 1.2+ personalized catalog refresh (OpenRouter key scoping,
+		// remote model lists) and is only used for explicit user refreshes —
+		// startup and timers stay offline.
 		if (refreshCredentials && this.modelRuntime) {
-			await this.modelRuntime.refresh();
+			await this.modelRuntime.refresh(
+				options.allowNetwork ? { allowNetwork: true } : undefined,
+			);
 		}
 		this.modelRegistryHandler.invalidateCliModelIdsCache();
-		await this.modelRegistryHandler.refreshAvailableModels();
+		await this.modelRegistryHandler.refreshAvailableModels(options);
 		// Keep the provider's local copy in sync so internal callers
 		// (getAvailableThinkingLevels, cycleModel) see the refreshed list.
 		this.availableModels = this.modelRegistryHandler.getAvailableModels();
@@ -2438,12 +2778,31 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		// Models are replaced whenever the caller provides a list (including an
 		// empty one, so editing can clear the list). name/baseUrl/apiKey remain
 		// set-if-nonempty: they cannot be cleared via this path.
+		// Per-model 1.4 fields the GUI does not edit (api, baseUrl, reasoning,
+		// thinkingLevelMap, input, cost, contextWindow, samplingParams,
+		// headers, compat, ...) are preserved for entries with the same id so
+		// saving from the GUI never strips CLI-authored metadata.
 		if (Array.isArray(input.models)) {
+			const existingModels = new Map<string, Record<string, unknown>>();
+			for (const entry of Array.isArray(existing.models) ? existing.models : []) {
+				if (
+					entry &&
+					typeof entry === "object" &&
+					typeof (entry as { id?: unknown }).id === "string"
+				) {
+					existingModels.set((entry as { id: string }).id, {
+						...(entry as Record<string, unknown>),
+					});
+				}
+			}
 			providerConfig.models = input.models
 				.filter((m) => m && typeof m.id === "string" && m.id.trim())
 				.map((m) => {
-					const entry: Record<string, unknown> = { id: m.id.trim() };
+					const id = m.id.trim();
+					const entry: Record<string, unknown> = { ...(existingModels.get(id) ?? {}) };
+					entry.id = id;
 					if (m.name?.trim()) entry.name = m.name.trim();
+					else delete entry.name;
 					return entry;
 				});
 		}
@@ -2837,6 +3196,101 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 			this.pendingLoginPrompts.delete(promptId);
 			entry.reject(new Error(message));
 		}
+	}
+
+	/** Whether this workspace may load project-local PI resources (including .pi/mcp.json). */
+	private isProjectTrustedForResources(): boolean {
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		// SettingsManager starts trusted until a ResourceLoader reload resolves the
+		// decision. Only rely on it once a session has run that reload; before
+		// then, use the stored decision (a missing decision means untrusted).
+		if (this.session && this.settingsManager) {
+			try {
+				return this.settingsManager.isProjectTrusted();
+			} catch (error) {
+				this.logError("[PI] Could not read project trust from settings", error);
+			}
+		}
+		try {
+			return new ProjectTrustStore(piAgentProviderInternals.getAgentDir()).get(cwd) === true;
+		} catch (error) {
+			this.logError("[PI] Could not read project trust store", error);
+			return false;
+		}
+	}
+
+	/** Open the global or project MCP config in an editor tab, creating it if missing. */
+	async openMcpConfig(scope: "global" | "project"): Promise<void> {
+		if (!this.isInitialized) {
+			await this.initialize();
+		}
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+		const filePath =
+			scope === "project"
+				? path.join(cwd, ".pi", "mcp.json")
+				: path.join(piAgentProviderInternals.getAgentDir(), "mcp.json");
+		await this.openOrCreateConfigPath(filePath, '{\n  "mcpServers": {}\n}\n');
+	}
+
+	private async openOrCreateConfigPath(filePath: string, initialContent: string): Promise<void> {
+		await piAgentProviderInternals.mkdir(path.dirname(filePath), { recursive: true });
+		if (!piAgentProviderInternals.existsFile(filePath)) {
+			try {
+				await piAgentProviderInternals.writeFile(filePath, initialContent, { flag: "wx" });
+			} catch (error: unknown) {
+				if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") throw error;
+			}
+		}
+		const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+		await vscode.window.showTextDocument(doc);
+	}
+
+	// The MCP methods are called through ProviderApi by MessageHandler. Fallow
+	// cannot follow that interface dispatch, so they are marked here.
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async listMcpServers() {
+		if (!this.isInitialized) await this.initialize();
+		return this.mcpManager.list();
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async checkMcpServers() {
+		if (!this.isInitialized) await this.initialize();
+		return this.mcpManager.check();
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async addMcpServer(input: Parameters<McpManager["add"]>[0]): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		await this.mcpManager.add(input);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async removeMcpServer(name: string, scope: "global" | "project"): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		await this.mcpManager.remove(name, scope);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async updateMcpServerConfig(
+		name: string,
+		patch: Parameters<McpManager["updateConfig"]>[1],
+		scope?: "global" | "project",
+	): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		await this.mcpManager.updateConfig(name, patch, scope);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async loginMcpServer(name: string): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		await this.mcpManager.login(name);
+	}
+
+	// fallow-ignore-next-line unused-class-member -- invoked through ProviderApi by MessageHandler
+	async logoutMcpServer(name: string): Promise<void> {
+		if (!this.isInitialized) await this.initialize();
+		await this.mcpManager.logout(name);
 	}
 
 	/** Open a PI config/prompt file in an editor tab, creating it if missing. */

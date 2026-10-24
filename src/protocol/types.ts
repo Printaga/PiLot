@@ -2,6 +2,69 @@
 
 import { type ThinkingLevel } from "../webview/types/index.js";
 
+// ── MCP protocol types (shared with the MCP panel) ───────────────────────────
+
+export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+export type McpScope = "global" | "project" | "extension";
+
+export interface McpServerInfo {
+	name: string;
+	scope: McpScope;
+	source: string;
+	override?: string;
+	enabled: boolean;
+	exposure: McpExposure;
+	transport: string;
+	description: string;
+	state: string;
+	tools: string[];
+	toolExposure?: Record<string, McpExposure>;
+	resources?: boolean;
+	error?: string;
+}
+
+export interface McpFilesInfo {
+	global: string;
+	project: string;
+	projectExists: boolean;
+	projectTrusted: boolean;
+}
+
+export interface McpListPayload {
+	servers: McpServerInfo[];
+	errors: string[];
+	files: McpFilesInfo;
+	note?: string;
+	checkError?: string;
+	checkedAt?: number;
+}
+
+export interface McpAddInput {
+	name: string;
+	transport: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	/** Working directory for a stdio server (`pi mcp add --cwd`). */
+	cwd?: string;
+	url?: string;
+	env?: Record<string, string>;
+	headers?: Record<string, string>;
+	/** Sends `Authorization: Bearer ${name}` without storing the secret. */
+	bearerTokenEnvVar?: string;
+	/** Pre-registered OAuth client id for an HTTP server. */
+	oauthClientId?: string;
+	/** Pre-registered OAuth client secret for an HTTP server. */
+	oauthClientSecret?: string;
+	exposure?: McpExposure;
+	description?: string;
+	local?: boolean;
+}
+
+export interface McpConfigPatch {
+	enabled?: boolean;
+	exposure?: McpExposure;
+}
+
 /**
  * The set of thinking levels as a plain union, derived from the single ordered
  * source of truth (THINKING_LEVELS in model-registry-handler). Declaring the
@@ -26,7 +89,52 @@ export interface ProviderMessage {
 
 /** Keys accepted by openConfigFile; filenames/creation policy live in the provider. */
 export type ConfigFileKey =
-	"auth" | "models" | "settings" | "system-prompt" | "append-system-prompt";
+	"auth" | "models" | "settings" | "system-prompt" | "append-system-prompt" | "mcp";
+
+/** How the codemode tool presents tools while it is active (`codemode.mode`). */
+export type CodemodeMode = "on" | "only";
+
+/** Which config layer supplied an effective codemode value. */
+export type CodemodeSource = "default" | "global" | "project";
+
+/** Result of considering the project settings file for codemode values. */
+export type CodemodeProjectStatus = "none" | "applied" | "ignored" | "invalid";
+
+export interface CodemodeSources {
+	mode: CodemodeSource;
+	inlineBudget: CodemodeSource;
+	autoEnableCodemode: CodemodeSource;
+}
+
+export interface CodemodeSettings {
+	mode: CodemodeMode;
+	/** Estimated tokens codemode may spend declaring tools (`codemode.inlineBudget`). */
+	inlineBudget: number;
+	/** Whether connecting a codemode server activates codemode (`autoEnableCodemode`). */
+	autoEnableCodemode: boolean;
+	/** Config layer that supplied each effective value. */
+	sources: CodemodeSources;
+	/** `<cwd>/.pi/settings.json`, when a workspace is open. */
+	projectFile?: string;
+	projectStatus?: CodemodeProjectStatus;
+	/** Parse error for the project file, when `projectStatus` is `invalid`. */
+	projectError?: string;
+}
+
+export type CodemodeSettingsPatch = Partial<
+	Pick<CodemodeSettings, "mode" | "inlineBudget" | "autoEnableCodemode">
+>;
+
+/** Prompt cache-warming behavior (`cacheWarming` setting). */
+export type CacheWarmingMode = "off" | "streaming" | "idle";
+
+/** Image/classifier catalog entries for the Providers panel. */
+export interface MediaModelEntry {
+	provider: string;
+	id: string;
+	name: string;
+	available: boolean;
+}
 
 // ── Provider API interface — used by MessageHandler to avoid importing
 //     the full PiAgentProvider class (breaks circular dependency) ────────
@@ -46,6 +154,21 @@ export interface ProviderApi {
 	setThinkingLevel(level: ProtocolThinkingLevel): Promise<void>;
 	getPiUISettings(): Promise<{ showCacheMissNotices: boolean }>;
 	setPiUISetting(key: "showCacheMissNotices", value: boolean): Promise<void>;
+	getCodemodeSettings(): Promise<CodemodeSettings>;
+	setCodemodeSettings(patch: CodemodeSettingsPatch): Promise<CodemodeSettings>;
+	getCacheWarmingMode(): Promise<CacheWarmingMode>;
+	setCacheWarmingMode(mode: CacheWarmingMode): Promise<void>;
+	getDefaultToolsCodemodeEnabled(): Promise<{
+		enabled: boolean;
+		globalEnabled: boolean;
+		tools?: string[];
+	}>;
+	setDefaultToolsCodemodeEnabled(enabled: boolean): Promise<{
+		enabled: boolean;
+		globalEnabled: boolean;
+		tools?: string[];
+	}>;
+	getMediaModels(): Promise<{ image: MediaModelEntry[]; classifier: MediaModelEntry[] }>;
 	steer(text: string, images?: unknown[]): Promise<void>;
 	followUp(text: string, images?: unknown[]): Promise<void>;
 	abort(): Promise<void>;
@@ -87,7 +210,10 @@ export interface ProviderApi {
 		configured: boolean;
 		credentialType: "oauth" | "api_key" | null;
 	}>;
-	refreshModels(): Promise<void>;
+	refreshModels(
+		refreshCredentials?: boolean,
+		options?: { allowNetwork?: boolean },
+	): Promise<void>;
 	setApiKey(provider: string, apiKey: string): Promise<void>;
 	removeAuth(provider: string): Promise<void>;
 	/** Start an interactive OAuth login flow (PI CLI /login parity). */
@@ -125,6 +251,21 @@ export interface ProviderApi {
 		apiKey?: string;
 	}): Promise<Array<{ id: string; name?: string }>>;
 	openConfigFile(file: ConfigFileKey): Promise<void>;
+	/** Open the global or project `mcp.json`, creating it when missing. */
+	openMcpConfig(scope: "global" | "project"): Promise<void>;
+	/** Configured MCP servers from mcp.json without connecting to them. */
+	listMcpServers(): Promise<McpListPayload>;
+	/** Configured servers plus live state/tools from `pi mcp list --json`. */
+	checkMcpServers(): Promise<McpListPayload>;
+	addMcpServer(input: McpAddInput): Promise<void>;
+	removeMcpServer(name: string, scope: "global" | "project"): Promise<void>;
+	updateMcpServerConfig(
+		name: string,
+		patch: McpConfigPatch,
+		scope?: "global" | "project",
+	): Promise<void>;
+	loginMcpServer(name: string): Promise<void>;
+	logoutMcpServer(name: string): Promise<void>;
 	toggleFavorite(modelId: string, isFavorite: boolean): Promise<string[]>;
 	listSessions(): Promise<
 		Array<{

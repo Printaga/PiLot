@@ -4,9 +4,28 @@ All notable changes to the PiLot Studio for VS Code extension will be documented
 
 ## [Unreleased]
 
+### Added
+
+- **Prompt cache warming control**: Settings → Agent Behavior now offers the PI `cacheWarming` mode (`Streaming`/`Idle`/`Off`) with live updates to the current session; the previous cache-miss notice toggle remains alongside it.
+- **Codemode by default**: Settings → MCP & Codemode can add `+codemode` to the global `defaultTools` so new sessions start with the codemode tool (project-level `defaultTools` still layers on top).
+- **Media models visibility**: the Providers panel lists PI's image and classifier catalog entries (counts, availability, classifier-only labeling for providers like `typesafe`); chat pickers remain chat-models only.
+- **Online model refresh**: the Providers header gains a Refresh (online) action that performs PI 1.2+'s personalized network catalog refresh; the default refresh stays offline.
+- **Session diagnostics**: a resumed session that fell back to a different model now surfaces PI's fallback notice in chat instead of switching silently; the webview also handles `agent_settled`, streaming `bash_execution_update`, summarization-retention retry, and `entry_appended` session events.
+- **MCP management panel** (new sidebar button, keyboard shortcut 0): lists the servers from PI's global `mcp.json` and a trusted project's `.pi/mcp.json`, including live connection state and tools from `pi mcp list --json`, user/project scope and project overrides. Servers can be added or removed, enabled/disabled, assigned a `codemode`/`deferred`/`direct`/`hidden` exposure, and signed in or out through the PI CLI. The add form also covers `pi mcp add` stdio `--cwd`, HTTP `--bearer-token-env-var`, and `--oauth-client-id`/`--oauth-client-secret` options. Config errors and the untrusted-project note are shown in the panel.
+- **MCP & Codemode settings**: Settings now edits codemode's mode (`on`/`only`), inline tool budget and `autoEnableCodemode`, and explains the per-server `codemode`/`deferred`/`direct`/`hidden` exposure choices. The section shows each effective value with its source — **Project**, **Global** or **Default** — and calls out values overridden by a trusted project's `.pi/settings.json` or `.pi/mcp.json`, plus untrusted or unreadable project settings. Codemode values are merged into PI's global `settings.json`; auto-enable lives beside `mcpServers` in the main `mcp.json`. Changes apply to new sessions.
+- **Open mcp.json**: the MCP panel opens the main (global user) or project MCP config, creating it when missing, and Settings → Configuration Files gains an **Open mcp.json** button for the main file.
+
+### Changed
+
+- Upgraded the PI SDK to 1.4 and raised the runtime floor to VS Code 1.105 / Node 22.19.0, matching the SDK's `engines` requirement. Activation now fails with an actionable message on older VS Code instead of a module-load error, and the loader blocks a globally installed PI SDK older than 1.4.0 with an update prompt.
+- PiLot now loads PI 1.4's built-in MCP, codemode and tool_search extension factories (except in light mode), so `mcp.json` servers, `defaultTools` additions and `tool_search` work as they do in the CLI.
+- Project-local `.pi` settings, MCP servers, packages and extensions now require project trust. The prompt is shown only when the workspace actually contains gated resources, and decisions are shared with the PI CLI through `trust.json`; cancellations resolve untrusted.
+- Migrated provider-keyed state for the PI 1.4 `azure-openai-responses` → `azure` rename: `auth.json` credentials, default provider/model, scoped models, favorites and the current model id.
+
 ### Fixed
 
-- API keys saved from the Providers panel (e.g. OpenCode Go) no longer disappear after a window reload. The key was only set as a `ModelRuntime` in-memory override, which the PI SDK never persists; it is now also written to PI's credential store (`auth.json`), the same place a CLI `/login` uses. Existing entries for other providers and provider-scoped fields (such as Cloudflare account/gateway IDs) are preserved, the file is written atomically with `0600` permissions, and an unparseable `auth.json` is left untouched instead of being overwritten. **Remove auth** and **Remove provider** now delete the stored credential as well, so removal survives a reload.
+- Editing a custom provider in the GUI no longer strips PI 1.4 per-model metadata (`contextWindow`, `cost`, `reasoning`, `thinkingLevelMap`, `input`, `headers`, etc.): entries with the same model id keep fields the form does not edit.
+- API keys saved from the Providers panel (e.g. OpenCode Go) no longer disappear after a window reload: the key is now also written to PI's credential store (`auth.json`), preserving other providers and provider-scoped fields, writing atomically with `0600` permissions, and leaving an unparseable file untouched. **Remove auth** and **Remove provider** delete the stored credential too.
 
 ## [2.7.0] - 2026-09-30
 
