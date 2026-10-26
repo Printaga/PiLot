@@ -82,6 +82,22 @@ export class BinaryService {
 		return null;
 	}
 
+	/**
+	 * Re-run resolution when startup found nothing (pi installed later, PATH
+	 * fixed, staler VS Code PATH). Updates the cache so later callers see it.
+	 */
+	refreshIfMissing(): string | null {
+		if (this.resolvedBinaryPath) return this.resolvedBinaryPath;
+		const fresh = binaryServiceInternals.resolvePiBinary();
+		if (fresh) {
+			this.resolvedBinaryPath = fresh;
+			this.pathResolved = true;
+			this.deps.logDebug(`Resolved pi binary: ${fresh}`);
+			this.prependToPath();
+		}
+		return this.resolvedBinaryPath;
+	}
+
 	getResolvedPath(): string | null {
 		return this.resolvedBinaryPath;
 	}

@@ -2314,6 +2314,15 @@ window.__MEDIA_KOFI__ = "${mediaKofiUri}";
 		return this.binaryService.getCliVersion();
 	}
 
+	/**
+	 * Re-resolve when startup found nothing (e.g. pi installed after activation
+	 * or VS Code's PATH missed Homebrew/nvm/volta/mise). Returns the absolute
+	 * path or null; updates BinaryService cache on success.
+	 */
+	refreshBinaryIfMissing(): string | null {
+		return this.binaryService.refreshIfMissing();
+	}
+
 	/** Whether a usable pi binary was resolved (not just the fallback 'pi' name). */
 	isBinaryAvailable(): boolean {
 		return this.binaryService.isBinaryAvailable();

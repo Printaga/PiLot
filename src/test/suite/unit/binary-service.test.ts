@@ -535,3 +535,54 @@ suite("BinaryService: getResolvedPath / resolveBinary / getBinaryPath", () => {
 		assert.strictEqual(service.getResolvedPath(), "/fake/pi");
 	});
 });
+
+suite("BinaryService: refreshIfMissing", () => {
+	test("returns the cached path without re-resolving", () => {
+		const { service } = makeBinaryService({ resolvedPath: "/usr/local/bin/pi" });
+		const origResolve = binaryServiceInternals.resolvePiBinary;
+		let calls = 0;
+		binaryServiceInternals.resolvePiBinary = () => {
+			calls += 1;
+			return "/other/pi";
+		};
+		try {
+			assert.strictEqual(service.refreshIfMissing(), "/usr/local/bin/pi");
+			assert.strictEqual(calls, 0);
+		} finally {
+			binaryServiceInternals.resolvePiBinary = origResolve;
+		}
+	});
+
+	test("re-resolves a startup miss and caches it", () => {
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-refresh-"));
+		try {
+			const fakeBin = path.join(tmpDir, "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\necho ok");
+			fs.chmodSync(fakeBin, 0o755);
+			const { service } = makeBinaryService({ resolvedPath: null });
+			const origResolve = binaryServiceInternals.resolvePiBinary;
+			binaryServiceInternals.resolvePiBinary = () => fakeBin;
+			try {
+				assert.strictEqual(service.refreshIfMissing(), fakeBin);
+				assert.strictEqual(service.getResolvedPath(), fakeBin);
+				assert.strictEqual(service.isBinaryAvailable(), true);
+			} finally {
+				binaryServiceInternals.resolvePiBinary = origResolve;
+			}
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	test("stays missing when nothing resolves", () => {
+		const { service } = makeBinaryService({ resolvedPath: null });
+		const origResolve = binaryServiceInternals.resolvePiBinary;
+		binaryServiceInternals.resolvePiBinary = () => null;
+		try {
+			assert.strictEqual(service.refreshIfMissing(), null);
+			assert.strictEqual(service.isBinaryAvailable(), false);
+		} finally {
+			binaryServiceInternals.resolvePiBinary = origResolve;
+		}
+	});
+});

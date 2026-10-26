@@ -2,6 +2,12 @@
 
 All notable changes to the PiLot Studio for VS Code extension will be documented in this file.
 
+## [3.0.1] - 2026-10-26
+
+### Fixed
+
+- The Generate Commit Message function did not detect all possible PI installations and could not always locate the PI binary.
+
 ## [3.0.0] - 2026-10-24
 
 ### Added

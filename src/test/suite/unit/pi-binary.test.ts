@@ -326,6 +326,164 @@ suite("pi-binary: findPiBinary", () => {
 });
 
 // ---------------------------------------------------------------------------
+// install-method coverage (regression: Generate Commit Message reported
+// "pi binary could not be found" for non-PATH installs)
+// ---------------------------------------------------------------------------
+
+suite("pi-binary: install-method coverage", () => {
+	let restoreSettings: () => void;
+	suiteSetup(() => {
+		restoreSettings = installDefaultSettings();
+	});
+	suiteTeardown(() => {
+		restoreSettings();
+	});
+
+	test("finds pi in Volta's well-known bin dir", () => {
+		withTmpDir("pilot-volta-", (tmpHome) => {
+			// Each platform's real Volta layout: POSIX ~/.volta/bin/pi vs Windows
+			// %LOCALAPPDATA%\Volta\bin\pi.exe — the candidates probe the
+			// platform-specific path, so the fixture must match it.
+			const voltaBin =
+				process.platform === "win32"
+					? path.join(tmpHome, "AppData", "Local", "Volta", "bin")
+					: path.join(tmpHome, ".volta", "bin");
+			fs.mkdirSync(voltaBin, { recursive: true });
+			const fakeBin = path.join(voltaBin, process.platform === "win32" ? "pi.exe" : "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\nexit 0\n");
+			if (process.platform !== "win32") fs.chmodSync(fakeBin, 0o755);
+			const origHome = process.env.HOME;
+			const origAccess = piBinaryInternals.accessSync;
+			process.env.HOME = tmpHome;
+			// Hermetic: only the Volta path passes, so a real pi elsewhere
+			// (mise shims, PATH) cannot mask the assertion.
+			piBinaryInternals.accessSync = ((target: string) => {
+				if (target === fakeBin) return;
+				throw new Error("ENOENT");
+			}) as typeof piBinaryInternals.accessSync;
+			try {
+				assert.strictEqual(findPiBinary(), fakeBin);
+			} finally {
+				if (origHome === undefined) delete process.env.HOME;
+				else process.env.HOME = origHome;
+				piBinaryInternals.accessSync = origAccess;
+			}
+		});
+	});
+
+	test("profile noise printed before the PATH line does not break resolution", () => {
+		if (process.platform === "win32") return; // POSIX-only branch
+		withTmpDir("pilot-shell-noise-", (tmpDir) => {
+			const fakeBin = path.join(tmpDir, "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\necho ok");
+			fs.chmodSync(fakeBin, 0o755);
+			const origSpawn = piBinaryInternals.spawnSync;
+			const origAccess = piBinaryInternals.accessSync;
+			const origPath = process.env.PATH;
+			process.env.PATH = "/usr/bin:/bin";
+			// Profiles may print (motd, greetings) before `echo $PATH` runs. The
+			// PATH is the LAST non-empty line; taking the first would probe
+			// "Welcome to Ubuntu 24.04" as a directory and never find tmpDir.
+			(piBinaryInternals as any).spawnSync = (cmd: string, args?: string[]) => {
+				if (cmd === "/bin/sh") {
+					return {
+						status: 0,
+						stdout: Buffer.from("Welcome to Ubuntu 24.04\n" + tmpDir + "\n"),
+					} as any;
+				}
+				return origSpawn(cmd, args as string[]);
+			};
+			piBinaryInternals.accessSync = ((target: string) => {
+				if (target === fakeBin) return;
+				throw new Error("ENOENT");
+			}) as typeof piBinaryInternals.accessSync;
+			try {
+				assert.strictEqual(resolvePiBinary(), fakeBin);
+			} finally {
+				piBinaryInternals.spawnSync = origSpawn;
+				piBinaryInternals.accessSync = origAccess;
+				if (origPath === undefined) delete process.env.PATH;
+				else process.env.PATH = origPath;
+			}
+		});
+	});
+
+	test("a static candidate hit spawns no install-manager discovery", () => {
+		withTmpDir("pilot-static-skip-", (tmpHome) => {
+			// Platform's real Volta layout, same fixture rule as the test above.
+			const voltaBin =
+				process.platform === "win32"
+					? path.join(tmpHome, "AppData", "Local", "Volta", "bin")
+					: path.join(tmpHome, ".volta", "bin");
+			fs.mkdirSync(voltaBin, { recursive: true });
+			const fakeBin = path.join(voltaBin, process.platform === "win32" ? "pi.exe" : "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\nexit 0\n");
+			if (process.platform !== "win32") fs.chmodSync(fakeBin, 0o755);
+			const origHome = process.env.HOME;
+			const origAccess = piBinaryInternals.accessSync;
+			const origSpawn = piBinaryInternals.spawnSync;
+			const spawnCommands: string[] = [];
+			process.env.HOME = tmpHome;
+			// Hermetic: only the Volta path passes the probe.
+			piBinaryInternals.accessSync = ((target: string) => {
+				if (target === fakeBin) return;
+				throw new Error("ENOENT");
+			}) as typeof piBinaryInternals.accessSync;
+			// `npm root -g` (and any other spawn) is discovery for installs the
+			// static list missed. A static hit must never pay that cost — callers
+			// re-run findPiBinary() on timers and per operation.
+			(piBinaryInternals as any).spawnSync = (cmd: string) => {
+				spawnCommands.push(cmd);
+				throw new Error("discovery must not spawn after a static hit");
+			};
+			try {
+				assert.strictEqual(findPiBinary(), fakeBin);
+				assert.deepStrictEqual(spawnCommands, [], "no process may spawn on a static hit");
+			} finally {
+				if (origHome === undefined) delete process.env.HOME;
+				else process.env.HOME = origHome;
+				piBinaryInternals.accessSync = origAccess;
+				piBinaryInternals.spawnSync = origSpawn;
+			}
+		});
+	});
+
+	test("resolves a bare pi through the login-shell PATH when VS Code PATH is minimal", () => {
+		if (process.platform === "win32") return; // POSIX-only branch
+		withTmpDir("pilot-login-shell-", (tmpDir) => {
+			const fakeBin = path.join(tmpDir, "pi");
+			fs.writeFileSync(fakeBin, "#!/bin/sh\necho ok");
+			fs.chmodSync(fakeBin, 0o755);
+			const origSpawn = piBinaryInternals.spawnSync;
+			const origAccess = piBinaryInternals.accessSync;
+			const origPath = process.env.PATH;
+			// Simulate a GUI-launched VS Code: tmpDir is absent from
+			// process PATH and present only in the login shell.
+			process.env.PATH = "/usr/bin:/bin";
+			(piBinaryInternals as any).spawnSync = (cmd: string, args?: string[]) => {
+				if (cmd === "/bin/sh") {
+					return { status: 0, stdout: Buffer.from(tmpDir + "\n") } as any;
+				}
+				return origSpawn(cmd, args as string[]);
+			};
+			piBinaryInternals.accessSync = ((target: string) => {
+				if (target === fakeBin) return;
+				throw new Error("ENOENT");
+			}) as typeof piBinaryInternals.accessSync;
+			try {
+				const result = resolvePiBinary();
+				assert.strictEqual(result, fakeBin);
+			} finally {
+				piBinaryInternals.spawnSync = origSpawn;
+				piBinaryInternals.accessSync = origAccess;
+				if (origPath === undefined) delete process.env.PATH;
+				else process.env.PATH = origPath;
+			}
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
 // resolvePiBinary
 // ---------------------------------------------------------------------------
 

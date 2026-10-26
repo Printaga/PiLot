@@ -182,6 +182,161 @@ function findPiBinaryInSdkInstall(): string | null {
 	return null;
 }
 
+/**
+ * Subdirectories of `dir`, bounded so a huge global root cannot stall startup.
+ * Every filesystem probe here is best-effort: missing/unreadable dirs mean
+ * "not installed that way", not an error.
+ */
+function listSubdirs(dir: string, max = 30): string[] {
+	try {
+		return fs
+			.readdirSync(dir, { withFileTypes: true })
+			.filter((entry) => {
+				try {
+					return entry.isDirectory();
+				} catch {
+					return false;
+				}
+			})
+			.map((entry) => entry.name)
+			.slice(0, max);
+	} catch {
+		return [];
+	}
+}
+
+/** First candidate that exists (and is executable on POSIX). */
+function firstUsableBinary(candidates: string[]): string | null {
+	for (const candidate of candidates) {
+		if (!candidate || !path.isAbsolute(candidate)) continue;
+		if (!isSafeBinaryPath(candidate)) continue;
+		try {
+			piBinaryInternals.accessSync(
+				candidate,
+				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
+			);
+			return candidate;
+		} catch {
+			continue;
+		}
+	}
+	return null;
+}
+
+/** nvm: ~/.nvm/versions/node/<version>/bin/pi */
+function collectNvmCandidates(home: string): string[] {
+	const base = path.join(home, ".nvm", "versions", "node");
+	return listSubdirs(base).map((version) => path.join(base, version, "bin", "pi"));
+}
+
+/** fnm: ~/.local/share/fnm/node-versions/<version>/installation/bin/pi */
+function collectFnmCandidates(home: string): string[] {
+	const base = path.join(home, ".local", "share", "fnm", "node-versions");
+	return listSubdirs(base).map((version) =>
+		path.join(base, version, "installation", "bin", "pi"),
+	);
+}
+
+/** pnpm global versioned installs: ~/.local/share/pnpm/global/<v>/node_modules/.bin/pi */
+function collectPnpmGlobalCandidates(home: string): string[] {
+	const out: string[] = [];
+	const bases =
+		process.platform === "win32"
+			? [
+					path.join(home, "AppData", "Local", "pnpm", "global"),
+					path.join(home, "AppData", "Roaming", "pnpm", "global"),
+				]
+			: [path.join(home, ".local", "share", "pnpm", "global")];
+	for (const base of bases) {
+		for (const version of listSubdirs(base)) {
+			const suffix = process.platform === "win32" ? ".cmd" : "";
+			out.push(path.join(base, version, "node_modules", ".bin", "pi" + suffix));
+			if (process.platform === "win32") {
+				out.push(path.join(base, version, "node_modules", ".bin", "pi.exe"));
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * mise installs: ~/.local/share/mise/installs/npm-<pkg>/<version>/node_modules/.bin/pi.
+ * Only the npm-backed categories can ship the pi launcher; the scan is bounded
+ * (categories x versions) so a large tool store cannot stall startup.
+ */
+function collectMiseInstallCandidates(home: string): string[] {
+	const out: string[] = [];
+	if (process.platform === "win32") return out;
+	const base = path.join(home, ".local", "share", "mise", "installs");
+	for (const category of listSubdirs(base, 20)) {
+		if (!category.startsWith("npm-")) continue;
+		const categoryPath = path.join(base, category);
+		for (const version of listSubdirs(categoryPath, 10)) {
+			out.push(path.join(categoryPath, version, "node_modules", ".bin", "pi"));
+		}
+	}
+	return out;
+}
+
+/**
+ * npm's global bin derived from `npm root -g` (`<prefix>/lib/node_modules` ->
+ * `<prefix>/bin/pi`). Uses the probing seam with a short timeout; any failure
+ * means "npm not available", not an error. The result is still verified with
+ * accessSync by the caller.
+ */
+function collectNpmGlobalPrefixCandidates(): string[] {
+	try {
+		const result = piBinaryInternals.spawnSync("npm", ["root", "-g"], {
+			shell: false,
+			timeout: 1000,
+		});
+		if (result.status === 0 && result.stdout) {
+			const root = result.stdout.toString().split(/\r?\n/)[0]?.trim();
+			if (root && path.isAbsolute(root)) {
+				const prefixBin = path.resolve(root, "..", "..", "bin", "pi");
+				if (path.isAbsolute(prefixBin) && isSafeBinaryPath(prefixBin)) {
+					return [prefixBin];
+				}
+			}
+		}
+	} catch {
+		// npm missing or probing failed — the static candidates still apply.
+	}
+	return [];
+}
+
+/**
+ * PATH as seen by a login shell, merged after process.env.PATH. VS Code
+ * launched from the Dock/Activities (not a terminal) inherits a minimal PATH
+ * that misses Homebrew, nvm, volta, and mise shims even though the user's
+ * shell has them. Fixed command, no shell parsing of user input.
+ */
+function getExtendedPathDirs(): string[] {
+	const merged = (process.env.PATH || "").split(path.delimiter).filter((dir) => dir.length > 0);
+	if (process.platform === "win32") return merged;
+	try {
+		const result = piBinaryInternals.spawnSync("/bin/sh", ["-lc", "echo $PATH"], {
+			shell: false,
+			timeout: 1000,
+		});
+		if (result.status === 0 && result.stdout) {
+			// Profile scripts may print (motd, greetings) before the command runs;
+			// `echo $PATH` is the last thing printed, so the PATH is the LAST
+			// non-empty line — the first line may be shell noise instead.
+			const lines = result.stdout.toString().split(/\r?\n/);
+			const shellPath = lines.reverse().find((line) => line.trim().length > 0) ?? "";
+			for (const dir of shellPath.split(path.delimiter)) {
+				// Non-absolute entries would probe relative to the extension host's
+				// CWD — the same rule the static candidates below follow.
+				if (path.isAbsolute(dir) && !merged.includes(dir)) merged.push(dir);
+			}
+		}
+	} catch {
+		// A login shell may be unavailable — process PATH still applies.
+	}
+	return merged;
+}
+
 /** Find the pi binary using VS Code settings, workspace node_modules, and well-known paths. */
 export function findPiBinary(): string {
 	const settingPath = vscode.workspace
@@ -224,19 +379,39 @@ export function findPiBinary(): string {
 		path.join(process.env.ProgramFiles || "", "nodejs", "pi.cmd"),
 		// bun / other
 		path.join(home, ".bun", "bin", "pi"),
+		path.join(home, ".bun", "bin", "pi.exe"),
+		path.join(home, ".bun", "bin", "pi.cmd"),
 		path.join(home, ".npm-global", "pi"),
 		path.join(home, ".npm-global", "pi.exe"),
 		path.join(home, ".npm-global", "pi.cmd"),
 		path.join(home, ".local", "bin", "pi"),
 		path.join(home, ".local", "share", "pnpm", "bin", "pi"),
+		// Volta / fnm / nvm-windows / Scoop / Chocolatey / pi agent dir
+		path.join(home, "AppData", "Local", "Volta", "bin", "pi.exe"),
+		path.join(home, "AppData", "Local", "Volta", "bin", "pi.cmd"),
+		path.join(home, "scoop", "shims", "pi.exe"),
+		path.join(home, "scoop", "shims", "pi.cmd"),
+		path.join(home, ".pi", "agent", "npm", "node_modules", ".bin", "pi.cmd"),
+		path.join(home, ".pi", "agent", "npm", "node_modules", ".bin", "pi.exe"),
 	];
 	const posixCandidates = [
-		path.join(home, ".bun/bin/pi"),
-		path.join(home, ".local/bin/pi"),
-		path.join(home, ".npm-global/bin/pi"),
-		path.join(home, ".local/share/pnpm/bin/pi"),
+		path.join(home, ".bun", "bin", "pi"),
+		path.join(home, ".local", "bin", "pi"),
+		path.join(home, ".npm-global", "bin", "pi"),
+		path.join(home, ".local", "share", "pnpm", "bin", "pi"),
 		// mise shims — covers installs where 'pi' is not on PATH seen by VS Code
-		path.join(home, ".local/share/mise/shims/pi"),
+		path.join(home, ".local", "share", "mise", "shims", "pi"),
+		// Homebrew (Apple Silicon, Intel, Linuxbrew)
+		"/opt/homebrew/bin/pi",
+		"/usr/local/bin/pi",
+		"/home/linuxbrew/.linuxbrew/bin/pi",
+		// Volta / asdf shims
+		path.join(home, ".volta", "bin", "pi"),
+		path.join(home, ".asdf", "shims", "pi"),
+		// bun global install layout
+		path.join(home, ".bun", "install", "global", "node_modules", ".bin", "pi"),
+		// pi's own agent dir
+		path.join(home, ".pi", "agent", "npm", "node_modules", ".bin", "pi"),
 	];
 	// An unset base env var (HOME, LOCALAPPDATA, …) makes `path.join` produce a
 	// CWD-relative path, which would probe files shipped inside the current
@@ -246,19 +421,25 @@ export function findPiBinary(): string {
 		(c) => path.isAbsolute(c),
 	);
 
-	for (const c of candidates) {
-		try {
-			piBinaryInternals.accessSync(
-				c,
-				process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK,
-			);
-			return c;
-		} catch {
-			continue;
-		}
-	}
+	const usable = firstUsableBinary(candidates);
+	if (usable) return usable;
 
-	return "pi";
+	// Static well-known paths missed: discover installs the fixed list cannot
+	// name (nvm, fnm, pnpm versioned globals, mise). Directory walks first —
+	// bounded and cheap — so the `npm root -g` spawn runs only when a walk
+	// missed too. Callers (model-registry timer, mcp/package managers) re-run
+	// this on every op, so a found install must stay spawn-free.
+	const discovered = [
+		...collectNvmCandidates(home),
+		...collectFnmCandidates(home),
+		...collectPnpmGlobalCandidates(home),
+		...collectMiseInstallCandidates(home),
+	].filter((c) => path.isAbsolute(c));
+
+	const walked = firstUsableBinary(discovered);
+	if (walked) return walked;
+
+	return firstUsableBinary(collectNpmGlobalPrefixCandidates()) ?? "pi";
 }
 
 /** Resolve pi binary to absolute path, returning null if not found. */
@@ -303,9 +484,7 @@ export function resolvePiBinary(): string | null {
 			// directly instead — same `command -v` semantics (first executable
 			// match wins) with no shell in the loop. `binary` is validated by
 			// resolvePiBinaryFromSetting() and re-checked by isSafeBinaryPath above.
-			const pathDirs = (process.env.PATH || "")
-				.split(path.delimiter)
-				.filter((dir) => dir.length > 0);
+			const pathDirs = getExtendedPathDirs();
 			for (const dir of pathDirs) {
 				try {
 					const candidate = path.join(dir, binary);

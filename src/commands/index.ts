@@ -355,10 +355,16 @@ export function registerCommands(context: vscode.ExtensionContext, provider: PiA
 			}
 
 			if (!provider.isBinaryAvailable()) {
-				vscode.window.showErrorMessage(
-					"PiLot Studio: the pi binary could not be found. Set pi-agent.binaryPath or add pi to your PATH.",
-				);
-				return;
+				// Startup may have run before pi was installed (or with VS Code's
+				// minimal PATH missing Homebrew/nvm/volta/mise). Retry once here
+				// so the button works without a window reload.
+				const refreshed = provider.refreshBinaryIfMissing?.();
+				if (!refreshed || !provider.isBinaryAvailable()) {
+					vscode.window.showErrorMessage(
+						"PiLot Studio: the pi binary could not be found. Set pi-agent.binaryPath or add pi to your PATH.",
+					);
+					return;
+				}
 			}
 
 			await vscode.window.withProgress(
